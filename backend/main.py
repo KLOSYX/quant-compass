@@ -613,9 +613,27 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         if gap > 0:
             # Calculate available cash including new budget
             available_cash = risk_free_balance + current_cash + request.monthly_budget
-            # Apply triple constraint: Gap, Budget Limit, Available Cash
+
+            # Pre-calculate average buy fee rate based on weights
+            total_weight = weights.sum()
+            avg_fee = 0.0
+            if total_weight > 0:
+                avg_fee = (
+                    sum(
+                        request.buy_fee.get(code, 0.0) * w
+                        for code, w in weights.items()
+                    )
+                    / total_weight
+                )
+
+            # Apply triple constraint: Gap, Budget Limit, Available Cash (including fees)
+            # amount * (1 + avg_fee) <= available_cash
+            max_buyable_with_fees = (
+                available_cash / (1 + avg_fee) if avg_fee > 0 else available_cash
+            )
+
             limit = request.monthly_budget * request.max_buy_multiplier
-            recommended_monthly_investment = min(gap, limit, available_cash)
+            recommended_monthly_investment = min(gap, limit, max_buyable_with_fees)
 
         recommended_monthly_investment = max(0, recommended_monthly_investment)
 
