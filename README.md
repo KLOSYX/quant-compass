@@ -1,5 +1,7 @@
 # Quant Compass 🧭
 
+> **Precision tools for the long-term journey.** A modern Quant Analysis suite specializing in Value Averaging, Dynamic DCA, and multi-cycle backtesting. Built for investors who measure success in years, not days.
+
 [English](#english) | [简体中文](#chinese)
 
 <a name="english"></a>
