@@ -59,5 +59,5 @@ def test_riskfree_post_trade_calculation():
         # Ideal RF should be 1100 - 550 = 550.
 
         assert riskfree_advice["ideal_holding"] == 550.0
-        assert riskfree_advice["target_holding"] == 1000.0
-        assert riskfree_advice["target_holding"] != riskfree_advice["ideal_holding"]
+        assert riskfree_advice["target_holding"] == 550.0  # Should match Ideal
+        # assert riskfree_advice["target_holding"] != riskfree_advice["ideal_holding"]

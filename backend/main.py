@@ -327,9 +327,21 @@ def backtest_lump_sum(df_nav, weights_dict, total_investment, initial_holdings=N
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
     max_drawdown_nav = calculate_max_drawdown(portfolio_series / total_committed)
 
+    # Calculate Annualized Return (CAGR)
+    days = (df_nav.index[-1] - df_nav.index[0]).days
+    years = days / 365.25 if days > 0 else 0
+    annualized_return = 0.0
+    if years > 0 and total_committed > 0:
+        final_value = portfolio_history_values.iloc[-1]
+        if final_value > 0:
+            annualized_return = (final_value / total_committed) ** (1 / years) - 1
+        else:
+            annualized_return = -1.0  # Lost everything
+
     return {
         "total_invested": total_committed,
         "final_value": portfolio_history_values.iloc[-1],
+        "annualized_return": annualized_return,
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
@@ -413,12 +425,26 @@ def backtest_dca(df_nav, weights_dict, monthly_investment, initial_holdings=None
     max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
+    # Calculate Annualized Return (CAGR based on Strategy Unit NAV)
+    days = (df_nav.index[-1] - df_nav.index[0]).days
+    years = days / 365.25 if days > 0 else 0
+    annualized_return = 0.0
+
+    final_unit_nav = (
+        float(unit_nav_series.iloc[-1]) if not unit_nav_series.empty else 1.0
+    )
+
+    if years > 0:
+        if final_unit_nav > 0:
+            annualized_return = (final_unit_nav) ** (1 / years) - 1
+        else:
+            annualized_return = -1.0
+
     return {
         "total_invested": total_invested,
         "final_value": list(portfolio_history.values())[-1],
-        "final_unit_nav": float(unit_nav_series.iloc[-1])
-        if not unit_nav_series.empty
-        else 1.0,
+        "final_unit_nav": final_unit_nav,
+        "annualized_return": annualized_return,
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
@@ -1055,12 +1081,26 @@ def backtest_kelly_dca(
     max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
+    # Calculate Annualized Return (CAGR based on Strategy Unit NAV)
+    days = (df_nav.index[-1] - df_nav.index[0]).days
+    years = days / 365.25 if days > 0 else 0
+    annualized_return = 0.0
+
+    final_unit_nav = (
+        float(unit_nav_series.iloc[-1]) if not unit_nav_series.empty else 1.0
+    )
+
+    if years > 0:
+        if final_unit_nav > 0:
+            annualized_return = (final_unit_nav) ** (1 / years) - 1
+        else:
+            annualized_return = -1.0
+
     return {
         "total_invested": accumulated_investment,
         "final_value": list(portfolio_history.values())[-1],
-        "final_unit_nav": float(unit_nav_series.iloc[-1])
-        if not unit_nav_series.empty
-        else 1.0,
+        "final_unit_nav": final_unit_nav,
+        "annualized_return": annualized_return,
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),

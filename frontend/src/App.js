@@ -431,28 +431,7 @@ function App() {
         };
     };
 
-    const calculateAnnualizedReturn = (finalValue, totalInvested, startDate, endDate, isDCA = false) => {
-        if (!totalInvested || totalInvested === 0) return 0;
-        const totalReturn = (finalValue - totalInvested) / totalInvested;
 
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const years = (end - start) / (1000 * 60 * 60 * 24 * 365.25);
-
-        if (years <= 0) return 0;
-
-        if (isDCA) {
-            // DCA approximation: Capital is deployed on average for half the time
-            // Formula: (1 + TotalReturn) ^ (1 / (Years / 2)) - 1
-            if (totalReturn <= -1) return -1;
-            return Math.pow(1 + totalReturn, 1 / (years / 2)) - 1;
-        } else {
-            // Lump Sum: Standard CAGR
-            // Formula: (Final / Initial) ^ (1 / Years) - 1
-            if (finalValue <= 0) return -1;
-            return Math.pow(finalValue / totalInvested, 1 / years) - 1;
-        }
-    };
 
     return (
         <div className="App">
@@ -614,7 +593,13 @@ function App() {
                                                         <input type="number" step="1" value={maWindow} onChange={(e) => { setMaWindow(e.target.value); localStorage.setItem('maWindow', e.target.value); }} />
                                                     </div>
                                                 </div>
+                                                {parseInt(minWeight) > parseInt(maxWeight) && (
+                                                    <div style={{ gridColumn: '1 / -1', color: 'red', marginTop: '5px', fontSize: '0.9em', fontWeight: 'bold' }}>
+                                                        ⚠️ 错误：最低持仓 (Min Weight) 不能高于最高持仓 (Max Weight)
+                                                    </div>
+                                                )}
                                             </div>
+
                                         )}
                                     </div>
 
@@ -639,27 +624,27 @@ function App() {
                                         <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>单笔全额买入，长期持有 (Buy & Hold)</p>
                                         <p><strong>总投入:</strong> ¥{strategyResult.lump_sum.total_invested.toFixed(2)}</p>
                                         <p><strong>期末价值:</strong> ¥{strategyResult.lump_sum.final_value.toFixed(2)}</p>
-                                        <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn(strategyResult.lump_sum.final_value, strategyResult.lump_sum.total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, false) * 100).toFixed(2)}%</p>
-                                        <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.lump_sum, 'max_drawdown_value', 'max_drawdown')}</p>
-                                        <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.lump_sum, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                        <p><strong>年化收益率:</strong> {(strategyResult.lump_sum.annualized_return * 100).toFixed(2)}%</p>
+                                        <p><strong>最大回撤(市值) <span title="基于账户总资产市值的回撤，反映实际金额的缩水程度 (受资金进出影响)。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.lump_sum, 'max_drawdown_value', 'max_drawdown')}</p>
+                                        <p><strong>最大回撤(净值化) <span title="基于单位净值的回撤，排除资金进出影响，单纯反映策略本身的投资表现。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.lump_sum, 'max_drawdown_nav', 'max_drawdown')}</p>
                                     </div>
                                     <div className="summary-card">
                                         <h4>月月投 (DCA)</h4>
                                         <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>每月定额定比买入，不进行再平衡</p>
                                         <p><strong>总投入:</strong> ¥{strategyResult.dca.total_invested.toFixed(2)}</p>
                                         <p><strong>期末价值:</strong> ¥{strategyResult.dca.final_value.toFixed(2)}</p>
-                                        <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn(strategyResult.dca.final_value, strategyResult.dca.total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
-                                        <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</p>
-                                        <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.dca, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                        <p><strong>年化收益率:</strong> {(strategyResult.dca.annualized_return * 100).toFixed(2)}%</p>
+                                        <p><strong>最大回撤(市值) <span title="基于账户总资产市值的回撤，反映实际金额的缩水程度 (受资金进出影响)。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</p>
+                                        <p><strong>最大回撤(净值化) <span title="基于单位净值的回撤，排除资金进出影响，单纯反映策略本身的投资表现。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.dca, 'max_drawdown_nav', 'max_drawdown')}</p>
                                     </div>
                                     <div className="summary-card" style={{ borderLeft: '5px solid #4caf50' }}>
                                         <h4>VA/Kelly (理论配置)</h4>
                                         <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>假设初始资金按目标权重完美配置</p>
                                         <p><strong>总投入:</strong> ¥{(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).total_invested.toFixed(2)}</p>
                                         <p><strong>期末价值:</strong> ¥{(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).final_value.toFixed(2)}</p>
-                                        <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn((strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).final_value, (strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
-                                        <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
-                                        <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                        <p><strong>年化收益率:</strong> {((strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).annualized_return * 100).toFixed(2)}%</p>
+                                        <p><strong>最大回撤(市值) <span title="基于账户总资产市值的回撤，反映实际金额的缩水程度 (受资金进出影响)。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
+                                        <p><strong>最大回撤(净值化) <span title="基于单位净值的回撤，排除资金进出影响，单纯反映策略本身的投资表现。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
                                     </div>
                                     {strategyResult.actual_kelly_dca && (
                                         <div className="summary-card" style={{ borderLeft: '5px solid #ff9800' }}>
@@ -667,9 +652,9 @@ function App() {
                                             <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>基于您输入的真实持仓进行回测</p>
                                             <p><strong>总投入:</strong> ¥{strategyResult.actual_kelly_dca.total_invested.toFixed(2)}</p>
                                             <p><strong>期末价值:</strong> ¥{strategyResult.actual_kelly_dca.final_value.toFixed(2)}</p>
-                                            <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn(strategyResult.actual_kelly_dca.final_value, strategyResult.actual_kelly_dca.total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
-                                            <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
-                                            <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                            <p><strong>年化收益率:</strong> {(strategyResult.actual_kelly_dca.annualized_return * 100).toFixed(2)}%</p>
+                                            <p><strong>最大回撤(市值) <span title="基于账户总资产市值的回撤，反映实际金额的缩水程度 (受资金进出影响)。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
+                                            <p><strong>最大回撤(净值化) <span title="基于单位净值的回撤，排除资金进出影响，单纯反映策略本身的投资表现。" style={{ cursor: 'help', textDecoration: 'underline dotted', fontSize: '0.8em', color: '#888' }}>[?]</span>:</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
                                         </div>
                                     )}
                                 </div>

@@ -47,6 +47,14 @@ def test_backtest_strategies_success():
         assert data["kelly_dca"]["final_value"] > 0
         assert len(data["kelly_dca"]["history"]) > 0
 
+        # Verify Annualized Return is present
+        assert "annualized_return" in data["lump_sum"]
+        assert isinstance(data["lump_sum"]["annualized_return"], float)
+        assert "annualized_return" in data["dca"]
+        assert isinstance(data["dca"]["annualized_return"], float)
+        assert "annualized_return" in data["kelly_dca"]
+        assert isinstance(data["kelly_dca"]["annualized_return"], float)
+
 
 def test_current_recommendation_success():
     """Test current recommendation endpoint."""
