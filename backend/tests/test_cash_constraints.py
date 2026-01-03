@@ -150,16 +150,29 @@ def test_fee_calculation_accuracy():
         assert response.status_code == 200
         data = response.json()
 
-        # If recommendation is to buy, check fee calculations
-        fund_advice = data["fund_advice"]
-        for advice in fund_advice:
-            if advice["action"] == "Buy" and advice["code"] == "000001":
-                amount = advice["amount"]
-                # Total cost should be amount * 1.015
-                expected_cost = amount * 1.015
-                # Just verify the logic is reasonable
-                assert amount > 0
-                print(f"Buy amount: ¥{amount:.2f}, With fee: ¥{expected_cost:.2f}")
+        # In Gross Investment logic:
+        # 1. recommended_monthly_investment represents total cash spent.
+        # 2. total_buy_with_fees (sum of Buy amounts) should equal recommended_monthly_investment.
+        # 3. net_cash_flow = budget - total_buy_with_fees.
+
+        buy_total = sum(
+            item["amount"] for item in data["fund_advice"] if item["action"] == "Buy"
+        )
+        sell_total = sum(
+            item["amount"] for item in data["fund_advice"] if item["action"] == "Sell"
+        )
+        budget = request_data["monthly_budget"]
+
+        deposit_row = data["fund_advice"][-1]
+        deposit_amount = deposit_row["amount"]
+
+        # budget + sell_total_net = buy_total + deposit_amount
+        # In this test, sell_fee is not set, so it defaults to 0.
+        assert abs(budget + sell_total - (buy_total + deposit_amount)) < 0.1
+
+        print(
+            f"Budget: {budget}, Buys: {buy_total}, Sells: {sell_total}, Deposit: {deposit_amount}"
+        )
 
 
 def test_sell_threshold_boundary():

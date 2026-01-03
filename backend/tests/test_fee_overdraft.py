@@ -46,15 +46,16 @@ def test_recommendation_fee_overdraft_prevention():
         data = response.json()
 
         recommended = data["recommended_monthly_investment"]
-        fee_rate = 0.1
-        total_cost = recommended * (1 + fee_rate)
 
-        print(f"Recommended: {recommended}, Total Cost with Fees: {total_cost}")
+        print(f"Recommended (Gross): {recommended}")
 
-        # Total cost should not exceed 1000
-        assert total_cost <= 1000.001  # Small epsilon for float precision
-        assert recommended < 1000  # It must be less than 1000 because of the fee
-        assert abs(recommended - 1000 / 1.1) < 0.1
+        # In Gross Investment logic, recommended amount IS the total cash payment.
+        # So it should be exactly 1000, not 909.09.
+        assert abs(recommended - 1000) < 0.001
+
+        # Verify fund advice amount is also 1000
+        assert data["fund_advice"][0]["amount"] == 1000
+        assert data["fund_advice"][1]["action"] == "持有"  # RiskFree row
 
 
 if __name__ == "__main__":

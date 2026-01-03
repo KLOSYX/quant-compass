@@ -48,6 +48,16 @@ class AnalysisRequest(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     risk_free_rate: Optional[float] = None
+    # Add Strategy Params to align chart with actual backtest
+    max_buy_multiplier: Optional[float] = 3.0
+    sell_threshold: Optional[float] = 0.05
+    min_weight: Optional[float] = None  # If None, use auto-tune. If set, use fixed.
+    max_weight: Optional[float] = None
+    buy_fee: Dict[str, float] = {}
+    sell_fee: Dict[str, float] = {}
+    ma_window: int = 12
+    initial_lump_sum: Optional[float] = 10000.0
+    monthly_investment: Optional[float] = 1000.0
 
 
 class StrategyBacktestRequest(BaseModel):
@@ -287,59 +297,128 @@ def calculate_max_drawdown(nav_series: pd.Series) -> float:
     return drawdowns.min()
 
 
-def backtest_lump_sum(df_nav, weights_dict, total_investment):
+def backtest_lump_sum(df_nav, weights_dict, total_investment, initial_holdings=None):
+    if initial_holdings is None:
+        initial_holdings = {}
     weights = pd.Series(weights_dict).reindex(df_nav.columns).fillna(0)
     initial_nav = df_nav.iloc[0]
-    initial_shares = (total_investment * weights) / initial_nav
-    portfolio_history = df_nav.dot(initial_shares.T)
+
+    # Calculate initial shares from both new investment and existing holdings
+    initial_shares = pd.Series(0.0, index=df_nav.columns)
+    initial_cash = initial_holdings.get("RiskFree", 0.0)
+
+    for code in df_nav.columns:
+        # Shares from initial holdings
+        if code in initial_holdings:
+            initial_shares[code] = initial_holdings[code] / initial_nav[code]
+        # plus shares from new lump sum cash
+        initial_shares[code] += (total_investment * weights[code]) / initial_nav[code]
+
+    # Total capital committed at start
+    initial_holdings_value = sum(
+        v for k, v in initial_holdings.items() if k != "RiskFree"
+    )
+    total_committed = total_investment + initial_holdings_value + initial_cash
+
+    portfolio_history_values = df_nav.dot(initial_shares.T) + initial_cash
     attribution_history = df_nav.multiply(initial_shares, axis="columns")
-    portfolio_series = pd.Series(portfolio_history)
+
+    portfolio_series = pd.Series(portfolio_history_values)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
-    max_drawdown_nav = calculate_max_drawdown(portfolio_series / total_investment)
+    max_drawdown_nav = calculate_max_drawdown(portfolio_series / total_committed)
+
     return {
-        "total_invested": total_investment,
-        "final_value": portfolio_history.iloc[-1],
+        "total_invested": total_committed,
+        "final_value": portfolio_history_values.iloc[-1],
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
         "history": {
             date.strftime("%Y-%m"): value
-            for date, value in portfolio_history.to_dict().items()
+            for date, value in portfolio_history_values.to_dict().items()
         },
         "attribution": {
-            date.strftime("%Y-%m"): row.to_dict()
+            date.strftime("%Y-%m"): {**row.to_dict(), "RiskFree": initial_cash}
             for date, row in attribution_history.iterrows()
         },
     }
 
 
-def backtest_dca(df_nav, weights_dict, monthly_investment):
+def backtest_dca(df_nav, weights_dict, monthly_investment, initial_holdings=None):
+    if initial_holdings is None:
+        initial_holdings = {}
     weights = pd.Series(weights_dict).reindex(df_nav.columns).fillna(0)
+    initial_nav = df_nav.iloc[0]
+
     total_shares = pd.Series(0.0, index=df_nav.columns)
-    total_invested = 0.0
+    # Initialize from existing holdings
+    for code in df_nav.columns:
+        if code in initial_holdings and initial_holdings[code] > 0:
+            total_shares[code] = initial_holdings[code] / initial_nav[code]
+
+    cash_balance = initial_holdings.get("RiskFree", 0.0)
+    initial_equity_value = sum(
+        v for k, v in initial_holdings.items() if k != "RiskFree"
+    )
+    total_invested = initial_equity_value + cash_balance
+
     portfolio_history = {}
     attribution_history = {}
     invested_history = {}
 
+    # Initialize "Strategy Unit" accounting
+    # We treat the strategy as a fund where new investments buy "units" of the strategy
+    # This allows correctly calculating Drawdown based on Unit Value, not (Value/Invested)
+    total_units = 0.0
+    if total_invested > 0:
+        total_units = total_invested  # Initial units at price 1.0
+
+    unit_nav_history = {}
+
     for timestamp, nav_row in df_nav.iterrows():
+        # 1. Calculate Portfolio Value BEFORE new investment (market impact on existing assets)
+        current_val_pre = (total_shares * nav_row).sum() + cash_balance
+
+        # 2. Derive Unit NAV
+        if total_units > 0:
+            unit_nav = current_val_pre / total_units
+        else:
+            unit_nav = 1.0
+
+        unit_nav_history[timestamp] = unit_nav
+
+        # 3. Add New Investment (Buying Strategy Units)
         total_invested += monthly_investment
+        if unit_nav > 0:
+            new_units = monthly_investment / unit_nav
+            total_units += new_units
+
+        # 4. Execute Investment Logic (Buying Underlying Assets)
         shares_bought = (monthly_investment * weights) / nav_row
         total_shares += shares_bought
+
+        # 5. Record State
         current_asset_values = total_shares * nav_row
-        attribution_history[timestamp] = current_asset_values.to_dict()
-        portfolio_history[timestamp] = current_asset_values.sum()
+        attr = current_asset_values.to_dict()
+        attr["RiskFree"] = cash_balance
+        attribution_history[timestamp] = attr
+        portfolio_history[timestamp] = current_asset_values.sum() + cash_balance
         invested_history[timestamp] = total_invested
 
     portfolio_series = pd.Series(portfolio_history)
-    invested_series = pd.Series(invested_history)
-    # 使用净值化曲线（总价值/累计投入）计算回撤，避免持续加仓导致回撤被掩盖
-    nav_ratio_series = portfolio_series / invested_series
-    max_drawdown_nav = calculate_max_drawdown(nav_ratio_series)
+    unit_nav_series = pd.Series(unit_nav_history)
+    # invested_series = pd.Series(invested_history) # No longer used for DD
+
+    # Calculate Max Drawdown based on Unit NAV Series (True performance)
+    max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
     return {
         "total_invested": total_invested,
         "final_value": list(portfolio_history.values())[-1],
+        "final_unit_nav": float(unit_nav_series.iloc[-1])
+        if not unit_nav_series.empty
+        else 1.0,
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
@@ -360,10 +439,19 @@ def simulate_strategy_frontier(
     end_date,
     risk_free_rate,
     ma_window=12,
+    buy_fee=None,
+    sell_fee=None,
+    max_buy_multiplier=3.0,
+    sell_threshold=0.05,
+    user_min_weight=None,
+    user_max_weight=None,
+    initial_lump_sum=0.0,
+    monthly_investment=1000.0,
 ):
     """
     Simulate VA/Kelly strategy for each point on the frontier to get separate 'Strategy Frontier'.
-    Uses the aggressive auto-tuning logic (Min 40-90 / Max 80-100).
+    If user_min_weight / user_max_weight are provided, use them (Manual Mode).
+    Otherwise, use auto-tuning logic (Auto Mode).
     """
     strategy_points = []
     risks = [p["risk"] for p in frontier_points]
@@ -373,22 +461,26 @@ def simulate_strategy_frontier(
     max_risk = max(risks)
 
     # Prepare backtest common params
-    # We simulate a standardized DCA: 1000/month, 3 years (or provided duration)
-    monthly_investment = 1000.0
+    # We use user provided params to match scale
 
     for pt in frontier_points:
         risk = pt["risk"]
         weights = pt["weights"]
 
-        # Auto-tune Params Logic (Aggressive)
-        if max_risk > min_risk:
-            risk_level = (risk - min_risk) / (max_risk - min_risk)
+        if user_min_weight is not None and user_max_weight is not None:
+            # Use user provided fixed params (Align with detailed backtest)
+            min_weight = user_min_weight
+            max_weight = user_max_weight
         else:
-            risk_level = 0.5  # Default middle
+            # Auto-tune Params Logic (Aggressive)
+            if max_risk > min_risk:
+                risk_level = (risk - min_risk) / (max_risk - min_risk)
+            else:
+                risk_level = 0.5  # Default middle
 
-        # Interpolate: Min 40->90, Max 80->100
-        min_weight = 0.4 + (risk_level * 0.5)
-        max_weight = 0.8 + (risk_level * 0.2)
+            # Interpolate: Min 40->90, Max 80->100
+            min_weight = 0.4 + (risk_level * 0.5)
+            max_weight = 0.8 + (risk_level * 0.2)
 
         # Run Backtest
         # Note: nav_adjusted ALREADY has fees subtracted in analyze_portfolio
@@ -397,31 +489,29 @@ def simulate_strategy_frontier(
             nav_adjusted,
             weights,
             monthly_investment,
-            initial_holdings={},
-            max_buy_multiplier=3.0,
-            sell_threshold=0.05,
+            initial_holdings={
+                code: initial_lump_sum * w for code, w in weights.items() if w > 0
+            },
+            max_buy_multiplier=max_buy_multiplier,
+            sell_threshold=sell_threshold,
             min_weight=min_weight,
             max_weight=max_weight,
-            buy_fee={},
-            sell_fee={},
+            buy_fee=buy_fee or {},
+            sell_fee=sell_fee or {},
             ma_window=ma_window,
             risk_free_rate=risk_free_rate or 0.0,
         )
 
-        # Calculate Annualized Metrics for the Chart
-        # 1. Strategy Return (Annualized approximation for DCA)
-        # Using the "Unit Value" growth: Final / Invested
-        total_ret = (result["final_value"] / result["total_invested"]) - 1
-
+        # Strategy Return: Standard CAGR based on Strategy Unit NAV
+        # Formula: FinalUnitNav ^ (1 / Years) - 1
         # Duration in years
         days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
         years = days / 365.25
         if years <= 0:
             years = 1
 
-        # DCA Annualized approx: (1 + TotalRet) ^ (1 / (Years / 2)) - 1
-        # Because capital is invested on average for half the time.
-        strategy_return_annualized = (1 + total_ret) ** (1 / (years / 2)) - 1
+        final_nav = result.get("final_unit_nav", 1.0)
+        strategy_return_annualized = (final_nav) ** (1 / years) - 1
 
         # 2. Strategy Risk (Drawdown? or Volatility?)
         # MV Frontier X-axis is Volatility.
@@ -492,6 +582,15 @@ async def analyze_portfolio(request: AnalysisRequest):
             start_date_str,
             end_date_str,
             request.risk_free_rate,
+            ma_window=request.ma_window,
+            buy_fee=request.buy_fee,
+            sell_fee=request.sell_fee,
+            max_buy_multiplier=request.max_buy_multiplier,
+            sell_threshold=request.sell_threshold,
+            user_min_weight=request.min_weight,
+            user_max_weight=request.max_weight,
+            initial_lump_sum=request.initial_lump_sum or 0.0,
+            monthly_investment=request.monthly_investment or 1000.0,
         )
 
         return {
@@ -509,30 +608,34 @@ async def analyze_portfolio(request: AnalysisRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def calculate_target_ratio(
-    current_price, ma_value, min_weight=0.3, max_weight=0.8, low_bias=0.8, high_bias=1.2
-):
-    """
-    Calculates target equity ratio using linear interpolation.
-    Bias <= low_bias -> max_weight
-    Bias >= high_bias -> min_weight
-    In between -> Linear interpolation
-    """
+def calculate_target_ratio(current_price, ma_value, min_weight, max_weight):
     if ma_value == 0:
-        return (min_weight + max_weight) / 2
+        return min_weight, "neutral"
 
+    # Simple linear interpolation between low bias (0.8) and high bias (1.2)
+    low_bias = 0.8
+    high_bias = 1.2
     bias = current_price / ma_value
 
     if bias <= low_bias:
-        return max_weight
+        return max_weight, "undervalued"
     elif bias >= high_bias:
-        return min_weight
+        return min_weight, "overvalued"
     else:
         # Interpolate
         # Ratio = Slope * (Bias - LowBias) + MaxWeight
         slope = (min_weight - max_weight) / (high_bias - low_bias)
         ratio = slope * (bias - low_bias) + max_weight
-        return ratio
+
+        # Signal name for return value clarification
+        if bias < 0.95:
+            signal = "undervalued"
+        elif bias > 1.05:
+            signal = "overvalued"
+        else:
+            signal = "neutral"
+
+        return ratio, signal
 
 
 @router.post("/current_recommendation")
@@ -567,22 +670,12 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         # Get current (latest) values
         current_price = reference_portfolio_nav.iloc[-1]
         current_ma = ma_series.iloc[-1]
-        latest_nav = fund_df.iloc[-1].to_dict()
-
-        # Determine target ratio using Linear Interpolation
-        target_ratio = calculate_target_ratio(
-            current_price,
-            current_ma,
-            min_weight=request.min_weight,
-            max_weight=request.max_weight,
+        latest_nav = float(reference_portfolio_nav.iloc[-1])
+        current_price = latest_nav
+        current_ma = float(ma_series.iloc[-1])
+        target_ratio, market_signal = calculate_target_ratio(
+            current_price, current_ma, request.min_weight, request.max_weight
         )
-
-        market_signal = "neutral"
-        bias = current_price / current_ma
-        if bias < 0.9:
-            market_signal = "undervalued"
-        elif bias > 1.1:
-            market_signal = "overvalued"
 
         # Calculate current equity value
         # Handle 'RiskFree' if passed (filter it out for equity calc)
@@ -626,14 +719,13 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     / total_weight
                 )
 
-            # Apply triple constraint: Gap, Budget Limit, Available Cash (including fees)
-            # amount * (1 + avg_fee) <= available_cash
-            max_buyable_with_fees = (
-                available_cash / (1 + avg_fee) if avg_fee > 0 else available_cash
-            )
-
+            # Apply triple constraint: Gap (converted to gross), Budget Limit, Available Cash
+            # gap is the NAV gap. To fill it, we need gap * (1 + avg_fee) cash.
+            gross_gap = gap * (1 + avg_fee)
             limit = request.monthly_budget * request.max_buy_multiplier
-            recommended_monthly_investment = min(gap, limit, max_buyable_with_fees)
+
+            # recommended_monthly_investment is now the TOTAL CASH to be spent (Gross)
+            recommended_monthly_investment = min(gross_gap, limit, available_cash)
 
         recommended_monthly_investment = max(0, recommended_monthly_investment)
 
@@ -644,7 +736,9 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         fund_gaps = {}
 
         # 1. Distribute Gap Calculation
-        for code in request.fund_codes:
+        # Use a list of dict keys to ensure uniqueness if codes were somehow repeated
+        unique_fund_codes = list(dict.fromkeys(request.fund_codes))
+        for code in unique_fund_codes:
             w = weights.get(code, 0) / total_weight if total_weight > 0 else 0
             current_val = equity_holdings.get(code, 0)
             target_val = target_equity_value * w
@@ -654,16 +748,22 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 positive_gap_sum += gap_val
 
         # 2. Determine Actions
-        for code in request.fund_codes:
+        for code in unique_fund_codes:
             current_val = equity_holdings.get(code, 0)
-            gap_val = fund_gaps[code]
+            gap_val = fund_gaps.get(code, 0)
             target_val = current_val + gap_val
 
+            # Reset action and amount for each fund to prevent leakage
+            # Using a more robust if-elif-else structure
+            action = "Hold"
+            amount = 0.0
             reason = "持有"
-            if recommended_monthly_investment > 0:
+
+            if recommended_monthly_investment > 0 and positive_gap_sum > 0:
                 # We have money to spend
                 if gap_val > 0:
                     action = "Buy"
+                    # amount is the Gross Cash to spend on this fund
                     amount = recommended_monthly_investment * (
                         gap_val / positive_gap_sum
                     )
@@ -671,8 +771,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 else:
                     action = "Hold"
                     reason = "仓位已达标"
-            else:
-                # Net recommendation is 0 (Hold or Sell)
+            elif recommended_monthly_investment <= 0:
+                # Net recommendation is 0 or negative (Hold or Sell)
                 if gap_val < 0:
                     # Check Sell Threshold
                     if abs(gap) > total_wealth_projected * request.sell_threshold:
@@ -685,13 +785,22 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 elif gap_val > 0:
                     action = "Hold"
                     reason = "低位观察不额外定投"
+            else:
+                # Handle cases where positive_gap_sum is 0 but recommended_monthly_investment > 0
+                # which shouldn't happen but for safety we mark it as Hold
+                action = "Hold"
+                amount = 0.0
+                reason = "仓位已平衡"
+
+            # target_val is already calculated as the ideal target (current + gap)
 
             fund_advice.append(
                 {
                     "code": code,
                     "name": fund_names.get(code, code),
                     "current_holding": current_val,
-                    "target_holding": target_val,
+                    "target_holding": target_val,  # Ideal Target (Current + Gap)
+                    "ideal_holding": target_val,  # This is Ideal Target (Current + Gap)
                     "gap": gap_val,
                     "action": action,
                     "amount": amount,
@@ -706,8 +815,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         total_buy_with_fees = 0.0
         for item in fund_advice:
             if item["action"] == "Buy":
-                f = request.buy_fee.get(item["code"], 0.0)
-                total_buy_with_fees += item["amount"] * (1 + f)
+                # item["amount"] is already the gross cash outflow
+                total_buy_with_fees += item["amount"]
 
         # Sells: net proceeds
         total_sell_net_proceeds = 0.0
@@ -732,16 +841,20 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
 
         # RiskFree Target Calculation
         target_risk_free_value = total_wealth_projected - target_equity_value
+        risk_free_current = risk_free_balance + current_cash
+        risk_free_gap = target_risk_free_value - risk_free_current
 
         fund_advice.append(
             {
                 "code": "RiskFree",
                 "name": "无风险资产 (现金/理财)",
-                "current_holding": risk_free_balance + current_cash,
-                "target_holding": target_risk_free_value,
-                "gap": target_risk_free_value - (risk_free_balance + current_cash),
+                "current_holding": risk_free_current,
+                "target_holding": target_risk_free_value,  # Ideal target (current + gap)
+                "ideal_holding": target_risk_free_value,
+                "gap": risk_free_gap,
                 "action": risk_free_action,
                 "amount": risk_free_amount,
+                "reason": "余额管理" if risk_free_amount > 0 else "持仓平衡",
             }
         )
 
@@ -796,14 +909,20 @@ def backtest_kelly_dca(
     total_shares = pd.Series(0.0, index=df_nav.columns)
 
     # Convert initial holdings (in currency) to shares
+    # IMPORTANT: Exclude 'RiskFree' - it should only be in cash_balance, not shares
     for code in df_nav.columns:
+        if code == "RiskFree":
+            continue  # Skip RiskFree, handled separately as cash_balance
         if code in initial_holdings and initial_holdings[code] > 0:
             total_shares[code] = initial_holdings[code] / initial_nav[code]
 
-    # Handle Initial Cash (RiskFree)
+    # Handle Initial Cash (RiskFree only goes here, not in shares)
     cash_balance = initial_holdings.get("RiskFree", 0.0)
 
-    initial_value = sum(initial_holdings.values()) if initial_holdings else 0.0
+    # Calculate initial value excluding RiskFree double-counting
+    initial_value = (
+        sum(v for k, v in initial_holdings.items() if k != "RiskFree") + cash_balance
+    )
     accumulated_investment = initial_value  # Total external money put in (principal)
 
     portfolio_history = {}
@@ -818,23 +937,47 @@ def backtest_kelly_dca(
         (1 + risk_free_rate) ** (1 / 12) - 1 if risk_free_rate > 0 else 0.0
     )
 
+    # Unit NAV Accounting
+    total_units = 0.0
+    if accumulated_investment > 0:
+        total_units = accumulated_investment  # Initial units at 1.0
+
+    unit_nav_history = {}
+
     for timestamp, nav_row in df_nav.iterrows():
         # 0. Apply Interest to Cash Balance (Start of Month)
         if cash_balance > 0:
             cash_balance *= 1 + monthly_rf_rate
 
-        # 1. Income Step
+        # --- Unit NAV Calculation Start ---
+        # Calculate Wealth BEFORE new external inflow (income)
+        current_equity_val_pre = (total_shares * nav_row).sum()
+        wealth_pre = current_equity_val_pre + cash_balance
+
+        if total_units > 0:
+            unit_nav = wealth_pre / total_units
+        else:
+            unit_nav = 1.0
+
+        unit_nav_history[timestamp] = unit_nav
+        # --- Unit NAV Calculation End ---
+
+        # 1. Income Step (External Inflow)
         cash_balance += monthly_investment
         accumulated_investment += monthly_investment
 
-        # 2. Valuation Step
+        # Buy Strategy Units
+        if unit_nav > 0:
+            total_units += monthly_investment / unit_nav
+
+        # 2. Valuation Step (Post Income)
         current_equity_value = (total_shares * nav_row).sum()
         total_wealth = current_equity_value + cash_balance
 
         # 3. Target Ratio (Linear)
         current_price = reference_portfolio_nav.loc[timestamp]
         current_ma = ma_series.loc[timestamp]
-        target_ratio = calculate_target_ratio(
+        target_ratio, market_signal_current = calculate_target_ratio(
             current_price, current_ma, min_weight, max_weight
         )
 
@@ -886,9 +1029,14 @@ def backtest_kelly_dca(
                     for code, w in weights.items():
                         if w > 0:
                             f = (sell_fee or {}).get(code, 0.0)
-                            amt = sell_amount * w
-                            net_proceeds += amt * (1 - f)
-                            total_shares[code] -= amt / nav_row[code]
+                            # CRITICAL FIX: Cannot sell more than what we have (No short selling)
+                            # target_amt_to_sell is sell_amount * weight
+                            available_val = total_shares[code] * nav_row[code]
+                            actual_amt_to_sell = min(sell_amount * w, available_val)
+
+                            if actual_amt_to_sell > 0:
+                                net_proceeds += actual_amt_to_sell * (1 - f)
+                                total_shares[code] -= actual_amt_to_sell / nav_row[code]
                     cash_balance += net_proceeds
 
         # 5. Record State
@@ -902,20 +1050,26 @@ def backtest_kelly_dca(
         invested_history[timestamp] = accumulated_investment
 
     portfolio_series = pd.Series(portfolio_history)
-    invested_series = pd.Series(invested_history)
-    nav_ratio_series = portfolio_series / invested_series
-    max_drawdown_nav = calculate_max_drawdown(nav_ratio_series)
+    unit_nav_series = pd.Series(unit_nav_history)
+
+    max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
     return {
         "total_invested": accumulated_investment,
         "final_value": list(portfolio_history.values())[-1],
+        "final_unit_nav": float(unit_nav_series.iloc[-1])
+        if not unit_nav_series.empty
+        else 1.0,
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
-        "history": {d.strftime("%Y-%m"): val for d, val in portfolio_history.items()},
+        "market_signal": market_signal_current,
+        "history": {
+            date.strftime("%Y-%m"): value for date, value in portfolio_history.items()
+        },
         "attribution": {
-            d.strftime("%Y-%m"): val for d, val in attribution_history.items()
+            date.strftime("%Y-%m"): value for date, value in attribution_history.items()
         },
     }
 
@@ -942,11 +1096,17 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
         num_months = len(fund_df)
         total_lump_sum_investment = request.monthly_investment * num_months
         lump_sum_results = backtest_lump_sum(
-            nav_adjusted, request.weights, total_lump_sum_investment
+            nav_adjusted,
+            request.weights,
+            total_lump_sum_investment,
+            initial_holdings=request.initial_holdings,
         )
 
         dca_results = backtest_dca(
-            nav_adjusted, request.weights, request.monthly_investment
+            nav_adjusted,
+            request.weights,
+            request.monthly_investment,
+            initial_holdings=request.initial_holdings,
         )
 
         kelly_results = backtest_kelly_dca(

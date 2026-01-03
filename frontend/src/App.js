@@ -183,15 +183,28 @@ function App() {
                 return acc;
             }, {});
 
-            const holdingsAsFloats = Object.entries(initialHoldings).reduce((acc, [code, val]) => {
-                const parsed = parseFloat(val);
-                if (!isNaN(parsed) && parsed > 0) {
-                    acc[code] = parsed;
-                }
+            // Calculate total capital
+            const totalHoldingsValue = Object.values(initialHoldings).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+            const totalCash = parseFloat(currentCash) || 0;
+            const totalCapital = totalHoldingsValue + totalCash;
+
+            // IDEAL: Perfect allocation based on target weights
+            const idealHoldings = {};
+            if (totalCapital > 0) {
+                Object.entries(weights).forEach(([code, weight]) => {
+                    idealHoldings[code] = totalCapital * weight;
+                });
+            }
+
+            // ACTUAL: User's real holdings + cash as RiskFree
+            const actualHoldings = Object.entries(initialHoldings).reduce((acc, [code, val]) => {
+                const v = parseFloat(val);
+                if (v > 0) acc[code] = v;
                 return acc;
             }, {});
+            if (totalCash > 0) actualHoldings['RiskFree'] = (actualHoldings['RiskFree'] || 0) + totalCash;
 
-            const payload = {
+            const basePayload = {
                 fund_codes: fundCodes,
                 weights,
                 fund_fees: feesAsFloats,
@@ -199,7 +212,6 @@ function App() {
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
                 risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : null,
-                initial_holdings: holdingsAsFloats,
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
@@ -209,9 +221,21 @@ function App() {
                 ma_window: parseInt(maWindow)
             };
 
-            const response = await fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!response.ok) throw new Error((await response.json()).detail);
-            setStrategyResult(await response.json());
+            // Run BOTH backtests in parallel
+            const [idealRes, actualRes] = await Promise.all([
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings }) }),
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings }) })
+            ]);
+
+            const idealData = await idealRes.json();
+            const actualData = await actualRes.json();
+
+            // Store both results - keep backward compatible structure
+            setStrategyResult({
+                ...idealData,
+                ideal_kelly_dca: idealData.kelly_dca,
+                actual_kelly_dca: actualData.kelly_dca
+            });
         } catch (err) {
             setError(err.message);
         } finally {
@@ -389,8 +413,15 @@ function App() {
             data: dates.map(date => attributionData[date][code])
         }));
 
+        const titleMap = {
+            'lump_sum': '攒钱一次投 (Lump Sum) 收益归因',
+            'dca': '月月投 (DCA) 收益归因',
+            'kelly_dca': 'VA/Kelly 定投 (理论配置) 收益归因',
+            'ideal_kelly_dca': 'VA/Kelly 定投 (理论配置) 收益归因',
+            'actual_kelly_dca': 'VA/Kelly 定投 (实际持仓) 收益归因'
+        };
         return {
-            title: { text: strategyType === 'dca' ? '月月投 (DCA) 收益归因' : strategyType === 'kelly_dca' ? 'VA/Kelly 定投收益归因' : '攒钱一次投 (Lump Sum) 收益归因', left: 'center' },
+            title: { text: titleMap[strategyType] || 'Strategy Attribution', left: 'center' },
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross', label: { backgroundColor: '#6a7985' } } },
             legend: { data: assetCodes.map(code => getAssetName(code)), top: 30, type: 'scroll' },
             grid: { top: 70, left: '3%', right: '4%', bottom: '3%', containLabel: true },
@@ -621,20 +652,34 @@ function App() {
                                         <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</p>
                                         <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.dca, 'max_drawdown_nav', 'max_drawdown')}</p>
                                     </div>
-                                    <div className="summary-card">
-                                        <h4>VA/Kelly 定投</h4>
-                                        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>根据估值动态调整，低买高卖，控回撤</p>
-                                        <p><strong>总投入:</strong> ¥{strategyResult.kelly_dca.total_invested.toFixed(2)}</p>
-                                        <p><strong>期末价值:</strong> ¥{strategyResult.kelly_dca.final_value.toFixed(2)}</p>
-                                        <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn(strategyResult.kelly_dca.final_value, strategyResult.kelly_dca.total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
-                                        <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
-                                        <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                    <div className="summary-card" style={{ borderLeft: '5px solid #4caf50' }}>
+                                        <h4>VA/Kelly (理论配置)</h4>
+                                        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>假设初始资金按目标权重完美配置</p>
+                                        <p><strong>总投入:</strong> ¥{(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).total_invested.toFixed(2)}</p>
+                                        <p><strong>期末价值:</strong> ¥{(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).final_value.toFixed(2)}</p>
+                                        <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn((strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).final_value, (strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
+                                        <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
+                                        <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
                                     </div>
+                                    {strategyResult.actual_kelly_dca && (
+                                        <div className="summary-card" style={{ borderLeft: '5px solid #ff9800' }}>
+                                            <h4>VA/Kelly (实际持仓)</h4>
+                                            <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>基于您输入的真实持仓进行回测</p>
+                                            <p><strong>总投入:</strong> ¥{strategyResult.actual_kelly_dca.total_invested.toFixed(2)}</p>
+                                            <p><strong>期末价值:</strong> ¥{strategyResult.actual_kelly_dca.final_value.toFixed(2)}</p>
+                                            <p><strong>年化收益率:</strong> {(calculateAnnualizedReturn(strategyResult.actual_kelly_dca.final_value, strategyResult.actual_kelly_dca.total_invested, analysisResult.backtest_period.start_date, analysisResult.backtest_period.end_date, true) * 100).toFixed(2)}%</p>
+                                            <p><strong>最大回撤(市值):</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</p>
+                                            <p><strong>最大回撤(净值化):</strong> {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_nav', 'max_drawdown')}</p>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="attribution-charts">
-                                    <ReactECharts option={getStrategyChartOptions('lump_sum')} style={{ height: 400 }} />
-                                    <ReactECharts option={getStrategyChartOptions('dca')} style={{ height: 400 }} />
-                                    <ReactECharts option={getStrategyChartOptions('kelly_dca')} style={{ height: 400 }} />
+                                    <div><ReactECharts option={getStrategyChartOptions('lump_sum')} style={{ height: 400 }} /></div>
+                                    <div><ReactECharts option={getStrategyChartOptions('dca')} style={{ height: 400 }} /></div>
+                                    <div><ReactECharts option={getStrategyChartOptions('ideal_kelly_dca')} style={{ height: 400 }} /></div>
+                                    {strategyResult.actual_kelly_dca && (
+                                        <div><ReactECharts option={getStrategyChartOptions('actual_kelly_dca')} style={{ height: 400 }} /></div>
+                                    )}
                                 </div>
                             </div>
                         )}
