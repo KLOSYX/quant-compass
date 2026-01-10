@@ -35,3 +35,7 @@ backend/static/
 # OS
 .DS_Store
 Thumbs.db
+
+# UI-UX Pro Max
+.shared/
+.agent/
