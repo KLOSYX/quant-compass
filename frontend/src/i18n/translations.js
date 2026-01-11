@@ -31,13 +31,23 @@ export const translations = {
         analyze_btn: '1. 寻找最优策略',
         analyzing: '分析中...',
 
+
         // PortfolioOptimizer - Efficient Frontier
+        step_2_title: '2. 选择目标组合',
         frontier_title: '2. 选择目标组合 (Asset Allocation)',
+        theoretical_frontier: '理论预期',
+        strategy_frontier: '策略实测',
         toggle_theory: '理论预期',
         toggle_strategy: '策略实测',
+        efficient_frontier: '有效前沿',
         frontier_chart_title: '有效前沿',
+        title_suffix_theory: ' - 现代投资组合理论',
+        title_suffix_actual: ' - VA/Kelly 实测数据',
         chart_theory_suffix: ' - 现代投资组合理论',
         chart_strategy_suffix: ' - VA/Kelly 实测数据',
+        theoretical_vol: '理论波动率',
+        actual_vol: '实际波动率',
+        strategy_return: '策略年化收益',
         chart_x_theory: '理论波动率 (Annualized Vol)',
         chart_y_theory: '理论预期回报 (Expected Return)',
         chart_x_strategy: '实际策略波动率 (Annualized Vol)',
@@ -45,6 +55,23 @@ export const translations = {
         chart_tooltip_strategy: 'VA/Kelly 策略回测',
         chart_tooltip_theory: '理论组合预期',
         chart_tip: '点击图表上的任意点选择目标配置',
+        chart_hint: '点击图表上的任意点选择目标配置',
+
+        // Tooltip translations
+        tooltip_strategy_title: 'VA/Kelly 策略回测',
+        tooltip_theory_title: '理论组合预期',
+        tooltip_annual_return: '年化收益',
+        tooltip_actual_vol: '实际波动率',
+        tooltip_max_dd: '最大回撤',
+        tooltip_expected_return: '预期收益',
+        tooltip_expected_risk: '预期风险',
+
+        // Strategy chart titles
+        strat_lump_sum: 'Lump Sum 策略归因',
+        strat_dca: 'DCA 策略归因',
+        strat_ideal_kelly: 'VA/Kelly (理论配置) 策略归因',
+        strat_actual_kelly: 'VA/Kelly (实际持仓) 策略归因',
+
 
         // PortfolioOptimizer - Strategy Details
         strategy_title: '3. 策略详情 & 模拟配置',
@@ -158,12 +185,21 @@ export const translations = {
         analyzing: 'Analyzing...',
 
         // PortfolioOptimizer - Efficient Frontier
+        step_2_title: '2. Select Target Allocation',
         frontier_title: '2. Select Target Allocation',
+        theoretical_frontier: 'Theoretical',
+        strategy_frontier: 'Backtest',
         toggle_theory: 'Theoretical',
         toggle_strategy: 'Backtest',
+        efficient_frontier: 'Efficient Frontier',
         frontier_chart_title: 'Efficient Frontier',
+        title_suffix_theory: ' - Modern Portfolio Theory',
+        title_suffix_actual: ' - VA/Kelly Backtest Data',
         chart_theory_suffix: ' - Modern Portfolio Theory',
         chart_strategy_suffix: ' - VA/Kelly Backtest Data',
+        theoretical_vol: 'Theoretical Volatility',
+        actual_vol: 'Actual Volatility',
+        strategy_return: 'Strategy Annualized Return',
         chart_x_theory: 'Theoretical Volatility (Annualized)',
         chart_y_theory: 'Theoretical Expected Return',
         chart_x_strategy: 'Actual Strategy Volatility',
@@ -171,6 +207,22 @@ export const translations = {
         chart_tooltip_strategy: 'VA/Kelly Backtest',
         chart_tooltip_theory: 'Theoretical Expectation',
         chart_tip: 'Click any point on the chart to select target allocation',
+        chart_hint: 'Click any point on the chart to select target allocation',
+
+        // Tooltip translations
+        tooltip_strategy_title: 'VA/Kelly Backtest',
+        tooltip_theory_title: 'Theoretical Expectation',
+        tooltip_annual_return: 'Annualized Return',
+        tooltip_actual_vol: 'Actual Volatility',
+        tooltip_max_dd: 'Max Drawdown',
+        tooltip_expected_return: 'Expected Return',
+        tooltip_expected_risk: 'Expected Risk',
+
+        // Strategy chart titles
+        strat_lump_sum: 'Lump Sum Attribution',
+        strat_dca: 'DCA Attribution',
+        strat_ideal_kelly: 'VA/Kelly (Theoretical) Attribution',
+        strat_actual_kelly: 'VA/Kelly (Actual) Attribution',
 
         // PortfolioOptimizer - Strategy Details
         strategy_title: '3. Strategy Details & Simulation',
