@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useLanguage } from './LanguageContext';
 import axios from 'axios';
 import { Search } from 'lucide-react';
 
 function ValueInvesting() {
+    const { t } = useLanguage();
     const [peMax, setPeMax] = useState(20);
     const [pbMax, setPbMax] = useState(2);
     const [stocks, setStocks] = useState([]);
@@ -25,12 +27,12 @@ function ValueInvesting() {
             <div className="full-width">
                 <div className="dashboard-card mb-6">
                     <div className="card-header">
-                        <h3 className="card-title"><Search size={20} className="card-icon" /> 价值投资筛选器</h3>
+                        <h3 className="card-title"><Search size={20} className="card-icon" /> {t('vi_title')}</h3>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                         <div className="form-group">
-                            <label className="form-label">最大市盈率 (PE)</label>
+                            <label className="form-label">{t('max_pe')}</label>
                             <input
                                 type="number"
                                 className="form-input"
@@ -39,7 +41,7 @@ function ValueInvesting() {
                             />
                         </div>
                         <div className="form-group">
-                            <label className="form-label">最大市净率 (PB)</label>
+                            <label className="form-label">{t('max_pb')}</label>
                             <input
                                 type="number"
                                 className="form-input"
@@ -49,7 +51,7 @@ function ValueInvesting() {
                         </div>
                         <div className="form-group">
                             <button className="btn btn-primary w-full" onClick={handleScreen} disabled={loading}>
-                                {loading ? '筛选中...' : '开始筛选'}
+                                {loading ? t('screening') : t('start_screen_btn')}
                             </button>
                         </div>
                     </div>
@@ -58,17 +60,17 @@ function ValueInvesting() {
                 {stocks.length > 0 && (
                     <div className="dashboard-card">
                         <div className="card-header">
-                            <h3 className="card-title">筛选结果 ({stocks.length})</h3>
+                            <h3 className="card-title">{t('screen_results')} ({stocks.length})</h3>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>代码</th>
-                                        <th>名称</th>
-                                        <th>最新价</th>
-                                        <th>市盈率 (动态)</th>
-                                        <th>市净率</th>
+                                        <th>{t('col_code')}</th>
+                                        <th>{t('col_name')}</th>
+                                        <th>{t('col_price')}</th>
+                                        <th>{t('col_pe')}</th>
+                                        <th>{t('col_pb')}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -90,7 +92,7 @@ function ValueInvesting() {
                 {stocks.length === 0 && !loading && (
                     <div className="text-center p-12 text-slate-500 dashboard-card border-dashed">
                         <Search size={48} className="mx-auto mb-4 opacity-20" />
-                        <p>暂无数据，请调整参数后筛选</p>
+                        <p>{t('no_data')}</p>
                     </div>
                 )}
             </div>

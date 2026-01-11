@@ -1,0 +1,252 @@
+export const translations = {
+    zh: {
+        // App
+        brand: 'Quant Compass',
+        nav_portfolio: 'Portfolio Optimizer',
+        nav_value: 'Value Investing',
+        nav_dma: 'Dual MA Strategy',
+
+        // PortfolioOptimizer - Asset Config
+        asset_config_title: '资产配置',
+        add_fund_label: '添加风险资产 (基金代码)',
+        input_placeholder: '输入代码',
+        add_btn: '添加',
+        add_risk_free_btn: '+ 添加无风险资产',
+        risk_free_asset: '无风险资产',
+        annual_return: '年化回报率 (%)',
+
+        // PortfolioOptimizer - Asset List
+        header_fund: '基金',
+        header_buy: '申购%',
+        header_sell: '赎回%',
+        header_manage: '管理%',
+
+        // PortfolioOptimizer - Backtest Params
+        backtest_title: '回测参数',
+        start_date: '开始日期',
+        end_date: '结束日期',
+        last_1_year: '近1年',
+        last_3_years: '近3年',
+        last_5_years: '近5年',
+        analyze_btn: '1. 寻找最优策略',
+        analyzing: '分析中...',
+
+        // PortfolioOptimizer - Efficient Frontier
+        frontier_title: '2. 选择目标组合 (Asset Allocation)',
+        toggle_theory: '理论预期',
+        toggle_strategy: '策略实测',
+        frontier_chart_title: '有效前沿',
+        chart_theory_suffix: ' - 现代投资组合理论',
+        chart_strategy_suffix: ' - VA/Kelly 实测数据',
+        chart_x_theory: '理论波动率 (Annualized Vol)',
+        chart_y_theory: '理论预期回报 (Expected Return)',
+        chart_x_strategy: '实际策略波动率 (Annualized Vol)',
+        chart_y_strategy: '策略回测年化回报 (DCA Annualized)',
+        chart_tooltip_strategy: 'VA/Kelly 策略回测',
+        chart_tooltip_theory: '理论组合预期',
+        chart_tip: '点击图表上的任意点选择目标配置',
+
+        // PortfolioOptimizer - Strategy Details
+        strategy_title: '3. 策略详情 & 模拟配置',
+        selected_metrics: '选定组合指标',
+        expected_return: '预期回报',
+        expected_risk: '预期风险',
+        target_weight: '目标权重',
+
+        // PortfolioOptimizer - Inputs
+        current_holdings_monthly: '当前持仓与月预算',
+        current_cash: '当前闲置现金',
+        monthly_budget: '每月定投预算',
+        current_holding_val: '当前持仓 (元)',
+        input_amount: '输入金额',
+        placeholder_money: '例如: 1000',
+        expand_advanced: '展开高级设置',
+        collapse_advanced: '收起高级设置',
+        max_buy_mult: '最大买入倍数 (Max Buy Multiplier)',
+        sell_threshold: '卖出阈值 (Sell Threshold %)',
+        min_weight: '最低持仓 (Min Weight %)',
+        max_weight: '最高持仓 (Max Weight %)',
+        ma_window: '均线窗口 (Months)',
+        start_analysis_btn: '开始分析 & 获取建议',
+
+        // PortfolioOptimizer - Results
+        backtest_compare: '回测数据对比',
+        lump_sum_annual: 'Lump Sum 年化',
+        dca_annual: 'DCA 年化',
+        kelly_theory: 'VA/Kelly (理论)',
+        kelly_actual: 'VA/Kelly (实际持仓)',
+        max_drawdown: '最大回撤',
+        strategy_chart_title: '策略归因',
+
+        // PortfolioOptimizer - Recommendation
+        recommend_title: '智能投资建议',
+        market_signal: '市场信号',
+        signal_under: '低估 (机会)',
+        signal_over: '高估 (风险)',
+        signal_neutral: '中性',
+        suggested_target: '建议目标仓位',
+        suggested_monthly: '建议本月投入',
+        monthly_budget_label: '月预算',
+        table_fund: '基金',
+        table_action: '动作',
+        table_amount: '金额',
+        table_target: '目标仓位',
+        table_reason: '原因',
+        action_buy: '买入',
+        action_sell: '卖出',
+        action_hold: '持有',
+
+        // Value Investing
+        vi_title: '价值投资筛选器',
+        max_pe: '最大市盈率 (PE)',
+        max_pb: '最大市净率 (PB)',
+        start_screen_btn: '开始筛选',
+        screening: '筛选中...',
+        screen_results: '筛选结果',
+        no_data: '暂无数据，请调整参数后筛选',
+        col_code: '代码',
+        col_name: '名称',
+        col_price: '最新价',
+        col_pe: '市盈率 (动态)',
+        col_pb: '市净率',
+
+        // Dual MA
+        dma_title: '双均线策略回测',
+        stock_code: '股票代码',
+        short_ma: '短期均线',
+        long_ma: '长期均线',
+        search_backtest: '查询并回测',
+        backtesting: '回测中...',
+        chart_title: '双均线策略',
+        legend_close: '收盘价',
+        legend_short: '短期均线',
+        legend_long: '长期均线',
+        legend_buy: '买入信号',
+        legend_sell: '卖出信号'
+    },
+    en: {
+        // App
+        brand: 'Quant Compass',
+        nav_portfolio: 'Portfolio Optimizer',
+        nav_value: 'Value Investing',
+        nav_dma: 'Dual MA Strategy',
+
+        // PortfolioOptimizer - Asset Config
+        asset_config_title: 'Asset Allocation',
+        add_fund_label: 'Add Risk Asset (Fund Code)',
+        input_placeholder: 'Enter Code',
+        add_btn: 'Add',
+        add_risk_free_btn: '+ Add Risk-Free Asset',
+        risk_free_asset: 'Risk-Free Asset',
+        annual_return: 'Annual Return (%)',
+
+        // PortfolioOptimizer - Asset List
+        header_fund: 'Fund',
+        header_buy: 'Buy Fee %',
+        header_sell: 'Sell Fee %',
+        header_manage: 'Mgmt Fee %',
+
+        // PortfolioOptimizer - Backtest Params
+        backtest_title: 'Backtest Parameters',
+        start_date: 'Start Date',
+        end_date: 'End Date',
+        last_1_year: '1 Year',
+        last_3_years: '3 Years',
+        last_5_years: '5 Years',
+        analyze_btn: '1. Find Optimal Strategy',
+        analyzing: 'Analyzing...',
+
+        // PortfolioOptimizer - Efficient Frontier
+        frontier_title: '2. Select Target Allocation',
+        toggle_theory: 'Theoretical',
+        toggle_strategy: 'Backtest',
+        frontier_chart_title: 'Efficient Frontier',
+        chart_theory_suffix: ' - Modern Portfolio Theory',
+        chart_strategy_suffix: ' - VA/Kelly Backtest Data',
+        chart_x_theory: 'Theoretical Volatility (Annualized)',
+        chart_y_theory: 'Theoretical Expected Return',
+        chart_x_strategy: 'Actual Strategy Volatility',
+        chart_y_strategy: 'Strategy Annualized Return (DCA)',
+        chart_tooltip_strategy: 'VA/Kelly Backtest',
+        chart_tooltip_theory: 'Theoretical Expectation',
+        chart_tip: 'Click any point on the chart to select target allocation',
+
+        // PortfolioOptimizer - Strategy Details
+        strategy_title: '3. Strategy Details & Simulation',
+        selected_metrics: 'Selected Portfolio Metrics',
+        expected_return: 'Expected Return',
+        expected_risk: 'Expected Risk',
+        target_weight: 'Target Weight',
+
+        // PortfolioOptimizer - Inputs
+        current_holdings_monthly: 'Current Holdings & Monthly Budget',
+        current_cash: 'Current Idle Cash',
+        monthly_budget: 'Monthly Investment Budget',
+        current_holding_val: 'Current Holding (Value)',
+        input_amount: 'Enter Amount',
+        placeholder_money: 'e.g. 1000',
+        expand_advanced: 'Show Advanced Settings',
+        collapse_advanced: 'Hide Advanced Settings',
+        max_buy_mult: 'Max Buy Multiplier',
+        sell_threshold: 'Sell Threshold (%)',
+        min_weight: 'Min Weight (%)',
+        max_weight: 'Max Weight (%)',
+        ma_window: 'MA Window (Months)',
+        start_analysis_btn: 'Start Analysis & Get Advice',
+
+        // PortfolioOptimizer - Results
+        backtest_compare: 'Backtest Comparison',
+        lump_sum_annual: 'Lump Sum Annualized',
+        dca_annual: 'DCA Annualized',
+        kelly_theory: 'VA/Kelly (Theoretical)',
+        kelly_actual: 'VA/Kelly (Actual)',
+        max_drawdown: 'Max Drawdown',
+        strategy_chart_title: 'Strategy Attribution',
+
+        // PortfolioOptimizer - Recommendation
+        recommend_title: 'Smart Investment Advice',
+        market_signal: 'Market Signal',
+        signal_under: 'Undervalued (Opp.)',
+        signal_over: 'Overvalued (Risk)',
+        signal_neutral: 'Neutral',
+        suggested_target: 'Suggested Target Equity',
+        suggested_monthly: 'Suggested Monthly Inv.',
+        monthly_budget_label: 'Monthly Budget',
+        table_fund: 'Fund',
+        table_action: 'Action',
+        table_amount: 'Amount',
+        table_target: 'Target Alloc.',
+        table_reason: 'Reason',
+        action_buy: 'Buy',
+        action_sell: 'Sell',
+        action_hold: 'Hold',
+
+        // Value Investing
+        vi_title: 'Value Investing Screener',
+        max_pe: 'Max P/E Ratio',
+        max_pb: 'Max P/B Ratio',
+        start_screen_btn: 'Start Screening',
+        screening: 'Screening...',
+        screen_results: 'Screening Results',
+        no_data: 'No data, please adjust parameters.',
+        col_code: 'Code',
+        col_name: 'Name',
+        col_price: 'Price',
+        col_pe: 'P/E (Dynamic)',
+        col_pb: 'P/B',
+
+        // Dual MA
+        dma_title: 'Dual Moving Average Backtest',
+        stock_code: 'Stock Code',
+        short_ma: 'Short MA Window',
+        long_ma: 'Long MA Window',
+        search_backtest: 'Search & Backtest',
+        backtesting: 'Running Backtest...',
+        chart_title: 'Dual MA Strategy',
+        legend_close: 'Close Price',
+        legend_short: 'Short MA',
+        legend_long: 'Long MA',
+        legend_buy: 'Buy Signal',
+        legend_sell: 'Sell Signal'
+    }
+};

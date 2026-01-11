@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
 import axios from 'axios';
 import { Activity } from 'lucide-react';
 
 function DualMovingAverage() {
+    const { t } = useLanguage();
     const [symbol, setSymbol] = useState('');
     const [chartOptions, setChartOptions] = useState({});
     const [shortWindow, setShortWindow] = useState(5);
@@ -24,9 +26,9 @@ function DualMovingAverage() {
             setChartOptions({
                 backgroundColor: 'transparent',
                 textStyle: { color: '#F8FAFC' },
-                title: { text: `双均线策略 (${symbol})`, left: 'center', textStyle: { color: '#F8FAFC' } },
+                title: { text: `${t('chart_title')} (${symbol})`, left: 'center', textStyle: { color: '#F8FAFC' } },
                 legend: {
-                    data: ['Close', 'Short MA', 'Long MA', 'Buy Signal', 'Sell Signal'],
+                    data: [t('legend_close'), t('legend_short'), t('legend_long'), t('legend_buy'), t('legend_sell')],
                     top: 30,
                     textStyle: { color: '#94A3B8' }
                 },
@@ -46,27 +48,27 @@ function DualMovingAverage() {
                 tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
                 series: [
                     {
-                        name: 'Close',
+                        name: t('legend_close'),
                         data: data.prices,
                         type: 'line',
                         lineStyle: { color: '#ffffff', width: 1 }
                     },
                     {
-                        name: 'Short MA',
+                        name: t('legend_short'),
                         data: strategyData.short_ma,
                         type: 'line',
                         smooth: true,
                         itemStyle: { color: '#F59E0B' }
                     },
                     {
-                        name: 'Long MA',
+                        name: t('legend_long'),
                         data: strategyData.long_ma,
                         type: 'line',
                         smooth: true,
                         itemStyle: { color: '#3B82F6' }
                     },
                     {
-                        name: 'Buy Signal',
+                        name: t('legend_buy'),
                         type: 'scatter',
                         symbol: 'arrow',
                         symbolSize: 15,
@@ -74,7 +76,7 @@ function DualMovingAverage() {
                         data: strategyData.buy_signals.map(d => [d.date, d.price])
                     },
                     {
-                        name: 'Sell Signal',
+                        name: t('legend_sell'),
                         type: 'scatter',
                         symbol: 'arrow',
                         symbolRotate: 180,
@@ -96,24 +98,24 @@ function DualMovingAverage() {
             <div className="full-width">
                 <div className="dashboard-card mb-6">
                     <div className="card-header">
-                        <h3 className="card-title"><Activity size={20} className="card-icon" /> 双均线策略回测</h3>
+                        <h3 className="card-title"><Activity size={20} className="card-icon" /> {t('dma_title')}</h3>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                         <div className="md:col-span-2 form-group">
-                            <label className="form-label">股票代码</label>
+                            <label className="form-label">{t('stock_code')}</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
                                     className="form-input"
-                                    placeholder="输入代码 (e.g., 000001)"
+                                    placeholder={t('input_placeholder')}
                                     value={symbol}
                                     onChange={(e) => setSymbol(e.target.value)}
                                 />
                             </div>
                         </div>
                         <div className="form-group">
-                            <label className="form-label">短期均线</label>
+                            <label className="form-label">{t('short_ma')}</label>
                             <input
                                 type="number"
                                 className="form-input"
@@ -122,7 +124,7 @@ function DualMovingAverage() {
                             />
                         </div>
                         <div className="form-group">
-                            <label className="form-label">长期均线</label>
+                            <label className="form-label">{t('long_ma')}</label>
                             <input
                                 type="number"
                                 className="form-input"
@@ -132,7 +134,7 @@ function DualMovingAverage() {
                         </div>
                         <div className="md:col-span-4 mt-2">
                             <button className="btn btn-primary w-full" type="button" onClick={handleSearch} disabled={loading}>
-                                {loading ? '回测中...' : '查询并回测'}
+                                {loading ? t('backtesting') : t('search_backtest')}
                             </button>
                         </div>
                     </div>

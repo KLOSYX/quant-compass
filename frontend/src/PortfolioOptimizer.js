@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
 import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar } from 'lucide-react';
 
@@ -10,6 +11,7 @@ const formatDD = (obj, key, fallbackKey) => {
 };
 
 function PortfolioOptimizer() {
+    const { t } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
     const [fundFees, setFundFees] = useState({});
     const [fundBuyFees, setFundBuyFees] = useState({});
@@ -341,9 +343,9 @@ function PortfolioOptimizer() {
                 p.max_drawdown,
                 p.original_risk
             ]);
-            xName = '实际策略波动率 (Annualized Vol)';
-            yName = '策略回测年化回报 (DCA Annualized)';
-            titleSuffix = ' - VA/Kelly 实测数据';
+            xName = t('actual_vol');
+            yName = t('strategy_return');
+            titleSuffix = t('title_suffix_actual');
         } else {
             // Theoretical: [Risk, Return, Weights, null, OriginalRisk]
             frontierData = analysisResult.efficient_frontier.map(p => [
@@ -353,24 +355,25 @@ function PortfolioOptimizer() {
                 null,
                 p.risk
             ]);
-            xName = '理论波动率 (Annualized Vol)';
-            yName = '理论预期回报 (Expected Return)';
-            titleSuffix = ' - 现代投资组合理论';
+            xName = t('theoretical_vol');
+            yName = t('expected_return');
+            titleSuffix = t('title_suffix_theory');
         }
 
         return {
             backgroundColor: 'transparent',
             textStyle: { color: '#F8FAFC' },
-            title: { text: `有效前沿${titleSuffix}`, left: 'center', textStyle: { fontSize: 16, color: '#F8FAFC' } },
+            title: { text: `${t('efficient_frontier')} ${titleSuffix}`, left: 'center', textStyle: { fontSize: 16, color: '#F8FAFC' } },
             tooltip: {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
                     const ret = (p.data[1] * 100).toFixed(2);
                     if (showStrategyFrontier) {
                         const dd = (p.data[3] * 100).toFixed(2);
-                        return `<b>VA/Kelly 策略回测:</b><br/>年化回报: ${ret}%<br/>实际波动: ${risk}%<br/>最大回撤: ${dd}%`;
+                        // using template literal for clarity, though keys are simple
+                        return `<b>${t('tooltip_strategy_title')}</b><br/>${t('tooltip_annual_return')}: ${ret}%<br/>${t('tooltip_actual_vol')}: ${risk}%<br/>${t('tooltip_max_dd')}: ${dd}%`;
                     } else {
-                        return `<b>理论组合预期:</b><br/>预期回报: ${ret}%<br/>预期风险: ${risk}%`;
+                        return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%`;
                     }
                 }
             },
@@ -422,10 +425,10 @@ function PortfolioOptimizer() {
         }));
 
         const titleMap = {
-            'lump_sum': '攒钱一次投 (Lump Sum)',
-            'dca': '月月投 (DCA)',
-            'ideal_kelly_dca': 'VA/Kelly (理论配置)',
-            'actual_kelly_dca': 'VA/Kelly (实际持仓)'
+            'lump_sum': t('strat_lump_sum'),
+            'dca': t('strat_dca'),
+            'ideal_kelly_dca': t('strat_ideal_kelly'),
+            'actual_kelly_dca': t('strat_actual_kelly')
         };
         return {
             backgroundColor: 'transparent',
@@ -449,11 +452,11 @@ function PortfolioOptimizer() {
                     <div className="half-width p-0">
                         <div className="dashboard-card h-full">
                             <div className="card-header">
-                                <h3 className="card-title"><Wallet size={20} className="card-icon" /> 资产配置</h3>
+                                <h3 className="card-title"><Wallet size={20} className="card-icon" /> {t('asset_config_title')}</h3>
                             </div>
 
                             <div className="form-group">
-                                <label className="form-label" htmlFor="fundCodeInput">添加风险资产 (基金代码)</label>
+                                <label className="form-label" htmlFor="fundCodeInput">{t('add_fund_label')}</label>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
@@ -462,18 +465,18 @@ function PortfolioOptimizer() {
                                         value={currentInput}
                                         onChange={(e) => setCurrentInput(e.target.value)}
                                         onKeyPress={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddFundCode(); } }}
-                                        placeholder="输入代码"
+                                        placeholder={t('input_placeholder')}
                                         style={{ flex: 1 }}
                                     />
                                     <button type="button" className="btn btn-primary" onClick={handleAddFundCode}>
-                                        <Plus size={16} /> 添加
+                                        <Plus size={16} /> {t('add_btn')}
                                     </button>
                                 </div>
                             </div>
 
                             <div className="form-group">
                                 <button type="button" className="btn btn-secondary w-full" onClick={handleAddRiskFree} disabled={hasRiskFree}>
-                                    + 添加无风险资产
+                                    {t('add_risk_free_btn')}
                                 </button>
                             </div>
 
@@ -481,8 +484,8 @@ function PortfolioOptimizer() {
 
                             {hasRiskFree && (
                                 <div className="risk-free-row">
-                                    <span className="risk-free-label">无风险资产</span>
-                                    <span className="text-xs text-slate-400">年化回报率 (%)</span>
+                                    <span className="risk-free-label">{t('risk_free_asset')}</span>
+                                    <span className="text-xs text-slate-400">{t('annual_return')}</span>
                                     <input type="number" className="form-input risk-free-input" value={riskFreeRate} onChange={(e) => handleRiskFreeRateChange(e.target.value)} placeholder="%" />
                                     <button type="button" className="icon-btn" onClick={() => handleRemoveAsset('RiskFree')}><X size={16} /></button>
                                 </div>
@@ -493,10 +496,10 @@ function PortfolioOptimizer() {
                                     <>
                                         <>
                                             <div className="asset-list-header">
-                                                <div>基金</div>
-                                                <div>申购%</div>
-                                                <div>赎回%</div>
-                                                <div>管理%</div>
+                                                <div>{t('header_fund')}</div>
+                                                <div>{t('header_buy')}</div>
+                                                <div>{t('header_sell')}</div>
+                                                <div>{t('header_manage')}</div>
                                                 <div></div>
                                             </div>
                                             {fundCodes.map(code => (
@@ -518,26 +521,26 @@ function PortfolioOptimizer() {
                     <div className="half-width p-0">
                         <div className="dashboard-card mb-6">
                             <div className="card-header">
-                                <h3 className="card-title"><Calendar size={20} className="card-icon" /> 回测参数</h3>
+                                <h3 className="card-title"><Calendar size={20} className="card-icon" /> {t('backtest_title')}</h3>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="form-group">
-                                    <label className="form-label">开始日期</label>
+                                    <label className="form-label">{t('start_date')}</label>
                                     <input type="date" className="form-input" value={startDate} onChange={(e) => { setStartDate(e.target.value); localStorage.setItem('startDate', e.target.value); }} />
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label">结束日期</label>
+                                    <label className="form-label">{t('end_date')}</label>
                                     <input type="date" className="form-input" value={endDate} onChange={(e) => { setEndDate(e.target.value); localStorage.setItem('endDate', e.target.value); }} />
                                 </div>
                             </div>
                             <div className="flex gap-2 mt-4">
-                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(1)}>近1年</button>
-                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(3)}>近3年</button>
-                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(5)}>近5年</button>
+                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(1)}>{t('last_1_year')}</button>
+                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(3)}>{t('last_3_years')}</button>
+                                <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(5)}>{t('last_5_years')}</button>
                             </div>
                         </div>
                         <button type="submit" className="btn btn-primary w-full py-4 text-lg shadow-lg-glow" disabled={loading.analysis || (fundCodes.length === 0 && !hasRiskFree)}>
-                            {loading.analysis ? '分析中...' : '1. 寻找最优策略'} <ArrowRight size={20} />
+                            {loading.analysis ? t('analyzing') : t('analyze_btn')} <ArrowRight size={20} />
                         </button>
                     </div>
                 </div>
@@ -550,11 +553,11 @@ function PortfolioOptimizer() {
                     <div className="full-width">
                         <div className="dashboard-card">
                             <div className="card-header justify-between">
-                                <h3 className="card-title"><TrendingUp size={20} className="card-icon" /> 2. 选择目标组合 (Asset Allocation)</h3>
+                                <h3 className="card-title"><TrendingUp size={20} className="card-icon" /> {t('step_2_title')}</h3>
                                 <div className="toggle-container">
-                                    <span className={`toggle-label ${!showStrategyFrontier ? 'active' : ''}`}>理论预期</span>
+                                    <span className={`toggle-label ${!showStrategyFrontier ? 'active' : ''}`}>{t('theoretical_frontier')}</span>
                                     <div className={`toggle-switch ${showStrategyFrontier ? 'checked' : ''}`} onClick={() => setShowStrategyFrontier(!showStrategyFrontier)}></div>
-                                    <span className={`toggle-label ${showStrategyFrontier ? 'active' : ''}`}>策略实测</span>
+                                    <span className={`toggle-label ${showStrategyFrontier ? 'active' : ''}`}>{t('strategy_frontier')}</span>
                                 </div>
                             </div>
 
@@ -565,7 +568,7 @@ function PortfolioOptimizer() {
                             )}
 
                             <ReactECharts option={getFrontierOptions()} style={{ height: 400 }} onEvents={{ 'click': onChartClick }} />
-                            <p className="text-center text-slate-400 text-sm mt-4">点击图表上的任意点选择目标配置</p>
+                            <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
                         </div>
                     </div>
 
@@ -573,24 +576,24 @@ function PortfolioOptimizer() {
                         <div className="full-width">
                             <div className="dashboard-card">
                                 <div className="card-header">
-                                    <h3 className="card-title"><Settings size={20} className="card-icon" /> 3. 策略详情 & 模拟配置</h3>
+                                    <h3 className="card-title"><Settings size={20} className="card-icon" /> {t('strategy_title')}</h3>
                                 </div>
                                 <div className="grid grid-cols-12 gap-8">
                                     <div className="col-span-4">
                                         <div className="p-4 bg-slate-900/50 rounded-lg mb-6">
-                                            <h4 className="text-slate-400 text-sm uppercase mb-4">选定组合指标</h4>
+                                            <h4 className="text-slate-400 text-sm uppercase mb-4">{t('selected_metrics')}</h4>
                                             <div className="flex justify-between mb-2">
-                                                <span>预期回报</span>
+                                                <span>{t('expected_return')}</span>
                                                 <span className="text-emerald-400 font-mono font-bold">{(selectedPoint.return * 100).toFixed(2)}%</span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span>预期风险</span>
+                                                <span>{t('expected_risk')}</span>
                                                 <span className="text-amber-400 font-mono font-bold">{(selectedPoint.risk * 100).toFixed(2)}%</span>
                                             </div>
                                         </div>
 
                                         <table className="data-table">
-                                            <thead><tr><th>基金</th><th>目标权重</th></tr></thead>
+                                            <thead><tr><th>{t('header_fund')}</th><th>{t('target_weight')}</th></tr></thead>
                                             <tbody>
                                                 {Object.entries(selectedPoint.weights).map(([code, weight]) => (
                                                     <tr key={code}>
@@ -603,22 +606,22 @@ function PortfolioOptimizer() {
                                     </div>
 
                                     <div className="col-span-8">
-                                        <h5 className="text-lg font-medium mb-4 flex items-center gap-2"><DollarSign size={18} className="text-sky-400" /> 当前持仓与月预算</h5>
+                                        <h5 className="text-lg font-medium mb-4 flex items-center gap-2"><DollarSign size={18} className="text-sky-400" /> {t('current_holdings_monthly')}</h5>
 
                                         <div className="grid grid-cols-2 gap-6 mb-6">
                                             <div>
-                                                <label className="form-label">当前闲置现金</label>
+                                                <label className="form-label">{t('current_cash')}</label>
                                                 <input type="number" className="form-input" value={currentCash} onChange={(e) => { setCurrentCash(e.target.value); localStorage.setItem('currentCash', e.target.value); }} placeholder="0" />
                                             </div>
                                             <div>
-                                                <label className="form-label">每月定投预算</label>
-                                                <input type="number" className="form-input" value={monthlyInvestment} onChange={(e) => { setMonthlyInvestment(e.target.value); localStorage.setItem('monthlyInvestment', e.target.value); }} placeholder="例如: 1000" />
+                                                <label className="form-label">{t('monthly_budget')}</label>
+                                                <input type="number" className="form-input" value={monthlyInvestment} onChange={(e) => { setMonthlyInvestment(e.target.value); localStorage.setItem('monthlyInvestment', e.target.value); }} placeholder={t('placeholder_money')} />
                                             </div>
                                         </div>
 
                                         <div className="mb-6">
                                             <table className="data-table">
-                                                <thead><tr><th>当前持仓 (元)</th><th>输入金额</th></tr></thead>
+                                                <thead><tr><th>{t('current_holding_val')}</th><th>{t('input_amount')}</th></tr></thead>
                                                 <tbody>
                                                     {Object.entries(selectedPoint.weights).map(([code, weight]) => (
                                                         <tr key={code}>
@@ -632,36 +635,36 @@ function PortfolioOptimizer() {
 
                                         <button className="text-link-btn mb-4" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
                                             <Settings size={14} />
-                                            {showAdvancedParams ? '收起高级设置' : '展开高级设置'}
+                                            {showAdvancedParams ? t('collapse_advanced') : t('expand_advanced')}
                                         </button>
 
                                         {showAdvancedParams && (
                                             <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-6 grid grid-cols-2 gap-4">
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">最大买入倍数 (Max Buy Multiplier)</label>
+                                                    <label className="form-label text-xs">{t('max_buy_mult')}</label>
                                                     <input className="form-input text-sm" type="number" step="0.1" value={maxBuyMultiplier} onChange={(e) => { setMaxBuyMultiplier(e.target.value); localStorage.setItem('maxBuyMultiplier', e.target.value); }} />
                                                 </div>
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">卖出阈值 (Sell Threshold %)</label>
+                                                    <label className="form-label text-xs">{t('sell_threshold')}</label>
                                                     <input className="form-input text-sm" type="number" step="0.5" value={sellThreshold} onChange={(e) => { setSellThreshold(e.target.value); localStorage.setItem('sellThreshold', e.target.value); }} />
                                                 </div>
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">最低持仓 (Min Weight %)</label>
+                                                    <label className="form-label text-xs">{t('min_weight')}</label>
                                                     <input className="form-input text-sm" type="number" step="5" value={minWeight} onChange={(e) => { setMinWeight(e.target.value); localStorage.setItem('minWeight', e.target.value); }} />
                                                 </div>
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">最高持仓 (Max Weight %)</label>
+                                                    <label className="form-label text-xs">{t('max_weight')}</label>
                                                     <input className="form-input text-sm" type="number" step="5" value={maxWeight} onChange={(e) => { setMaxWeight(e.target.value); localStorage.setItem('maxWeight', e.target.value); }} />
                                                 </div>
                                                 <div className="form-group col-span-2">
-                                                    <label className="form-label text-xs">均线窗口 (Months)</label>
+                                                    <label className="form-label text-xs">{t('ma_window')}</label>
                                                     <input className="form-input text-sm" type="number" step="1" value={maWindow} onChange={(e) => { setMaWindow(e.target.value); localStorage.setItem('maWindow', e.target.value); }} />
                                                 </div>
                                             </div>
                                         )}
 
                                         <button className="btn btn-primary w-full" onClick={handleStrategySubmit} disabled={loading.strategy || !monthlyInvestment || !selectedPoint}>
-                                            {loading.strategy ? '分析中...' : '开始分析 & 获取建议'}
+                                            {loading.strategy ? t('analyzing') : t('start_analysis_btn')}
                                         </button>
                                     </div>
                                 </div>
@@ -673,29 +676,29 @@ function PortfolioOptimizer() {
                         <div className="full-width">
                             <div className="dashboard-card mb-6">
                                 <div className="card-header">
-                                    <h3 className="card-title">回测数据对比</h3>
+                                    <h3 className="card-title">{t('backtest_compare')}</h3>
                                 </div>
                                 <div className="stat-grid">
                                     <div className="stat-item">
-                                        <div className="stat-label">Lump Sum 年化</div>
+                                        <div className="stat-label">{t('lump_sum_annual')}</div>
                                         <div className="stat-value">{(strategyResult.lump_sum.annualized_return * 100).toFixed(2)}%</div>
-                                        <div className="text-xs text-slate-500 mt-1">最大回撤: {formatDD(strategyResult.lump_sum, 'max_drawdown_value', 'max_drawdown')}</div>
+                                        <div className="text-xs text-slate-500 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.lump_sum, 'max_drawdown_value', 'max_drawdown')}</div>
                                     </div>
                                     <div className="stat-item">
-                                        <div className="stat-label">DCA 年化</div>
+                                        <div className="stat-label">{t('dca_annual')}</div>
                                         <div className="stat-value">{(strategyResult.dca.annualized_return * 100).toFixed(2)}%</div>
-                                        <div className="text-xs text-slate-500 mt-1">最大回撤: {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</div>
+                                        <div className="text-xs text-slate-500 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</div>
                                     </div>
                                     <div className="stat-item border-l-4 border-emerald-500 bg-emerald-900/10">
-                                        <div className="stat-label text-emerald-400">VA/Kelly (理论)</div>
+                                        <div className="stat-label text-emerald-400">{t('kelly_theory')}</div>
                                         <div className="stat-value text-emerald-400">{((strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).annualized_return * 100).toFixed(2)}%</div>
-                                        <div className="text-xs text-emerald-600 mt-1">最大回撤: {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
+                                        <div className="text-xs text-emerald-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
                                     </div>
                                     {strategyResult.actual_kelly_dca && (
                                         <div className="stat-item border-l-4 border-amber-500 bg-amber-900/10">
-                                            <div className="stat-label text-amber-400">VA/Kelly (实际)</div>
+                                            <div className="stat-label text-amber-400">{t('kelly_actual')}</div>
                                             <div className="stat-value text-amber-400">{(strategyResult.actual_kelly_dca.annualized_return * 100).toFixed(2)}%</div>
-                                            <div className="text-xs text-amber-600 mt-1">最大回撤: {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
+                                            <div className="text-xs text-amber-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
                                         </div>
                                     )}
                                 </div>
@@ -714,26 +717,26 @@ function PortfolioOptimizer() {
                         <div className="full-width">
                             <div className="recommendation-card">
                                 <div className="card-header">
-                                    <h3 className="card-title text-xl text-emerald-400"><TrendingUp size={24} /> 智能投资建议</h3>
+                                    <h3 className="card-title text-xl text-emerald-400"><TrendingUp size={24} /> {t('recommend_title')}</h3>
                                 </div>
 
                                 <div className="recommendation-header">
                                     <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">市场信号</div>
+                                        <div className="recommendation-stat-label">{t('market_signal')}</div>
                                         <div className="recommendation-stat-value" style={{ color: recommendationResult.market_signal === 'undervalued' ? '#34D399' : recommendationResult.market_signal === 'overvalued' ? '#F87171' : '#FBBF24' }}>
-                                            {recommendationResult.market_signal === 'undervalued' ? '低估 (机会)' : recommendationResult.market_signal === 'overvalued' ? '高估 (风险)' : '中性'}
+                                            {recommendationResult.market_signal === 'undervalued' ? t('signal_under') : recommendationResult.market_signal === 'overvalued' ? t('signal_over') : t('signal_neutral')}
                                         </div>
                                     </div>
                                     <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">建议目标仓位</div>
+                                        <div className="recommendation-stat-label">{t('suggested_target')}</div>
                                         <div className="recommendation-stat-value">{(recommendationResult.target_equity_ratio * 100).toFixed(0)}%</div>
                                     </div>
                                     <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">建议本月投入</div>
+                                        <div className="recommendation-stat-label">{t('suggested_monthly')}</div>
                                         <div className="recommendation-stat-value text-white">¥{recommendationResult.recommended_monthly_investment.toFixed(2)}</div>
                                     </div>
                                     <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">月预算</div>
+                                        <div className="recommendation-stat-label">{t('monthly_budget_label')}</div>
                                         <div className="recommendation-stat-value text-slate-400">¥{recommendationResult.monthly_budget}</div>
                                     </div>
                                 </div>
@@ -742,11 +745,11 @@ function PortfolioOptimizer() {
                                     <table className="recommendation-table">
                                         <thead>
                                             <tr>
-                                                <th>基金</th>
-                                                <th>动作</th>
-                                                <th>金额</th>
-                                                <th>目标仓位</th>
-                                                <th>原因</th>
+                                                <th>{t('table_fund')}</th>
+                                                <th>{t('table_action')}</th>
+                                                <th>{t('table_amount')}</th>
+                                                <th>{t('table_target')}</th>
+                                                <th>{t('table_reason')}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -755,7 +758,7 @@ function PortfolioOptimizer() {
                                                     <td>{advice.name}</td>
                                                     <td>
                                                         <span className={`action-badge ${advice.action === 'Buy' ? 'buy' : advice.action === 'Sell' ? 'sell' : 'hold'}`}>
-                                                            {advice.action === 'Buy' ? '买入' : advice.action === 'Sell' ? '卖出' : advice.action}
+                                                            {advice.action === 'Buy' ? t('action_buy') : advice.action === 'Sell' ? t('action_sell') : t('action_hold')}
                                                         </span>
                                                     </td>
                                                     <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
