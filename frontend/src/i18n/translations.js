@@ -68,6 +68,7 @@ export const translations = {
         max_weight: '最高持仓 (Max Weight %)',
         ma_window: '均线窗口 (Months)',
         start_analysis_btn: '开始分析 & 获取建议',
+        monthly_budget_required: '请输入每月定投预算后再进行分析',
 
         // PortfolioOptimizer - Results
         backtest_compare: '回测数据对比',
@@ -193,6 +194,7 @@ export const translations = {
         max_weight: 'Max Weight (%)',
         ma_window: 'MA Window (Months)',
         start_analysis_btn: 'Start Analysis & Get Advice',
+        monthly_budget_required: 'Please enter monthly investment budget before analysis',
 
         // PortfolioOptimizer - Results
         backtest_compare: 'Backtest Comparison',

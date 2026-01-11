@@ -45,6 +45,7 @@ function PortfolioOptimizer() {
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState({ analysis: false, strategy: false, recommendation: false });
     const [showStrategyFrontier, setShowStrategyFrontier] = useState(false);
+    const [budgetError, setBudgetError] = useState('');
 
     useEffect(() => {
         const savedFundCodes = localStorage.getItem('fundCodes');
@@ -285,7 +286,12 @@ function PortfolioOptimizer() {
     };
 
     const handleStrategySubmit = async () => {
-        if (!selectedPoint || !monthlyInvestment) return;
+        if (!selectedPoint) return;
+        if (!monthlyInvestment) {
+            setBudgetError(t('monthly_budget_required'));
+            return;
+        }
+        setBudgetError('');
         setStrategyResult(null);
         setRecommendationResult(null);
         await Promise.all([runBacktests(selectedPoint.weights), getRecommendation()]);
@@ -663,9 +669,15 @@ function PortfolioOptimizer() {
                                             </div>
                                         )}
 
-                                        <button className="btn btn-primary w-full" onClick={handleStrategySubmit} disabled={loading.strategy || !monthlyInvestment || !selectedPoint}>
+                                        <button className="btn btn-primary w-full" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
                                             {loading.strategy ? t('analyzing') : t('start_analysis_btn')}
                                         </button>
+                                        {budgetError && (
+                                            <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm flex items-center gap-2">
+                                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                                {budgetError}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
