@@ -10,6 +10,28 @@ const formatDD = (obj, key, fallbackKey) => {
     return `${(val * 100).toFixed(2)}%`;
 };
 
+// Format money values for better readability (e.g., 1234567 -> "123.46万")
+const formatMoney = (value) => {
+    if (value === null || value === undefined) return '--';
+    const num = Number(value);
+    if (isNaN(num)) return '--';
+
+    const absNum = Math.abs(num);
+    const sign = num < 0 ? '-' : '';
+
+    if (absNum >= 100000000) {
+        // >= 1亿
+        return `${sign}${(absNum / 100000000).toFixed(2)}亿`;
+    } else if (absNum >= 10000) {
+        // >= 1万
+        return `${sign}${(absNum / 10000).toFixed(2)}万`;
+    } else if (absNum >= 1) {
+        return `${sign}${absNum.toFixed(2)}`;
+    } else {
+        return `${sign}${absNum.toFixed(2)}`;
+    }
+};
+
 function PortfolioOptimizer() {
     const { t } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -440,11 +462,30 @@ function PortfolioOptimizer() {
             backgroundColor: 'transparent',
             textStyle: { color: '#F8FAFC' },
             title: { text: titleMap[strategyType] || 'Strategy Attribution', left: 'center', textStyle: { color: '#F8FAFC' } },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'cross', label: { backgroundColor: '#6a7985' } } },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'cross', label: { backgroundColor: '#6a7985' } },
+                formatter: (params) => {
+                    if (!params || params.length === 0) return '';
+                    let result = `<div style="font-weight:bold;margin-bottom:8px;">${params[0].axisValue}</div>`;
+                    params.forEach(item => {
+                        const value = formatMoney(item.value);
+                        result += `<div style="display:flex;justify-content:space-between;gap:16px;"><span>${item.marker} ${item.seriesName}</span><span style="font-weight:bold;">¥${value}</span></div>`;
+                    });
+                    return result;
+                }
+            },
             legend: { data: assetCodes.map(code => getAssetName(code)), top: 30, type: 'scroll', textStyle: { color: '#94A3B8' } },
             grid: { top: 70, left: '3%', right: '4%', bottom: '3%', containLabel: true },
             xAxis: { type: 'category', boundaryGap: false, data: dates, axisLabel: { color: '#94A3B8' } },
-            yAxis: { type: 'value', axisLabel: { formatter: '¥{value}', color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+            yAxis: {
+                type: 'value',
+                axisLabel: {
+                    formatter: (value) => `¥${formatMoney(value)}`,
+                    color: '#94A3B8'
+                },
+                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+            },
             series: series
         };
     };
