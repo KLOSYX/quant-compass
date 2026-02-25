@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
 import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar } from 'lucide-react';
@@ -30,6 +30,22 @@ const formatMoney = (value) => {
     } else {
         return `${sign}${absNum.toFixed(2)}`;
     }
+};
+
+const getAdviceActionMeta = (action, t) => {
+    if (action === 'Buy') {
+        return { label: t('action_buy'), badgeClass: 'buy' };
+    }
+    if (action === 'Sell') {
+        return { label: t('action_sell'), badgeClass: 'sell' };
+    }
+    if (action === '存入' || action === 'Deposit') {
+        return { label: t('action_deposit'), badgeClass: 'deposit' };
+    }
+    if (action === '取用' || action === 'Withdraw') {
+        return { label: t('action_withdraw'), badgeClass: 'withdraw' };
+    }
+    return { label: t('action_hold'), badgeClass: 'hold' };
 };
 
 function PortfolioOptimizer() {
@@ -68,6 +84,9 @@ function PortfolioOptimizer() {
     const [loading, setLoading] = useState({ analysis: false, strategy: false, recommendation: false });
     const [showStrategyFrontier, setShowStrategyFrontier] = useState(false);
     const [budgetError, setBudgetError] = useState('');
+    const [showBacktestNote, setShowBacktestNote] = useState(false);
+    const [backtestNotePinned, setBacktestNotePinned] = useState(false);
+    const backtestNoteRef = useRef(null);
 
     useEffect(() => {
         const savedFundCodes = localStorage.getItem('fundCodes');
@@ -82,6 +101,20 @@ function PortfolioOptimizer() {
         if (savedFundSellFees) setFundSellFees(JSON.parse(savedFundSellFees));
         if (savedHasRiskFree) setHasRiskFree(JSON.parse(savedHasRiskFree));
         if (savedRiskFreeRate) setRiskFreeRate(savedRiskFreeRate);
+    }, []);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (!backtestNoteRef.current || backtestNoteRef.current.contains(event.target)) return;
+            setBacktestNotePinned(false);
+            setShowBacktestNote(false);
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('touchstart', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('touchstart', handleClickOutside);
+        };
     }, []);
 
     const handleAddFundCode = () => {
@@ -317,6 +350,16 @@ function PortfolioOptimizer() {
         setStrategyResult(null);
         setRecommendationResult(null);
         await Promise.all([runBacktests(selectedPoint.weights), getRecommendation()]);
+    };
+
+    const toggleBacktestNote = () => {
+        if (backtestNotePinned) {
+            setBacktestNotePinned(false);
+            setShowBacktestNote(false);
+            return;
+        }
+        setBacktestNotePinned(true);
+        setShowBacktestNote(true);
     };
 
 
@@ -730,6 +773,34 @@ function PortfolioOptimizer() {
                             <div className="dashboard-card mb-6">
                                 <div className="card-header">
                                     <h3 className="card-title">{t('backtest_compare')}</h3>
+                                    <div
+                                        className="backtest-note-tooltip"
+                                        ref={backtestNoteRef}
+                                        onMouseEnter={() => setShowBacktestNote(true)}
+                                        onMouseLeave={() => {
+                                            if (!backtestNotePinned) setShowBacktestNote(false);
+                                        }}
+                                    >
+                                        <button
+                                            type="button"
+                                            className={`backtest-note-trigger ${showBacktestNote ? 'active' : ''}`}
+                                            onClick={toggleBacktestNote}
+                                            aria-label={t('backtest_note_toggle')}
+                                            aria-expanded={showBacktestNote}
+                                            title={t('backtest_note_title')}
+                                        >
+                                            <Info size={14} />
+                                        </button>
+                                        <div className={`backtest-note-popover ${showBacktestNote ? 'show' : ''}`} role="note">
+                                            <div className="backtest-note-popover-title">{t('backtest_note_title')}</div>
+                                            <div className="backtest-note-line">1. {t('backtest_note_lump_sum')}</div>
+                                            <div className="backtest-note-line">2. {t('backtest_note_dca')}</div>
+                                            <div className="backtest-note-line">3. {t('backtest_note_kelly_theory')}</div>
+                                            {strategyResult.actual_kelly_dca && (
+                                                <div className="backtest-note-line">4. {t('backtest_note_kelly_actual')}</div>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                                 <div className="stat-grid">
                                     <div className="stat-item">
@@ -806,19 +877,22 @@ function PortfolioOptimizer() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {recommendationResult.fund_advice.map(advice => (
+                                            {recommendationResult.fund_advice.map(advice => {
+                                                const actionMeta = getAdviceActionMeta(advice.action, t);
+                                                return (
                                                 <tr key={advice.code}>
                                                     <td>{advice.name}</td>
                                                     <td>
-                                                        <span className={`action-badge ${advice.action === 'Buy' ? 'buy' : advice.action === 'Sell' ? 'sell' : 'hold'}`}>
-                                                            {advice.action === 'Buy' ? t('action_buy') : advice.action === 'Sell' ? t('action_sell') : t('action_hold')}
+                                                        <span className={`action-badge ${actionMeta.badgeClass}`}>
+                                                            {actionMeta.label}
                                                         </span>
                                                     </td>
                                                     <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
                                                     <td className="font-mono">¥{advice.target_holding?.toFixed(2) ?? '--'}</td>
                                                     <td className="text-slate-500 text-xs">{advice.reason}</td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 )}

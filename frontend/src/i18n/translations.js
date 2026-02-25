@@ -99,6 +99,12 @@ export const translations = {
 
         // PortfolioOptimizer - Results
         backtest_compare: '回测数据对比',
+        backtest_note_title: '口径说明',
+        backtest_note_toggle: '查看口径说明',
+        backtest_note_lump_sum: 'Lump Sum：假设总投入在起始日一次性买入。',
+        backtest_note_dca: 'DCA：每月按固定金额投入，不做择时。',
+        backtest_note_kelly_theory: 'VA/Kelly（理论）：先按目标权重配平，再按 VA/Kelly 规则回测。',
+        backtest_note_kelly_actual: 'VA/Kelly（实际持仓）：从你当前真实持仓与现金出发，不做期初强制再平衡。',
         lump_sum_annual: 'Lump Sum 年化',
         dca_annual: 'DCA 年化',
         kelly_theory: 'VA/Kelly (理论)',
@@ -123,6 +129,8 @@ export const translations = {
         action_buy: '买入',
         action_sell: '卖出',
         action_hold: '持有',
+        action_deposit: '存入',
+        action_withdraw: '取用',
 
         // Value Investing
         vi_title: '价值投资筛选器',
@@ -250,6 +258,12 @@ export const translations = {
 
         // PortfolioOptimizer - Results
         backtest_compare: 'Backtest Comparison',
+        backtest_note_title: 'Method Notes',
+        backtest_note_toggle: 'Show method notes',
+        backtest_note_lump_sum: 'Lump Sum: assumes all planned capital is invested on day one.',
+        backtest_note_dca: 'DCA: invests a fixed amount monthly without timing.',
+        backtest_note_kelly_theory: 'VA/Kelly (Theoretical): first rebalances to target weights, then runs VA/Kelly rules.',
+        backtest_note_kelly_actual: 'VA/Kelly (Actual): starts from your real holdings and cash, with no forced initial rebalance.',
         lump_sum_annual: 'Lump Sum Annualized',
         dca_annual: 'DCA Annualized',
         kelly_theory: 'VA/Kelly (Theoretical)',
@@ -274,6 +288,8 @@ export const translations = {
         action_buy: 'Buy',
         action_sell: 'Sell',
         action_hold: 'Hold',
+        action_deposit: 'Deposit',
+        action_withdraw: 'Withdraw',
 
         // Value Investing
         vi_title: 'Value Investing Screener',

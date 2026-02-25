@@ -28,7 +28,7 @@ COPY backend/ .
 COPY --from=build /app/frontend/build static
 
 # Expose the port the app runs on
-EXPOSE 8000
+EXPOSE 8666
 
 # Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8666"]

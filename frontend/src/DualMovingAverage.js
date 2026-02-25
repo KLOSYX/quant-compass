@@ -16,11 +16,11 @@ function DualMovingAverage() {
         setLoading(true);
         try {
             // Fetch basic stock data
-            const response = await axios.get(`http://localhost:8000/stock/${symbol}`);
+            const response = await axios.get(`http://localhost:8666/stock/${symbol}`);
             const data = response.data;
 
             // Fetch backtesting data
-            const strategyResponse = await axios.get(`http://localhost:8000/strategy/dual-moving-average/${symbol}?short_window=${shortWindow}&long_window=${longWindow}`);
+            const strategyResponse = await axios.get(`http://localhost:8666/strategy/dual-moving-average/${symbol}?short_window=${shortWindow}&long_window=${longWindow}`);
             const strategyData = strategyResponse.data;
 
             setChartOptions({

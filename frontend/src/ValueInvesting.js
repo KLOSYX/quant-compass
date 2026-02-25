@@ -13,7 +13,7 @@ function ValueInvesting() {
     const handleScreen = async () => {
         setLoading(true);
         try {
-            const response = await axios.get(`http://localhost:8000/strategy/value-investing?pe_max=${peMax}&pb_max=${pbMax}`);
+            const response = await axios.get(`http://localhost:8666/strategy/value-investing?pe_max=${peMax}&pb_max=${pbMax}`);
             setStocks(response.data);
         } catch (error) {
             console.error("Error screening value stocks:", error);

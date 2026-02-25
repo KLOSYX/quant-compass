@@ -91,6 +91,71 @@ header.app-header {
     color: var(--accent-primary);
 }
 
+/* Backtest Method Notes Tooltip */
+.backtest-note-tooltip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.backtest-note-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--border-color);
+    background: rgba(15, 23, 42, 0.7);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.backtest-note-trigger:hover,
+.backtest-note-trigger.active {
+    color: var(--info);
+    border-color: rgba(59, 130, 246, 0.45);
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.backtest-note-popover {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: min(28rem, calc(100vw - 4rem));
+    z-index: 20;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: var(--radius-md);
+    background: linear-gradient(160deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.96) 100%);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.backtest-note-popover.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.backtest-note-popover-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.45rem;
+}
+
+.backtest-note-line {
+    font-size: 0.77rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
 /* Layout Helpers */
 .full-width {
     grid-column: span 12;
@@ -119,6 +184,11 @@ header.app-header {
     .col-span-4 {
         grid-column: span 12;
         width: 100%;
+    }
+
+    .backtest-note-popover {
+        width: min(24rem, calc(100vw - 2.5rem));
+        right: -0.5rem;
     }
 }
 
@@ -536,6 +606,16 @@ header.app-header {
 .action-badge.hold {
     background: rgba(148, 163, 184, 0.15);
     color: var(--text-secondary);
+}
+
+.action-badge.deposit {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60A5FA;
+}
+
+.action-badge.withdraw {
+    background: rgba(251, 146, 60, 0.15);
+    color: #FB923C;
 }
 
 /* Date Picker Customization */
