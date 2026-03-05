@@ -48,6 +48,33 @@ const getAdviceActionMeta = (action, t) => {
     return { label: t('action_hold'), badgeClass: 'hold' };
 };
 
+const getAllocationSignalLabel = (signal, t) => {
+    if (signal === 'undervalued') return t('allocation_upper');
+    if (signal === 'overvalued') return t('allocation_lower');
+    return t('allocation_neutral');
+};
+
+const getStoredNumber = (key, fallback) => {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const getStoredPercentWithLegacyRatioSupport = (key, fallback) => {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return fallback;
+    // Legacy versions persisted ratios (0~1). Current UI expects percentages (0~100).
+    if (parsed > 0 && parsed <= 1) {
+        const migrated = parsed * 100;
+        localStorage.setItem(key, String(migrated));
+        return migrated;
+    }
+    return parsed;
+};
+
 function PortfolioOptimizer() {
     const { t } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -73,16 +100,30 @@ function PortfolioOptimizer() {
 
     // Advanced Strategy Parameters
     const [showAdvancedParams, setShowAdvancedParams] = useState(false);
-    const [maxBuyMultiplier, setMaxBuyMultiplier] = useState(() => localStorage.getItem('maxBuyMultiplier') || 3.0);
-    const [sellThreshold, setSellThreshold] = useState(() => localStorage.getItem('sellThreshold') || 5.0); // pct
-    const [minWeight, setMinWeight] = useState(() => localStorage.getItem('minWeight') || 30); // pct
-    const [maxWeight, setMaxWeight] = useState(() => localStorage.getItem('maxWeight') || 80); // pct
-    const [maWindow, setMaWindow] = useState(() => localStorage.getItem('maWindow') || 12);
+    const [strategyMode, setStrategyMode] = useState(() => localStorage.getItem('strategyMode') || 'optimized_kelly');
+    const [kellyFraction, setKellyFraction] = useState(() => getStoredPercentWithLegacyRatioSupport('kellyFraction', 50)); // pct
+    const [estimationWindow, setEstimationWindow] = useState(() => getStoredNumber('estimationWindow', 36));
+    const [minimumCashReserve, setMinimumCashReserve] = useState(() => getStoredNumber('minimumCashReserve', 0));
+    const [enableCvarConstraint, setEnableCvarConstraint] = useState(() => {
+        const saved = localStorage.getItem('enableCvarConstraint');
+        return saved === null ? true : JSON.parse(saved);
+    });
+    const [cvarConfidence, setCvarConfidence] = useState(() => getStoredPercentWithLegacyRatioSupport('cvarConfidence', 95)); // pct
+    const [cvarLimit, setCvarLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('cvarLimit', 8)); // pct
+    const [enableDrawdownConstraint, setEnableDrawdownConstraint] = useState(() => {
+        const saved = localStorage.getItem('enableDrawdownConstraint');
+        return saved === null ? true : JSON.parse(saved);
+    });
+    const [maxDrawdownLimit, setMaxDrawdownLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('maxDrawdownLimit', 20)); // pct
+    const [maxBuyMultiplier, setMaxBuyMultiplier] = useState(() => getStoredNumber('maxBuyMultiplier', 3.0));
+    const [sellThreshold, setSellThreshold] = useState(() => getStoredPercentWithLegacyRatioSupport('sellThreshold', 5.0)); // pct
+    const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
+    const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
+    const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
     const [strategyResult, setStrategyResult] = useState(null);
     const [recommendationResult, setRecommendationResult] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState({ analysis: false, strategy: false, recommendation: false });
-    const [showStrategyFrontier, setShowStrategyFrontier] = useState(false);
     const [budgetError, setBudgetError] = useState('');
     const [showBacktestNote, setShowBacktestNote] = useState(false);
     const [backtestNotePinned, setBacktestNotePinned] = useState(false);
@@ -206,6 +247,17 @@ function PortfolioOptimizer() {
                 acc[code] = isNaN(parsedFee) ? 0 : parsedFee / 100;
                 return acc;
             }, {});
+            const parsedKellyFraction = parseFloat(kellyFraction);
+            const parsedEstimationWindow = parseInt(estimationWindow, 10);
+            const parsedMinimumCashReserve = parseFloat(minimumCashReserve);
+            const parsedCvarConfidence = parseFloat(cvarConfidence);
+            const parsedCvarLimit = parseFloat(cvarLimit);
+            const parsedMaxDrawdownLimit = parseFloat(maxDrawdownLimit);
+            const parsedMaxBuyMultiplier = parseFloat(maxBuyMultiplier);
+            const parsedSellThreshold = parseFloat(sellThreshold);
+            const parsedMinWeight = parseFloat(minWeight);
+            const parsedMaxWeight = parseFloat(maxWeight);
+            const parsedMaWindow = parseInt(maWindow, 10);
 
             const payload = {
                 fund_codes: fundCodes,
@@ -213,6 +265,20 @@ function PortfolioOptimizer() {
                 start_date: startDate,
                 end_date: endDate,
                 risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : null,
+                strategy_mode: strategyMode,
+                kelly_fraction: (Number.isNaN(parsedKellyFraction) ? 50 : parsedKellyFraction) / 100,
+                estimation_window: Number.isNaN(parsedEstimationWindow) ? 36 : parsedEstimationWindow,
+                minimum_cash_reserve: Number.isNaN(parsedMinimumCashReserve) ? 0 : parsedMinimumCashReserve,
+                enable_cvar_constraint: enableCvarConstraint,
+                cvar_confidence: (Number.isNaN(parsedCvarConfidence) ? 95 : parsedCvarConfidence) / 100,
+                cvar_limit: (Number.isNaN(parsedCvarLimit) ? 8 : parsedCvarLimit) / 100,
+                enable_drawdown_constraint: enableDrawdownConstraint,
+                max_drawdown_limit: (Number.isNaN(parsedMaxDrawdownLimit) ? 20 : parsedMaxDrawdownLimit) / 100,
+                max_buy_multiplier: Number.isNaN(parsedMaxBuyMultiplier) ? 3.0 : parsedMaxBuyMultiplier,
+                sell_threshold: (Number.isNaN(parsedSellThreshold) ? 5.0 : parsedSellThreshold) / 100,
+                min_weight: (Number.isNaN(parsedMinWeight) ? 30 : parsedMinWeight) / 100,
+                max_weight: (Number.isNaN(parsedMaxWeight) ? 80 : parsedMaxWeight) / 100,
+                ma_window: Number.isNaN(parsedMaWindow) ? 12 : parsedMaWindow,
             };
 
             const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -270,6 +336,33 @@ function PortfolioOptimizer() {
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
                 max_weight: parseFloat(maxWeight) / 100,
+                strategy_mode: strategyMode,
+                kelly_fraction: (() => {
+                    const value = parseFloat(kellyFraction);
+                    return (Number.isNaN(value) ? 50 : value) / 100;
+                })(),
+                estimation_window: (() => {
+                    const value = parseInt(estimationWindow, 10);
+                    return Number.isNaN(value) ? 36 : value;
+                })(),
+                minimum_cash_reserve: (() => {
+                    const value = parseFloat(minimumCashReserve);
+                    return Number.isNaN(value) ? 0 : value;
+                })(),
+                enable_cvar_constraint: enableCvarConstraint,
+                cvar_confidence: (() => {
+                    const value = parseFloat(cvarConfidence);
+                    return (Number.isNaN(value) ? 95 : value) / 100;
+                })(),
+                cvar_limit: (() => {
+                    const value = parseFloat(cvarLimit);
+                    return (Number.isNaN(value) ? 8 : value) / 100;
+                })(),
+                enable_drawdown_constraint: enableDrawdownConstraint,
+                max_drawdown_limit: (() => {
+                    const value = parseFloat(maxDrawdownLimit);
+                    return (Number.isNaN(value) ? 20 : value) / 100;
+                })(),
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 ma_window: parseInt(maWindow)
@@ -321,10 +414,38 @@ function PortfolioOptimizer() {
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
                 monthly_budget: parseFloat(monthlyInvestment) || 0,
+                risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : 0,
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
                 max_weight: parseFloat(maxWeight) / 100,
+                strategy_mode: strategyMode,
+                kelly_fraction: (() => {
+                    const value = parseFloat(kellyFraction);
+                    return (Number.isNaN(value) ? 50 : value) / 100;
+                })(),
+                estimation_window: (() => {
+                    const value = parseInt(estimationWindow, 10);
+                    return Number.isNaN(value) ? 36 : value;
+                })(),
+                minimum_cash_reserve: (() => {
+                    const value = parseFloat(minimumCashReserve);
+                    return Number.isNaN(value) ? 0 : value;
+                })(),
+                enable_cvar_constraint: enableCvarConstraint,
+                cvar_confidence: (() => {
+                    const value = parseFloat(cvarConfidence);
+                    return (Number.isNaN(value) ? 95 : value) / 100;
+                })(),
+                cvar_limit: (() => {
+                    const value = parseFloat(cvarLimit);
+                    return (Number.isNaN(value) ? 8 : value) / 100;
+                })(),
+                enable_drawdown_constraint: enableDrawdownConstraint,
+                max_drawdown_limit: (() => {
+                    const value = parseFloat(maxDrawdownLimit);
+                    return (Number.isNaN(value) ? 20 : value) / 100;
+                })(),
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 ma_window: parseInt(maWindow)
@@ -364,11 +485,8 @@ function PortfolioOptimizer() {
 
 
     const onChartClick = (params) => {
-        const [chartRisk, chartReturn, weights, _maxDrawdown, originalRisk] = params.data;
-        // Use originalRisk if available (Strategy View), otherwise use chartRisk (Theoretical View)
-        const relevantRisk = originalRisk !== undefined ? originalRisk : chartRisk;
-
-        setSelectedPoint({ risk: relevantRisk, return: chartReturn, weights });
+        const [chartRisk, chartReturn, weights] = params.data;
+        setSelectedPoint({ risk: chartRisk, return: chartReturn, weights });
         setStrategyResult(null);
 
         // Auto-tune parameters based on risk/return profile
@@ -383,7 +501,7 @@ function PortfolioOptimizer() {
             let newMaxWeight = 80;
 
             if (maxRisk > minRisk) {
-                const riskLevel = (relevantRisk - minRisk) / (maxRisk - minRisk); // 0 to 1
+                const riskLevel = (chartRisk - minRisk) / (maxRisk - minRisk); // 0 to 1
                 newMinWeight = 40 + (riskLevel * 50); // 40 -> 90
                 newMaxWeight = 80 + (riskLevel * 20); // 80 -> 100
             }
@@ -402,34 +520,14 @@ function PortfolioOptimizer() {
     const getFrontierOptions = () => {
         if (!analysisResult) return {};
 
-        let frontierData;
-        let xName, yName, titleSuffix;
-
-        if (showStrategyFrontier && analysisResult.strategy_frontier) {
-            // Strategy Frontier: [Risk(Vol), Return(Annualized), Weights, MaxDD, OriginalRisk]
-            frontierData = analysisResult.strategy_frontier.map(p => [
-                p.risk,
-                p.return,
-                p.weights,
-                p.max_drawdown,
-                p.original_risk
-            ]);
-            xName = t('actual_vol');
-            yName = t('strategy_return');
-            titleSuffix = t('title_suffix_actual');
-        } else {
-            // Theoretical: [Risk, Return, Weights, null, OriginalRisk]
-            frontierData = analysisResult.efficient_frontier.map(p => [
-                p.risk,
-                p.return,
-                p.weights,
-                null,
-                p.risk
-            ]);
-            xName = t('theoretical_vol');
-            yName = t('expected_return');
-            titleSuffix = t('title_suffix_theory');
-        }
+        const frontierData = analysisResult.efficient_frontier.map(p => [
+            p.risk,
+            p.return,
+            p.weights
+        ]);
+        const xName = t('theoretical_vol');
+        const yName = t('expected_return');
+        const titleSuffix = t('title_suffix_theory');
 
         return {
             backgroundColor: 'transparent',
@@ -439,19 +537,13 @@ function PortfolioOptimizer() {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
                     const ret = (p.data[1] * 100).toFixed(2);
-                    if (showStrategyFrontier) {
-                        const dd = (p.data[3] * 100).toFixed(2);
-                        // using template literal for clarity, though keys are simple
-                        return `<b>${t('tooltip_strategy_title')}</b><br/>${t('tooltip_annual_return')}: ${ret}%<br/>${t('tooltip_actual_vol')}: ${risk}%<br/>${t('tooltip_max_dd')}: ${dd}%`;
-                    } else {
-                        return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%`;
-                    }
+                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%`;
                 }
             },
             xAxis: {
                 type: 'value',
                 name: xName,
-                axisLabel: { formatter: (v) => `${(v * 100).toFixed(1)}%`, color: '#94A3B8' },
+                axisLabel: { formatter: (v) => `${(v * 100).toFixed(2)}%`, color: '#94A3B8' },
                 splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
                 min: 'dataMin'
             },
@@ -462,7 +554,7 @@ function PortfolioOptimizer() {
                 splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
                 min: 'dataMin'
             },
-            series: [{ type: 'scatter', data: frontierData, symbolSize: 10, itemStyle: { color: showStrategyFrontier ? '#EF4444' : '#3B82F6' } }]
+            series: [{ type: 'scatter', data: frontierData, symbolSize: 10, itemStyle: { color: '#3B82F6' } }]
         };
     };
 
@@ -644,11 +736,6 @@ function PortfolioOptimizer() {
                         <div className="dashboard-card">
                             <div className="card-header justify-between">
                                 <h3 className="card-title"><TrendingUp size={20} className="card-icon" /> {t('step_2_title')}</h3>
-                                <div className="toggle-container">
-                                    <span className={`toggle-label ${!showStrategyFrontier ? 'active' : ''}`}>{t('theoretical_frontier')}</span>
-                                    <div className={`toggle-switch ${showStrategyFrontier ? 'checked' : ''}`} onClick={() => setShowStrategyFrontier(!showStrategyFrontier)}></div>
-                                    <span className={`toggle-label ${showStrategyFrontier ? 'active' : ''}`}>{t('strategy_frontier')}</span>
-                                </div>
                             </div>
 
                             {analysisResult.warnings?.length > 0 && (
@@ -730,26 +817,118 @@ function PortfolioOptimizer() {
 
                                         {showAdvancedParams && (
                                             <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-6 grid grid-cols-2 gap-4">
+                                                <div className="form-group col-span-2">
+                                                    <label className="form-label text-xs">{t('strategy_mode')}</label>
+                                                    <select
+                                                        className="form-input text-sm"
+                                                        value={strategyMode}
+                                                        onChange={(e) => {
+                                                            setStrategyMode(e.target.value);
+                                                            localStorage.setItem('strategyMode', e.target.value);
+                                                        }}
+                                                    >
+                                                        <option value="optimized_kelly">{t('mode_optimized_kelly')}</option>
+                                                        <option value="legacy_linear">{t('mode_legacy_linear')}</option>
+                                                    </select>
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
+                                                </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('max_buy_mult')}</label>
                                                     <input className="form-input text-sm" type="number" step="0.1" value={maxBuyMultiplier} onChange={(e) => { setMaxBuyMultiplier(e.target.value); localStorage.setItem('maxBuyMultiplier', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_buy_mult_help')}</p>
                                                 </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('sell_threshold')}</label>
                                                     <input className="form-input text-sm" type="number" step="0.5" value={sellThreshold} onChange={(e) => { setSellThreshold(e.target.value); localStorage.setItem('sellThreshold', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('sell_threshold_help')}</p>
                                                 </div>
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">{t('min_weight')}</label>
+                                                    <label className="form-label text-xs">{t('min_equity_ratio')}</label>
                                                     <input className="form-input text-sm" type="number" step="5" value={minWeight} onChange={(e) => { setMinWeight(e.target.value); localStorage.setItem('minWeight', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('min_equity_ratio_help')}</p>
                                                 </div>
                                                 <div className="form-group">
-                                                    <label className="form-label text-xs">{t('max_weight')}</label>
+                                                    <label className="form-label text-xs">{t('max_equity_ratio')}</label>
                                                     <input className="form-input text-sm" type="number" step="5" value={maxWeight} onChange={(e) => { setMaxWeight(e.target.value); localStorage.setItem('maxWeight', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_equity_ratio_help')}</p>
                                                 </div>
-                                                <div className="form-group col-span-2">
-                                                    <label className="form-label text-xs">{t('ma_window')}</label>
-                                                    <input className="form-input text-sm" type="number" step="1" value={maWindow} onChange={(e) => { setMaWindow(e.target.value); localStorage.setItem('maWindow', e.target.value); }} />
-                                                </div>
+                                                {strategyMode === 'optimized_kelly' ? (
+                                                    <>
+                                                        <div className="form-group">
+                                                            <label className="form-label text-xs">{t('kelly_fraction')}</label>
+                                                            <input className="form-input text-sm" type="number" step="5" min="1" max="100" value={kellyFraction} onChange={(e) => { setKellyFraction(e.target.value); localStorage.setItem('kellyFraction', e.target.value); }} />
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('kelly_fraction_help')}</p>
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label className="form-label text-xs">{t('estimation_window')}</label>
+                                                            <input className="form-input text-sm" type="number" step="1" min="6" value={estimationWindow} onChange={(e) => { setEstimationWindow(e.target.value); localStorage.setItem('estimationWindow', e.target.value); }} />
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('estimation_window_help')}</p>
+                                                        </div>
+                                                        <div className="form-group col-span-2">
+                                                            <label className="form-label text-xs">{t('minimum_cash_reserve')}</label>
+                                                            <input className="form-input text-sm" type="number" step="100" min="0" value={minimumCashReserve} onChange={(e) => { setMinimumCashReserve(e.target.value); localStorage.setItem('minimumCashReserve', e.target.value); }} />
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('minimum_cash_reserve_help')}</p>
+                                                        </div>
+                                                        <div className="form-group col-span-2">
+                                                            <label className="form-label text-xs">{t('constraint_priority_note')}</label>
+                                                        </div>
+                                                        <div className="form-group col-span-2">
+                                                            <label className="form-label text-xs flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={enableCvarConstraint}
+                                                                    onChange={(e) => {
+                                                                        setEnableCvarConstraint(e.target.checked);
+                                                                        localStorage.setItem('enableCvarConstraint', JSON.stringify(e.target.checked));
+                                                                    }}
+                                                                />
+                                                                {t('enable_cvar_constraint')}
+                                                            </label>
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('enable_cvar_constraint_help')}</p>
+                                                        </div>
+                                                        {enableCvarConstraint && (
+                                                            <>
+                                                                <div className="form-group">
+                                                                    <label className="form-label text-xs">{t('cvar_confidence')}</label>
+                                                                    <input className="form-input text-sm" type="number" step="1" min="51" max="99.8" value={cvarConfidence} onChange={(e) => { setCvarConfidence(e.target.value); localStorage.setItem('cvarConfidence', e.target.value); }} />
+                                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('cvar_confidence_help')}</p>
+                                                                </div>
+                                                                <div className="form-group">
+                                                                    <label className="form-label text-xs">{t('cvar_limit')}</label>
+                                                                    <input className="form-input text-sm" type="number" step="0.5" min="0.1" max="99" value={cvarLimit} onChange={(e) => { setCvarLimit(e.target.value); localStorage.setItem('cvarLimit', e.target.value); }} />
+                                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('cvar_limit_help')}</p>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                        <div className="form-group col-span-2">
+                                                            <label className="form-label text-xs flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={enableDrawdownConstraint}
+                                                                    onChange={(e) => {
+                                                                        setEnableDrawdownConstraint(e.target.checked);
+                                                                        localStorage.setItem('enableDrawdownConstraint', JSON.stringify(e.target.checked));
+                                                                    }}
+                                                                />
+                                                                {t('enable_drawdown_constraint')}
+                                                            </label>
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('enable_drawdown_constraint_help')}</p>
+                                                        </div>
+                                                        {enableDrawdownConstraint && (
+                                                            <div className="form-group col-span-2">
+                                                                <label className="form-label text-xs">{t('max_drawdown_limit')}</label>
+                                                                <input className="form-input text-sm" type="number" step="1" min="1" max="99" value={maxDrawdownLimit} onChange={(e) => { setMaxDrawdownLimit(e.target.value); localStorage.setItem('maxDrawdownLimit', e.target.value); }} />
+                                                                <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_drawdown_limit_help')}</p>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <div className="form-group col-span-2">
+                                                        <label className="form-label text-xs">{t('ma_window')}</label>
+                                                        <input className="form-input text-sm" type="number" step="1" value={maWindow} onChange={(e) => { setMaWindow(e.target.value); localStorage.setItem('maWindow', e.target.value); }} />
+                                                        <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('ma_window_help')}</p>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
 
@@ -850,6 +1029,11 @@ function PortfolioOptimizer() {
                                         <div className="recommendation-stat-value" style={{ color: recommendationResult.market_signal === 'undervalued' ? '#34D399' : recommendationResult.market_signal === 'overvalued' ? '#F87171' : '#FBBF24' }}>
                                             {recommendationResult.market_signal === 'undervalued' ? t('signal_under') : recommendationResult.market_signal === 'overvalued' ? t('signal_over') : t('signal_neutral')}
                                         </div>
+                                        {recommendationResult.allocation_signal && (
+                                            <div className="text-xs text-slate-400 mt-1">
+                                                {t('allocation_signal')}: {getAllocationSignalLabel(recommendationResult.allocation_signal, t)}
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="recommendation-stat">
                                         <div className="recommendation-stat-label">{t('suggested_target')}</div>

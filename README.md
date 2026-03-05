@@ -64,20 +64,39 @@ bash start.sh
 ### 📈 Investment Strategy & Logic
 
 #### 1. Core Logic Comparison
-| Strategy        | Logic                                             | Target Audience                          |
-| :-------------- | :------------------------------------------------ | :--------------------------------------- |
-| **Lump Sum**    | Buy & Hold from Day 1.                            | One-time investors.                      |
-| **Monthly DCA** | Fixed amount every month regardless of price.     | Disciplined savers.                      |
-| **VA / Kelly**  | Dynamic buying/selling based on market valuation. | Value investors seeking lower drawdowns. |
+| Strategy                   | Logic                                                                 | Target Audience                          |
+| :------------------------- | :-------------------------------------------------------------------- | :--------------------------------------- |
+| **Lump Sum**               | Buy & Hold from Day 1.                                                | One-time investors.                      |
+| **Monthly DCA**            | Fixed amount every month regardless of price.                         | Disciplined savers.                      |
+| **Optimized Kelly (Default)** | Fractional Kelly with hard risk constraints and cash reserve floor. | Value investors with strict risk control.|
+| **Legacy Linear**          | Linear target ratio from Price/MA bias for backward compatibility.    | Users reproducing historical behavior.   |
 
-#### 2. Market Signals (Kelly/VA)
-Market valuation is judged by the deviation from the **250-day Moving Average (MA250)**.
+#### 2. Default Strategy Mode
+- **Current default**: `optimized_kelly`
+- **Compatibility mode**: `legacy_linear`
+- `legacy_linear` does **not** apply CVaR / drawdown hard constraints.
 
-- **🟢 Undervalued**: Price < MA250 * 0.9 (Aggressive buying).
-- **🟡 Neutral**: Price within ±10% of MA250.
-- **🔴 Overvalued**: Price > MA250 * 1.1 (Reduce or sell).
+#### 3. Risk Controls (Optimized Kelly)
+- **Fractional Kelly**: uses `kelly_fraction` to scale the full Kelly ratio.
+- **Cash Reserve Floor**: keeps `minimum_cash_reserve` outside risky allocation.
+- **CVaR Hard Constraint**: caps tail-risk by requiring CVaR loss to stay below `cvar_limit` (default confidence: 95%).
+- **Max Drawdown Hard Constraint**: caps historical drawdown loss by `max_drawdown_limit`.
+- **Constraint Priority**: hard constraints (CVaR / drawdown / cash floor) override the minimum equity ratio when conflicts happen.
 
-#### 3. Key Metrics
+#### 4. Key Parameters (Default)
+| Parameter | Default | Meaning |
+| :-- | :-- | :-- |
+| `strategy_mode` | `optimized_kelly` | strategy selector (`optimized_kelly` / `legacy_linear`) |
+| `kelly_fraction` | `0.5` | fractional Kelly scaling |
+| `estimation_window` | `36` | rolling monthly window for return/risk estimation |
+| `minimum_cash_reserve` | `0` | required cash kept out of risky assets |
+| `enable_cvar_constraint` | `true` | enable CVaR hard cap |
+| `cvar_confidence` | `0.95` | CVaR confidence level |
+| `cvar_limit` | `0.08` | CVaR loss upper bound |
+| `enable_drawdown_constraint` | `true` | enable drawdown hard cap |
+| `max_drawdown_limit` | `0.20` | drawdown loss upper bound |
+
+#### 5. Key Metrics
 - **Max Drawdown (NAV)**: The gold standard for risk. It treats your strategy like a mutual fund, calculating the drop in unit value regardless of cash inflows. **Focus on this!**
 - **Max Drawdown (Market Value)**: Includes your monthly deposits, which often masks actual losses. Use with caution.
 
@@ -143,20 +162,39 @@ bash start.sh
 ### 📈 投资策略与逻辑详解
 
 #### 1. 策略回测逻辑对比
-| 策略名称                | 核心逻辑                                       | 适用场景                   |
-| :---------------------- | :--------------------------------------------- | :------------------------- |
-| **一次全仓 (Lump Sum)** | 第一天全额买入并长期持有 (Buy & Hold)。        | 验证组合被动持有的表现。   |
-| **月月投 (DCA)**        | 每月固定日期投入固定金额，不做择时。           | 模拟工薪族强制储蓄。       |
-| **VA / Kelly 定投**     | 根据市场估值（价格 vs 均线）动态调整买卖金额。 | 追求"低买高卖"，平滑波动。 |
+| 策略名称 | 核心逻辑 | 适用场景 |
+| :-- | :-- | :-- |
+| **一次全仓 (Lump Sum)** | 第一天全额买入并长期持有 (Buy & Hold)。 | 验证组合被动持有表现。 |
+| **月月投 (DCA)** | 每月固定投入，不做择时。 | 模拟工薪族定投。 |
+| **优化 Kelly（默认）** | 分数 Kelly + 现金底线 + CVaR/回撤硬约束。 | 关注风险上限与资金安全垫。 |
+| **传统线性（兼容）** | 按 Price/MA 线性映射目标仓位。 | 复现历史行为与旧回测口径。 |
 
-#### 2. 市场信号判断
-使用 **价格与 250日均线 (MA250)** 的偏离程度判断水位。
+#### 2. 默认模式说明
+- **默认模式**：`optimized_kelly`
+- **兼容模式**：`legacy_linear`
+- `legacy_linear` **不启用** CVaR / 最大回撤硬约束。
 
-- **🟢 低估**: 价格 < MA250 * 0.9。建议加大投入。
-- **🟡 中性**: 价格在均线上下 10% 波动。正常定投。
-- **🔴 高估**: 价格 > MA250 * 1.1。建议减少买入甚至锁定利润。
+#### 3. 风控约束（optimized_kelly）
+- **分数 Kelly**：通过 `kelly_fraction` 控制仓位激进程度。
+- **现金底线**：`minimum_cash_reserve` 指定不参与风险投资的最低现金。
+- **CVaR 硬约束**：要求尾部损失（95% 置信下最差 5% 均值）不超过 `cvar_limit`。
+- **最大回撤硬约束**：要求历史回撤损失不超过 `max_drawdown_limit`。
+- **优先级**：当与最小权益仓位冲突时，硬约束优先。
 
-#### 3. 核心指标说明
+#### 4. 关键参数默认值
+| 参数 | 默认值 | 含义 |
+| :-- | :-- | :-- |
+| `strategy_mode` | `optimized_kelly` | 策略模式（`optimized_kelly` / `legacy_linear`） |
+| `kelly_fraction` | `0.5` | 分数 Kelly 系数 |
+| `estimation_window` | `36` | 风险收益估计窗口（月） |
+| `minimum_cash_reserve` | `0` | 现金保留底线 |
+| `enable_cvar_constraint` | `true` | 是否启用 CVaR 硬约束 |
+| `cvar_confidence` | `0.95` | CVaR 置信度 |
+| `cvar_limit` | `0.08` | CVaR 损失上限 |
+| `enable_drawdown_constraint` | `true` | 是否启用回撤硬约束 |
+| `max_drawdown_limit` | `0.20` | 最大回撤损失上限 |
+
+#### 5. 核心指标说明
 - **最大回撤 (净值化/NAV)**: **最重要的风险指标**。采用基金会计法，撇开资金进出影响，真实反映组合自身的抗风险能力。
 - **最大回撤 (市值)**: 受新资金投入影响较大，容易产生"从未亏损"的错觉。
 

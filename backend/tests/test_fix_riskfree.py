@@ -16,9 +16,10 @@ def test_riskfree_post_trade_calculation():
         # Mock Data: 1 Fund + RiskFree
         import pandas as pd
 
+        idx = pd.date_range(end=date.today(), periods=12, freq="ME")
         mock_df = pd.DataFrame(
-            {"FundA": [1.0] * 12},
-            index=pd.date_range(end=date.today(), periods=12, freq="M"),
+            {"FundA": [1.0] * len(idx)},
+            index=idx,
         )
 
         mock_get_data.return_value = (mock_df, {"FundA": "Test Fund"}, [])

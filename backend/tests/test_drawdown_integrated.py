@@ -34,6 +34,7 @@ def test_kelly_dca_drawdown_with_rising_market():
         weights,
         monthly_investment,
         ma_window=2,  # Short window to ensure signals stable
+        strategy_mode="legacy_linear",
     )
 
     print(f"Computed Kelly Drawdown: {results['max_drawdown_nav']}")

@@ -32,6 +32,15 @@ router = APIRouter()
 FUND_LIST_CACHE = None
 MAX_SINGLE_WEIGHT = 0.5  # prevent over-concentration in a single fund
 MIN_WEIGHT_THRESHOLD = 0.01  # drop tiny weights that are hard to execute
+DEFAULT_STRATEGY_MODE = "optimized_kelly"
+VALID_STRATEGY_MODES = {DEFAULT_STRATEGY_MODE, "legacy_linear"}
+DEFAULT_KELLY_FRACTION = 0.5
+DEFAULT_ESTIMATION_WINDOW = 36
+OPTIMIZED_SIGNAL_EPSILON = 0.02
+DEFAULT_CVAR_CONFIDENCE = 0.95
+DEFAULT_CVAR_LIMIT = 0.08
+DEFAULT_MAX_DRAWDOWN_LIMIT = 0.20
+RISK_RATIO_GRID_STEP = 0.005
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,9 +62,19 @@ class AnalysisRequest(BaseModel):
     sell_threshold: Optional[float] = 0.05
     min_weight: Optional[float] = None  # If None, use auto-tune. If set, use fixed.
     max_weight: Optional[float] = None
+    strategy_mode: str = DEFAULT_STRATEGY_MODE
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION
+    estimation_window: int = DEFAULT_ESTIMATION_WINDOW
+    minimum_cash_reserve: float = 0.0
+    enable_cvar_constraint: bool = True
+    cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE
+    cvar_limit: float = DEFAULT_CVAR_LIMIT
+    enable_drawdown_constraint: bool = True
+    max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     ma_window: int = 12
+    include_strategy_frontier: bool = False
     initial_lump_sum: Optional[float] = 10000.0
     monthly_investment: Optional[float] = 1000.0
 
@@ -73,6 +92,15 @@ class StrategyBacktestRequest(BaseModel):
     sell_threshold: float = 0.05
     min_weight: float = 0.3
     max_weight: float = 0.8
+    strategy_mode: str = DEFAULT_STRATEGY_MODE
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION
+    estimation_window: int = DEFAULT_ESTIMATION_WINDOW
+    minimum_cash_reserve: float = 0.0
+    enable_cvar_constraint: bool = True
+    cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE
+    cvar_limit: float = DEFAULT_CVAR_LIMIT
+    enable_drawdown_constraint: bool = True
+    max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     ma_window: int = 12
@@ -84,10 +112,20 @@ class CurrentRecommendationRequest(BaseModel):
     current_holdings: Dict[str, float] = {}
     current_cash: float = 0.0
     monthly_budget: float
+    risk_free_rate: Optional[float] = 0.0
     max_buy_multiplier: float = 3.0
     sell_threshold: float = 0.05
     min_weight: float = 0.3
     max_weight: float = 0.8
+    strategy_mode: str = DEFAULT_STRATEGY_MODE
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION
+    estimation_window: int = DEFAULT_ESTIMATION_WINDOW
+    minimum_cash_reserve: float = 0.0
+    enable_cvar_constraint: bool = True
+    cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE
+    cvar_limit: float = DEFAULT_CVAR_LIMIT
+    enable_drawdown_constraint: bool = True
+    max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     ma_window: int = 12
@@ -471,6 +509,15 @@ def simulate_strategy_frontier(
     sell_threshold=0.05,
     user_min_weight=None,
     user_max_weight=None,
+    strategy_mode=DEFAULT_STRATEGY_MODE,
+    kelly_fraction=DEFAULT_KELLY_FRACTION,
+    estimation_window=DEFAULT_ESTIMATION_WINDOW,
+    minimum_cash_reserve=0.0,
+    enable_cvar_constraint=True,
+    cvar_confidence=DEFAULT_CVAR_CONFIDENCE,
+    cvar_limit=DEFAULT_CVAR_LIMIT,
+    enable_drawdown_constraint=True,
+    max_drawdown_limit=DEFAULT_MAX_DRAWDOWN_LIMIT,
     initial_lump_sum=0.0,
     monthly_investment=1000.0,
 ):
@@ -526,6 +573,15 @@ def simulate_strategy_frontier(
             sell_fee=sell_fee or {},
             ma_window=ma_window,
             risk_free_rate=risk_free_rate or 0.0,
+            strategy_mode=strategy_mode,
+            kelly_fraction=kelly_fraction,
+            estimation_window=estimation_window,
+            minimum_cash_reserve=minimum_cash_reserve,
+            enable_cvar_constraint=enable_cvar_constraint,
+            cvar_confidence=cvar_confidence,
+            cvar_limit=cvar_limit,
+            enable_drawdown_constraint=enable_drawdown_constraint,
+            max_drawdown_limit=max_drawdown_limit,
         )
 
         # Strategy Return: Standard CAGR based on Strategy Unit NAV
@@ -545,15 +601,19 @@ def simulate_strategy_frontier(
         # However, to plot on the SAME chart, X-axis must remain "Annualized Volatility"
         # OR we plot a different chart.
         # If we plot on same chart, we should calculate the Strategy's Volatility.
-        # Strategy Volatility = StdDev of the strategy's monthly returns (Total Value change)
-
-        # Calculate monthly returns of the strategy portfolio
-        hist_vals = pd.Series(result["history"])
-        # Needs to be sorted by date? dictionary order is insertion order (Python 3.7+), valid.
-        # Convert index to datetime
-        hist_vals.index = pd.to_datetime(hist_vals.index)
-        strat_monthly_rets = hist_vals.pct_change().fillna(0)
-        strategy_volatility = strat_monthly_rets.std() * np.sqrt(12)
+        # Strategy volatility should use unit NAV returns (cashflow-neutral risk).
+        hist_source = result.get("unit_nav_history") or result.get("history", {})
+        hist_vals = pd.Series(hist_source, dtype=float)
+        if not hist_vals.empty:
+            hist_vals.index = pd.to_datetime(hist_vals.index)
+            hist_vals = hist_vals.sort_index()
+        strat_monthly_rets = hist_vals.pct_change().dropna()
+        if strat_monthly_rets.empty:
+            strategy_volatility = 0.0
+        else:
+            strategy_volatility = float(strat_monthly_rets.std(ddof=0) * np.sqrt(12))
+            if not np.isfinite(strategy_volatility):
+                strategy_volatility = 0.0
 
         max_dd = result["max_drawdown_nav"]  # Negative float
 
@@ -578,6 +638,21 @@ async def analyze_portfolio(request: AnalysisRequest):
             status_code=400, detail="请至少选择一只基金或添加无风险资产。"
         )
     try:
+        validate_strategy_params(
+            strategy_mode=request.strategy_mode,
+            min_weight=request.min_weight,
+            max_weight=request.max_weight,
+            kelly_fraction=request.kelly_fraction,
+            estimation_window=request.estimation_window,
+            minimum_cash_reserve=request.minimum_cash_reserve,
+            enable_cvar_constraint=request.enable_cvar_constraint,
+            cvar_confidence=request.cvar_confidence,
+            cvar_limit=request.cvar_limit,
+            enable_drawdown_constraint=request.enable_drawdown_constraint,
+            max_drawdown_limit=request.max_drawdown_limit,
+            allow_auto_bounds=True,
+        )
+
         fund_df, fund_names, warnings = get_fund_data(
             request.fund_codes,
             request.start_date,
@@ -601,23 +676,34 @@ async def analyze_portfolio(request: AnalysisRequest):
         start_date_str = fund_df.index.min().strftime("%Y-%m-%d")
         end_date_str = fund_df.index.max().strftime("%Y-%m-%d")
 
-        strategy_frontier_points = simulate_strategy_frontier(
-            efficient_frontier_points,
-            nav_adjusted,
-            request.fund_fees,
-            start_date_str,
-            end_date_str,
-            request.risk_free_rate,
-            ma_window=request.ma_window,
-            buy_fee=request.buy_fee,
-            sell_fee=request.sell_fee,
-            max_buy_multiplier=request.max_buy_multiplier,
-            sell_threshold=request.sell_threshold,
-            user_min_weight=request.min_weight,
-            user_max_weight=request.max_weight,
-            initial_lump_sum=request.initial_lump_sum or 0.0,
-            monthly_investment=request.monthly_investment or 1000.0,
-        )
+        strategy_frontier_points = []
+        if request.include_strategy_frontier:
+            strategy_frontier_points = simulate_strategy_frontier(
+                efficient_frontier_points,
+                nav_adjusted,
+                request.fund_fees,
+                start_date_str,
+                end_date_str,
+                request.risk_free_rate,
+                ma_window=request.ma_window,
+                buy_fee=request.buy_fee,
+                sell_fee=request.sell_fee,
+                max_buy_multiplier=request.max_buy_multiplier,
+                sell_threshold=request.sell_threshold,
+                user_min_weight=request.min_weight,
+                user_max_weight=request.max_weight,
+                strategy_mode=request.strategy_mode,
+                kelly_fraction=request.kelly_fraction,
+                estimation_window=request.estimation_window,
+                minimum_cash_reserve=request.minimum_cash_reserve,
+                enable_cvar_constraint=request.enable_cvar_constraint,
+                cvar_confidence=request.cvar_confidence,
+                cvar_limit=request.cvar_limit,
+                enable_drawdown_constraint=request.enable_drawdown_constraint,
+                max_drawdown_limit=request.max_drawdown_limit,
+                initial_lump_sum=request.initial_lump_sum or 0.0,
+                monthly_investment=request.monthly_investment or 1000.0,
+            )
 
         return {
             "efficient_frontier": efficient_frontier_points,
@@ -629,6 +715,8 @@ async def analyze_portfolio(request: AnalysisRequest):
             },
             "warnings": warnings,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -645,29 +733,336 @@ def calculate_target_ratio(current_price, ma_value, min_weight, max_weight):
 
     if bias <= low_bias:
         return max_weight, "undervalued"
-    elif bias >= high_bias:
+    if bias >= high_bias:
         return min_weight, "overvalued"
+
+    # Interpolate
+    # Ratio = Slope * (Bias - LowBias) + MaxWeight
+    slope = (min_weight - max_weight) / (high_bias - low_bias)
+    ratio = slope * (bias - low_bias) + max_weight
+    return ratio, infer_valuation_signal(current_price, ma_value)
+
+
+def infer_valuation_signal(current_price: float, ma_value: float) -> str:
+    if ma_value == 0:
+        return "neutral"
+    bias = current_price / ma_value
+    if bias < 0.95:
+        return "undervalued"
+    if bias > 1.05:
+        return "overvalued"
+    return "neutral"
+
+
+def validate_strategy_params(
+    *,
+    strategy_mode: str,
+    min_weight: Optional[float],
+    max_weight: Optional[float],
+    kelly_fraction: float,
+    estimation_window: int,
+    minimum_cash_reserve: float,
+    enable_cvar_constraint: bool,
+    cvar_confidence: float,
+    cvar_limit: float,
+    enable_drawdown_constraint: bool,
+    max_drawdown_limit: float,
+    allow_auto_bounds: bool = False,
+):
+    if strategy_mode not in VALID_STRATEGY_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"strategy_mode must be one of {sorted(VALID_STRATEGY_MODES)}",
+        )
+
+    if allow_auto_bounds and (min_weight is None) != (max_weight is None):
+        raise HTTPException(
+            status_code=400,
+            detail="min_weight and max_weight must either both be provided or both be null",
+        )
+
+    if min_weight is not None and not (0 <= min_weight <= 1):
+        raise HTTPException(status_code=400, detail="min_weight must be within [0, 1]")
+    if max_weight is not None and not (0 <= max_weight <= 1):
+        raise HTTPException(status_code=400, detail="max_weight must be within [0, 1]")
+    if min_weight is not None and max_weight is not None and min_weight > max_weight:
+        raise HTTPException(
+            status_code=400, detail="min_weight cannot be greater than max_weight"
+        )
+
+    if not (0 < kelly_fraction <= 1):
+        raise HTTPException(status_code=400, detail="kelly_fraction must be in (0, 1]")
+    if estimation_window < 6:
+        raise HTTPException(status_code=400, detail="estimation_window must be >= 6")
+    if minimum_cash_reserve < 0:
+        raise HTTPException(status_code=400, detail="minimum_cash_reserve must be >= 0")
+    if not isinstance(enable_cvar_constraint, bool):
+        raise HTTPException(
+            status_code=400, detail="enable_cvar_constraint must be a boolean"
+        )
+    if not isinstance(enable_drawdown_constraint, bool):
+        raise HTTPException(
+            status_code=400, detail="enable_drawdown_constraint must be a boolean"
+        )
+    if not (0.5 < cvar_confidence < 0.999):
+        raise HTTPException(
+            status_code=400, detail="cvar_confidence must be in (0.5, 0.999)"
+        )
+    if not (0 < cvar_limit < 1):
+        raise HTTPException(status_code=400, detail="cvar_limit must be in (0, 1)")
+    if not (0 < max_drawdown_limit < 1):
+        raise HTTPException(
+            status_code=400, detail="max_drawdown_limit must be in (0, 1)"
+        )
+
+
+def _infer_signal_from_bounds(
+    target_ratio: float, lower_bound: float, upper_bound: float, epsilon: float
+) -> str:
+    if upper_bound - lower_bound <= epsilon:
+        return "neutral"
+    if target_ratio >= upper_bound - epsilon:
+        return "undervalued"
+    if target_ratio <= lower_bound + epsilon:
+        return "overvalued"
+    return "neutral"
+
+
+def get_monthly_rf_return(risk_free_rate: float) -> float:
+    if risk_free_rate <= -1:
+        return -1.0
+    return (1 + risk_free_rate) ** (1 / 12) - 1
+
+
+def calculate_cvar_loss(returns: pd.Series, confidence: float) -> float:
+    if returns.empty:
+        return 0.0
+    losses = -returns.astype(float)
+    var_loss = float(losses.quantile(confidence))
+    tail_losses = losses[losses >= var_loss]
+    if tail_losses.empty:
+        return max(0.0, var_loss)
+    return max(0.0, float(tail_losses.mean()))
+
+
+def calculate_drawdown_from_returns(returns: pd.Series) -> float:
+    if returns.empty:
+        return 0.0
+    nav = (1 + returns.astype(float)).cumprod()
+    return abs(float(calculate_max_drawdown(nav)))
+
+
+def calculate_max_feasible_risk_ratio(
+    hist_risky_returns: pd.Series,
+    rf_monthly: float,
+    effective_upper: float,
+    enable_cvar_constraint: bool,
+    cvar_confidence: float,
+    cvar_limit: float,
+    enable_drawdown_constraint: bool,
+    max_drawdown_limit: float,
+):
+    if effective_upper <= 0:
+        return {
+            "max_feasible_ratio_by_cvar": 0.0,
+            "max_feasible_ratio_by_drawdown": 0.0,
+            "max_feasible_ratio_by_risk": 0.0,
+        }
+
+    if hist_risky_returns.empty:
+        return {
+            "max_feasible_ratio_by_cvar": float(effective_upper),
+            "max_feasible_ratio_by_drawdown": float(effective_upper),
+            "max_feasible_ratio_by_risk": float(effective_upper),
+        }
+
+    grid = np.arange(0.0, effective_upper + RISK_RATIO_GRID_STEP, RISK_RATIO_GRID_STEP)
+    if len(grid) == 0 or grid[-1] < effective_upper:
+        grid = np.append(grid, effective_upper)
+
+    max_feasible_cvar = 0.0
+    max_feasible_dd = 0.0
+    max_feasible_both = 0.0
+
+    for ratio in grid:
+        ratio = float(min(max(ratio, 0.0), effective_upper))
+        portfolio_returns = ratio * hist_risky_returns + (1 - ratio) * rf_monthly
+        cvar_loss = calculate_cvar_loss(portfolio_returns, cvar_confidence)
+        dd_loss = calculate_drawdown_from_returns(portfolio_returns)
+
+        cvar_ok = (not enable_cvar_constraint) or (cvar_loss <= cvar_limit)
+        dd_ok = (not enable_drawdown_constraint) or (dd_loss <= max_drawdown_limit)
+
+        if not enable_cvar_constraint or cvar_ok:
+            max_feasible_cvar = ratio
+        if not enable_drawdown_constraint or dd_ok:
+            max_feasible_dd = ratio
+        if cvar_ok and dd_ok:
+            max_feasible_both = ratio
+
+    max_feasible_risk = float(
+        min(max_feasible_both, effective_upper)
+        if (enable_cvar_constraint or enable_drawdown_constraint)
+        else effective_upper
+    )
+    return {
+        "max_feasible_ratio_by_cvar": float(
+            min(max_feasible_cvar, effective_upper)
+            if enable_cvar_constraint
+            else effective_upper
+        ),
+        "max_feasible_ratio_by_drawdown": float(
+            min(max_feasible_dd, effective_upper)
+            if enable_drawdown_constraint
+            else effective_upper
+        ),
+        "max_feasible_ratio_by_risk": max_feasible_risk,
+    }
+
+
+def calculate_target_ratio_optimized(
+    reference_portfolio_nav: pd.Series,
+    timestamp,
+    min_weight: float,
+    max_weight: float,
+    kelly_fraction: float,
+    estimation_window: int,
+    risk_free_rate: float,
+    total_wealth: float,
+    minimum_cash_reserve: float,
+    enable_cvar_constraint: bool,
+    cvar_confidence: float,
+    cvar_limit: float,
+    enable_drawdown_constraint: bool,
+    max_drawdown_limit: float,
+):
+    if total_wealth > 0:
+        cash_cap_ratio = float(
+            np.clip((total_wealth - minimum_cash_reserve) / total_wealth, 0.0, 1.0)
+        )
     else:
-        # Interpolate
-        # Ratio = Slope * (Bias - LowBias) + MaxWeight
-        slope = (min_weight - max_weight) / (high_bias - low_bias)
-        ratio = slope * (bias - low_bias) + max_weight
+        cash_cap_ratio = 0.0
 
-        # Signal name for return value clarification
-        if bias < 0.95:
-            signal = "undervalued"
-        elif bias > 1.05:
-            signal = "overvalued"
-        else:
-            signal = "neutral"
+    effective_upper = min(max_weight, cash_cap_ratio)
+    lower_bound = min_weight if effective_upper >= min_weight else effective_upper
 
-        return ratio, signal
+    hist = (
+        reference_portfolio_nav.loc[:timestamp]
+        .pct_change()
+        .dropna()
+        .tail(estimation_window)
+    )
+
+    optimizer_info = {
+        "mu_excess": None,
+        "sigma2": None,
+        "full_kelly": None,
+        "fractional_kelly": None,
+        "cash_cap_ratio": cash_cap_ratio,
+        "cash_constrained": effective_upper < max_weight,
+        "max_feasible_ratio_by_cvar": float(effective_upper),
+        "max_feasible_ratio_by_drawdown": float(effective_upper),
+        "max_feasible_ratio_by_risk": float(effective_upper),
+        "cvar_estimate_at_target": None,
+        "drawdown_estimate_at_target": None,
+        "constraint_applied": False,
+        "constraint_binding": "cash" if effective_upper < max_weight else "none",
+    }
+
+    if len(hist) < 3:
+        target_ratio = min(min_weight, effective_upper)
+        allocation_signal = _infer_signal_from_bounds(
+            target_ratio, lower_bound, effective_upper, OPTIMIZED_SIGNAL_EPSILON
+        )
+        return target_ratio, allocation_signal, optimizer_info
+
+    rf_monthly = get_monthly_rf_return(risk_free_rate)
+
+    mu_excess = float(hist.mean() - rf_monthly)
+    sigma2 = float(max(hist.var(ddof=1), 1e-6))
+    full_kelly = mu_excess / sigma2
+    fractional_kelly = kelly_fraction * full_kelly
+    risk_caps = calculate_max_feasible_risk_ratio(
+        hist_risky_returns=hist,
+        rf_monthly=rf_monthly,
+        effective_upper=effective_upper,
+        enable_cvar_constraint=enable_cvar_constraint,
+        cvar_confidence=cvar_confidence,
+        cvar_limit=cvar_limit,
+        enable_drawdown_constraint=enable_drawdown_constraint,
+        max_drawdown_limit=max_drawdown_limit,
+    )
+    final_upper = min(effective_upper, risk_caps["max_feasible_ratio_by_risk"])
+    lower_bound = min_weight if final_upper >= min_weight else 0.0
+    target_ratio = float(np.clip(fractional_kelly, lower_bound, final_upper))
+    target_portfolio_returns = target_ratio * hist + (1 - target_ratio) * rf_monthly
+
+    constraint_applied = enable_cvar_constraint or enable_drawdown_constraint
+    cvar_binding = (
+        enable_cvar_constraint
+        and risk_caps["max_feasible_ratio_by_cvar"] + 1e-9 < effective_upper
+    )
+    drawdown_binding = (
+        enable_drawdown_constraint
+        and risk_caps["max_feasible_ratio_by_drawdown"] + 1e-9 < effective_upper
+    )
+    if cvar_binding and drawdown_binding:
+        binding = "both"
+    elif cvar_binding:
+        binding = "cvar"
+    elif drawdown_binding:
+        binding = "drawdown"
+    elif effective_upper < max_weight:
+        binding = "cash"
+    else:
+        binding = "none"
+
+    optimizer_info.update(
+        {
+            "mu_excess": mu_excess,
+            "sigma2": sigma2,
+            "full_kelly": float(full_kelly),
+            "fractional_kelly": float(fractional_kelly),
+            "max_feasible_ratio_by_cvar": risk_caps["max_feasible_ratio_by_cvar"],
+            "max_feasible_ratio_by_drawdown": risk_caps[
+                "max_feasible_ratio_by_drawdown"
+            ],
+            "max_feasible_ratio_by_risk": risk_caps["max_feasible_ratio_by_risk"],
+            "cvar_estimate_at_target": float(
+                calculate_cvar_loss(target_portfolio_returns, cvar_confidence)
+            ),
+            "drawdown_estimate_at_target": float(
+                calculate_drawdown_from_returns(target_portfolio_returns)
+            ),
+            "constraint_applied": constraint_applied,
+            "constraint_binding": binding,
+        }
+    )
+
+    allocation_signal = _infer_signal_from_bounds(
+        target_ratio, lower_bound, final_upper, OPTIMIZED_SIGNAL_EPSILON
+    )
+    return target_ratio, allocation_signal, optimizer_info
 
 
 @router.post("/current_recommendation")
 async def get_current_recommendation(request: CurrentRecommendationRequest):
     """Calculate current investment recommendation based on latest market data."""
     try:
+        validate_strategy_params(
+            strategy_mode=request.strategy_mode,
+            min_weight=request.min_weight,
+            max_weight=request.max_weight,
+            kelly_fraction=request.kelly_fraction,
+            estimation_window=request.estimation_window,
+            minimum_cash_reserve=request.minimum_cash_reserve,
+            enable_cvar_constraint=request.enable_cvar_constraint,
+            cvar_confidence=request.cvar_confidence,
+            cvar_limit=request.cvar_limit,
+            enable_drawdown_constraint=request.enable_drawdown_constraint,
+            max_drawdown_limit=request.max_drawdown_limit,
+        )
+
         # Fetch latest fund data (last 12 months for MA calculation)
         end_date_obj = date.today()
         start_date_obj = date(
@@ -699,9 +1094,6 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         latest_nav = float(reference_portfolio_nav.iloc[-1])
         current_price = latest_nav
         current_ma = float(ma_series.iloc[-1])
-        target_ratio, market_signal = calculate_target_ratio(
-            current_price, current_ma, request.min_weight, request.max_weight
-        )
 
         # Calculate current equity value
         # Handle 'RiskFree' if passed (filter it out for equity calc)
@@ -720,6 +1112,34 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             + request.monthly_budget
         )
 
+        market_signal = infer_valuation_signal(current_price, current_ma)
+        if request.strategy_mode == "legacy_linear":
+            target_ratio, allocation_signal = calculate_target_ratio(
+                current_price, current_ma, request.min_weight, request.max_weight
+            )
+            optimizer_info = None
+        else:
+            (
+                target_ratio,
+                allocation_signal,
+                optimizer_info,
+            ) = calculate_target_ratio_optimized(
+                reference_portfolio_nav=reference_portfolio_nav,
+                timestamp=reference_portfolio_nav.index[-1],
+                min_weight=request.min_weight,
+                max_weight=request.max_weight,
+                kelly_fraction=request.kelly_fraction,
+                estimation_window=request.estimation_window,
+                risk_free_rate=request.risk_free_rate or 0.0,
+                total_wealth=total_wealth_projected,
+                minimum_cash_reserve=request.minimum_cash_reserve,
+                enable_cvar_constraint=request.enable_cvar_constraint,
+                cvar_confidence=request.cvar_confidence,
+                cvar_limit=request.cvar_limit,
+                enable_drawdown_constraint=request.enable_drawdown_constraint,
+                max_drawdown_limit=request.max_drawdown_limit,
+            )
+
         # Calculate target equity value
         target_equity_value = total_wealth_projected * target_ratio
 
@@ -731,7 +1151,13 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
 
         if gap > 0:
             # Calculate available cash including new budget
-            available_cash = risk_free_balance + current_cash + request.monthly_budget
+            available_cash = max(
+                0.0,
+                risk_free_balance
+                + current_cash
+                + request.monthly_budget
+                - request.minimum_cash_reserve,
+            )
 
             # Pre-calculate average buy fee rate based on weights
             total_weight = weights.sum()
@@ -886,6 +1312,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
 
         return {
             "market_signal": market_signal,
+            "allocation_signal": allocation_signal,
             "target_equity_ratio": target_ratio,
             "current_equity_value": current_equity_value,
             "current_risk_free_value": risk_free_balance,
@@ -897,9 +1324,13 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "latest_nav": latest_nav,
             "ma_value": float(current_ma),
             "current_price": float(current_price),
+            "strategy_mode": request.strategy_mode,
+            "optimizer_info": optimizer_info,
             "fund_names": fund_names,
             "fund_advice": fund_advice,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -918,6 +1349,15 @@ def backtest_kelly_dca(
     sell_fee: Dict[str, float] = None,
     ma_window: int = 12,
     risk_free_rate: float = 0.0,
+    strategy_mode: str = DEFAULT_STRATEGY_MODE,
+    kelly_fraction: float = DEFAULT_KELLY_FRACTION,
+    estimation_window: int = DEFAULT_ESTIMATION_WINDOW,
+    minimum_cash_reserve: float = 0.0,
+    enable_cvar_constraint: bool = True,
+    cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE,
+    cvar_limit: float = DEFAULT_CVAR_LIMIT,
+    enable_drawdown_constraint: bool = True,
+    max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT,
 ):
     """
     Advanced Value Averaging (VA) Strategy.
@@ -925,6 +1365,20 @@ def backtest_kelly_dca(
     it implements Value Averaging by dynamically adjusting investment based on
     market valuation (Price vs MA bias).
     """
+    validate_strategy_params(
+        strategy_mode=strategy_mode,
+        min_weight=min_weight,
+        max_weight=max_weight,
+        kelly_fraction=kelly_fraction,
+        estimation_window=estimation_window,
+        minimum_cash_reserve=minimum_cash_reserve,
+        enable_cvar_constraint=enable_cvar_constraint,
+        cvar_confidence=cvar_confidence,
+        cvar_limit=cvar_limit,
+        enable_drawdown_constraint=enable_drawdown_constraint,
+        max_drawdown_limit=max_drawdown_limit,
+    )
+
     weights = pd.Series(weights_dict).reindex(df_nav.columns).fillna(0)
 
     # Initialize holdings from initial_holdings if provided
@@ -969,6 +1423,9 @@ def backtest_kelly_dca(
         total_units = accumulated_investment  # Initial units at 1.0
 
     unit_nav_history = {}
+    market_signal_current = "neutral"
+    allocation_signal_current = "neutral"
+    optimizer_info_current = None
 
     for timestamp, nav_row in df_nav.iterrows():
         # 0. Apply Interest to Cash Balance (Start of Month)
@@ -1000,12 +1457,36 @@ def backtest_kelly_dca(
         current_equity_value = (total_shares * nav_row).sum()
         total_wealth = current_equity_value + cash_balance
 
-        # 3. Target Ratio (Linear)
+        # 3. Target Ratio
         current_price = reference_portfolio_nav.loc[timestamp]
         current_ma = ma_series.loc[timestamp]
-        target_ratio, market_signal_current = calculate_target_ratio(
-            current_price, current_ma, min_weight, max_weight
-        )
+        market_signal_current = infer_valuation_signal(current_price, current_ma)
+        if strategy_mode == "legacy_linear":
+            target_ratio, allocation_signal_current = calculate_target_ratio(
+                current_price, current_ma, min_weight, max_weight
+            )
+            optimizer_info_current = None
+        else:
+            (
+                target_ratio,
+                allocation_signal_current,
+                optimizer_info_current,
+            ) = calculate_target_ratio_optimized(
+                reference_portfolio_nav=reference_portfolio_nav,
+                timestamp=timestamp,
+                min_weight=min_weight,
+                max_weight=max_weight,
+                kelly_fraction=kelly_fraction,
+                estimation_window=estimation_window,
+                risk_free_rate=risk_free_rate,
+                total_wealth=total_wealth,
+                minimum_cash_reserve=minimum_cash_reserve,
+                enable_cvar_constraint=enable_cvar_constraint,
+                cvar_confidence=cvar_confidence,
+                cvar_limit=cvar_limit,
+                enable_drawdown_constraint=enable_drawdown_constraint,
+                max_drawdown_limit=max_drawdown_limit,
+            )
 
         # 4. Rebalance Step
         target_equity_value = total_wealth * target_ratio
@@ -1027,10 +1508,11 @@ def backtest_kelly_dca(
                     / total_weight
                 )
 
-            # Calculate max buyable amount considering fees
+            # Calculate max buyable amount considering fees and cash reserve floor
             # buy_amount * (1 + avg_fee) <= cash_balance
+            cash_for_buy = max(0.0, cash_balance - minimum_cash_reserve)
             max_buyable_with_fees = (
-                cash_balance / (1 + avg_fee) if avg_fee < 1 else cash_balance
+                cash_for_buy / (1 + avg_fee) if avg_fee < 1 else cash_for_buy
             )
 
             buy_amount = min(diff, max_buyable_with_fees, buy_limit)
@@ -1105,8 +1587,14 @@ def backtest_kelly_dca(
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
         "market_signal": market_signal_current,
+        "allocation_signal": allocation_signal_current,
+        "strategy_mode": strategy_mode,
+        "optimizer_info": optimizer_info_current,
         "history": {
             date.strftime("%Y-%m"): value for date, value in portfolio_history.items()
+        },
+        "unit_nav_history": {
+            date.strftime("%Y-%m"): value for date, value in unit_nav_history.items()
         },
         "attribution": {
             date.strftime("%Y-%m"): value for date, value in attribution_history.items()
@@ -1117,6 +1605,20 @@ def backtest_kelly_dca(
 @router.post("/backtest_strategies")
 async def run_strategy_backtests(request: StrategyBacktestRequest):
     try:
+        validate_strategy_params(
+            strategy_mode=request.strategy_mode,
+            min_weight=request.min_weight,
+            max_weight=request.max_weight,
+            kelly_fraction=request.kelly_fraction,
+            estimation_window=request.estimation_window,
+            minimum_cash_reserve=request.minimum_cash_reserve,
+            enable_cvar_constraint=request.enable_cvar_constraint,
+            cvar_confidence=request.cvar_confidence,
+            cvar_limit=request.cvar_limit,
+            enable_drawdown_constraint=request.enable_drawdown_constraint,
+            max_drawdown_limit=request.max_drawdown_limit,
+        )
+
         fund_df, _, _ = get_fund_data(
             request.fund_codes,
             request.start_date,
@@ -1162,6 +1664,15 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             request.sell_fee,
             request.ma_window,
             risk_free_rate=request.risk_free_rate or 0.0,
+            strategy_mode=request.strategy_mode,
+            kelly_fraction=request.kelly_fraction,
+            estimation_window=request.estimation_window,
+            minimum_cash_reserve=request.minimum_cash_reserve,
+            enable_cvar_constraint=request.enable_cvar_constraint,
+            cvar_confidence=request.cvar_confidence,
+            cvar_limit=request.cvar_limit,
+            enable_drawdown_constraint=request.enable_drawdown_constraint,
+            max_drawdown_limit=request.max_drawdown_limit,
         )
 
         return {
@@ -1169,6 +1680,8 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             "dca": dca_results,
             "kelly_dca": kelly_results,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

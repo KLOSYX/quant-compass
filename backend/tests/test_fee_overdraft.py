@@ -36,6 +36,7 @@ def test_recommendation_fee_overdraft_prevention():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
+            "strategy_mode": "legacy_linear",
             "buy_fee": {"000001": 0.1},  # 10% fee
             "max_buy_multiplier": 5.0,  # High enough not to be the bottleneck
             "max_weight": 1.0,  # Ensure gap can reach 1000

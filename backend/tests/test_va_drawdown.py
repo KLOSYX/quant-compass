@@ -25,6 +25,7 @@ def test_va_short_selling_prevention():
         sell_threshold=0.0,  # Immediate sell
         min_weight=0.0,  # Target 0% equity
         max_weight=0.8,
+        strategy_mode="legacy_linear",
     )
 
     # Check that in every month, attribution for 000001 is NOT negative

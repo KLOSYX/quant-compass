@@ -34,6 +34,7 @@ def test_recommendation_insufficient_cash():
             "current_cash": 500.0,  # Only ¥500 cash
             "monthly_budget": 1000,  # ¥1000 budget
             "max_buy_multiplier": 3.0,  # Would allow ¥3000 theoretically
+            "strategy_mode": "legacy_linear",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -69,6 +70,7 @@ def test_recommendation_zero_cash():
             "current_holdings": {"000001": 5000},
             "current_cash": 0.0,  # No cash
             "monthly_budget": 0,  # No budget
+            "strategy_mode": "legacy_linear",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -78,6 +80,251 @@ def test_recommendation_zero_cash():
 
         # With zero cash and zero budget, should recommend 0
         assert data["recommended_monthly_investment"] == 0.0
+
+
+def test_recommendation_respects_minimum_cash_reserve():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    data = {"000001": [1.0] * len(dates)}
+    mock_df = pd.DataFrame(data, index=dates)
+    mock_df.iloc[-1] = mock_df.iloc[-1] * 0.5
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 0},
+            "current_cash": 0.0,
+            "monthly_budget": 1000,
+            "minimum_cash_reserve": 900,
+            "max_weight": 1.0,
+        }
+
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+
+        # Buy cash cannot exceed budget minus reserve.
+        assert data["recommended_monthly_investment"] <= 100.0 + 1e-6
+
+
+def test_recommendation_zero_target_when_reserve_exceeds_wealth():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    data = {"000001": [1.0] * len(dates)}
+    mock_df = pd.DataFrame(data, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 200},
+            "current_cash": 100.0,
+            "monthly_budget": 0,
+            "minimum_cash_reserve": 1000.0,
+        }
+
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["target_equity_ratio"] == 0.0
+        assert data["recommended_monthly_investment"] == 0.0
+
+
+def test_cvar_constraint_caps_target_ratio():
+    dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
+    nav_values = [
+        1.0,
+        1.5,
+        0.7,
+        1.6,
+        0.6,
+        1.8,
+        0.55,
+        1.9,
+        0.5,
+        2.0,
+        0.48,
+        2.2,
+    ] * 3
+    mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 0},
+            "current_cash": 0.0,
+            "monthly_budget": 1000,
+            "min_weight": 0.0,
+            "max_weight": 1.0,
+            "enable_cvar_constraint": True,
+            "cvar_confidence": 0.95,
+            "cvar_limit": 0.03,
+            "enable_drawdown_constraint": False,
+        }
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+        info = data["optimizer_info"]
+        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_cvar"] + 1e-9
+        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+
+
+def test_drawdown_constraint_caps_target_ratio():
+    dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
+    nav_values = [
+        1.0,
+        1.4,
+        0.8,
+        1.6,
+        0.75,
+        1.7,
+        0.72,
+        1.8,
+        0.7,
+        1.9,
+        0.68,
+        2.0,
+    ] * 3
+    mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 0},
+            "current_cash": 0.0,
+            "monthly_budget": 1000,
+            "min_weight": 0.0,
+            "max_weight": 1.0,
+            "enable_cvar_constraint": False,
+            "enable_drawdown_constraint": True,
+            "max_drawdown_limit": 0.05,
+        }
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+        info = data["optimizer_info"]
+        assert (
+            data["target_equity_ratio"] <= info["max_feasible_ratio_by_drawdown"] + 1e-9
+        )
+        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+
+
+def test_combined_constraints_use_tighter_cap():
+    dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
+    nav_values = [
+        1.0,
+        1.5,
+        0.7,
+        1.7,
+        0.65,
+        1.8,
+        0.6,
+        1.9,
+        0.55,
+        2.0,
+        0.5,
+        2.2,
+    ] * 3
+    mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 0},
+            "current_cash": 0.0,
+            "monthly_budget": 1000,
+            "min_weight": 0.0,
+            "max_weight": 1.0,
+            "enable_cvar_constraint": True,
+            "cvar_limit": 0.04,
+            "enable_drawdown_constraint": True,
+            "max_drawdown_limit": 0.08,
+        }
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+        info = data["optimizer_info"]
+        tighter = min(
+            info["max_feasible_ratio_by_cvar"], info["max_feasible_ratio_by_drawdown"]
+        )
+        assert info["max_feasible_ratio_by_risk"] <= tighter + 1e-9
+        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+
+
+def test_hard_constraints_override_min_weight():
+    dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
+    nav_values = [
+        1.0,
+        1.6,
+        0.6,
+        1.7,
+        0.55,
+        1.8,
+        0.5,
+        1.9,
+        0.45,
+        2.0,
+        0.4,
+        2.2,
+    ] * 3
+    mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+        request_data = {
+            "fund_codes": ["000001"],
+            "weights": {"000001": 1.0},
+            "current_holdings": {"000001": 0},
+            "current_cash": 0.0,
+            "monthly_budget": 1000,
+            "min_weight": 0.9,
+            "max_weight": 1.0,
+            "enable_cvar_constraint": True,
+            "cvar_limit": 0.02,
+            "enable_drawdown_constraint": True,
+            "max_drawdown_limit": 0.04,
+        }
+        response = client.post("/api/current_recommendation", json=request_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["target_equity_ratio"] < 0.9
+        assert (
+            data["target_equity_ratio"]
+            <= data["optimizer_info"]["max_feasible_ratio_by_risk"] + 1e-9
+        )
 
 
 def test_backtest_fee_no_overdraft():
@@ -122,6 +369,26 @@ def test_backtest_fee_no_overdraft():
         assert risk_free >= -0.01, f"Cash balance went negative in {month}: {risk_free}"
 
 
+def test_backtest_respects_minimum_cash_reserve_floor():
+    from main import backtest_kelly_dca
+
+    dates = pd.date_range(start="2023-01-31", end="2023-06-30", freq="ME")
+    nav_data = {"000001": [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]}
+    df_nav = pd.DataFrame(nav_data, index=dates)
+
+    result = backtest_kelly_dca(
+        df_nav,
+        {"000001": 1.0},
+        1000.0,
+        initial_holdings={"RiskFree": 800.0},
+        max_buy_multiplier=5.0,
+        minimum_cash_reserve=500.0,
+    )
+
+    for attribution in result["attribution"].values():
+        assert attribution.get("RiskFree", 0) >= 499.99
+
+
 def test_fee_calculation_accuracy():
     """Test that fees are calculated accurately in recommendations."""
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
@@ -143,6 +410,7 @@ def test_fee_calculation_accuracy():
             "current_cash": 0.0,
             "monthly_budget": 1000,
             "buy_fee": {"000001": 0.015},  # 1.5% buy fee
+            "strategy_mode": "legacy_linear",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -197,6 +465,7 @@ def test_sell_threshold_boundary():
             "current_cash": 0.0,
             "monthly_budget": 1000,
             "sell_threshold": 0.05,  # 5% threshold
+            "strategy_mode": "legacy_linear",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -278,6 +547,7 @@ def test_recommendation_sell_proceeds_not_double_counted():
             "sell_threshold": 0.01,
             "min_weight": 0.3,
             "max_weight": 0.8,
+            "strategy_mode": "legacy_linear",
             "sell_fee": {"000001": 0.01},  # 1% sell fee
         }
 
