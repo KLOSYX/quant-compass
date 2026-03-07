@@ -238,8 +238,6 @@ function PortfolioOptimizer() {
         setAnalysisResult(null);
         setSelectedPoint(null);
         setStrategyResult(null);
-        setMonthlyInvestment('');
-
 
         try {
             const feesAsFloats = Object.entries(fundFees).reduce((acc, [code, fee]) => {
@@ -1064,17 +1062,17 @@ function PortfolioOptimizer() {
                                             {recommendationResult.fund_advice.map(advice => {
                                                 const actionMeta = getAdviceActionMeta(advice.action, t);
                                                 return (
-                                                <tr key={advice.code}>
-                                                    <td>{advice.name}</td>
-                                                    <td>
-                                                        <span className={`action-badge ${actionMeta.badgeClass}`}>
-                                                            {actionMeta.label}
-                                                        </span>
-                                                    </td>
-                                                    <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
-                                                    <td className="font-mono">¥{advice.target_holding?.toFixed(2) ?? '--'}</td>
-                                                    <td className="text-slate-500 text-xs">{advice.reason}</td>
-                                                </tr>
+                                                    <tr key={advice.code}>
+                                                        <td>{advice.name}</td>
+                                                        <td>
+                                                            <span className={`action-badge ${actionMeta.badgeClass}`}>
+                                                                {actionMeta.label}
+                                                            </span>
+                                                        </td>
+                                                        <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
+                                                        <td className="font-mono">¥{advice.target_holding?.toFixed(2) ?? '--'}</td>
+                                                        <td className="text-slate-500 text-xs">{advice.reason}</td>
+                                                    </tr>
                                                 );
                                             })}
                                         </tbody>

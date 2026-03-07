@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import { Activity, LayoutDashboard, TrendingUp, Wallet, Globe } from 'lucide-react';
+import { Activity, Wallet, Globe } from 'lucide-react';
 import './App.css';
-import ValueInvesting from './ValueInvesting';
-import DualMovingAverage from './DualMovingAverage';
 import PortfolioOptimizer from './PortfolioOptimizer';
 import { useLanguage } from './LanguageContext';
 
@@ -35,27 +33,13 @@ function App() {
                             <Wallet size={18} />
                             {t('nav_portfolio')}
                         </button>
-                        <button
-                            className={`nav-tab flex items-center gap-2 ${activeTab === 'value-investing' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('value-investing')}
-                        >
-                            <LayoutDashboard size={18} />
-                            {t('nav_value')}
-                        </button>
-                        <button
-                            className={`nav-tab flex items-center gap-2 ${activeTab === 'dual-moving-average' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('dual-moving-average')}
-                        >
-                            <TrendingUp size={18} />
-                            {t('nav_dma')}
-                        </button>
+
                     </nav>
                 </div>
 
                 <div className="tab-content full-width">
                     {activeTab === 'portfolio-optimizer' && <PortfolioOptimizer />}
-                    {activeTab === 'value-investing' && <ValueInvesting />}
-                    {activeTab === 'dual-moving-average' && <DualMovingAverage />}
+
                 </div>
             </main>
         </div>
