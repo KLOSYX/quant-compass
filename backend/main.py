@@ -20,11 +20,9 @@ from core.constants import (
     DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_DRAWDOWN_LIMIT,
     DEFAULT_STRATEGY_MODE,
-    MAX_SINGLE_WEIGHT,
     MIN_WALK_FORWARD_TRAIN_MONTHS,
     MIN_WEIGHT_THRESHOLD,
     OPTIMIZED_SIGNAL_EPSILON,
-    RETURN_SHRINKAGE,
     RISK_RATIO_GRID_STEP,
     VALID_STRATEGY_MODES,
 )
@@ -32,6 +30,23 @@ from core.data import (
     ensure_risk_free_column,
     get_fund_data,
     prepare_nav_for_analysis,
+)
+from core.portfolio import (
+    append_fee_warnings,
+    decompose_selected_weights,
+    get_frontier_initial_guess,
+    get_frontier_weight_bounds,
+    get_max_return_weights,
+    normalize_risky_weights,
+    normalize_weights,
+    shrink_frontier_expected_returns,
+    validate_weight_universe,
+)
+from core.risk import (
+    calculate_asset_diagnostics,
+    calculate_cvar_loss,
+    calculate_drawdown_from_returns,
+    calculate_max_drawdown,
 )
 
 # Set a default timeout for all requests globally to prevent hanging
@@ -144,153 +159,6 @@ class CurrentRecommendationRequest(BaseModel):
     ma_window: int = 12
 
 
-def normalize_weights(
-    weights_dict: Dict[str, float],
-    columns: List[str],
-    *,
-    include_risk_free: bool = True,
-) -> pd.Series:
-    weights = pd.Series(weights_dict, dtype=float).reindex(columns).fillna(0.0)
-    weights = weights.clip(lower=0.0)
-    if not include_risk_free and "RiskFree" in weights.index:
-        weights["RiskFree"] = 0.0
-    total = float(weights.sum())
-    if total > 0:
-        weights /= total
-    return weights
-
-
-def normalize_risky_weights(
-    weights_dict: Dict[str, float], columns: List[str]
-) -> pd.Series:
-    risky_columns = [code for code in columns if code != "RiskFree"]
-    return normalize_weights(weights_dict, risky_columns, include_risk_free=False)
-
-
-def validate_weight_universe(
-    weights_dict: Dict[str, float], columns: List[str]
-) -> None:
-    unknown_positive_assets = sorted(
-        code
-        for code, weight in weights_dict.items()
-        if code not in columns and float(weight) > 1e-12
-    )
-    if unknown_positive_assets:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "weights contain assets outside the current analysis universe: "
-                + ", ".join(unknown_positive_assets)
-            ),
-        )
-
-    available_positive_weight = sum(
-        max(float(weights_dict.get(code, 0.0)), 0.0) for code in columns
-    )
-    if available_positive_weight <= 1e-12:
-        raise HTTPException(
-            status_code=400,
-            detail="weights must allocate positive weight to at least one available asset",
-        )
-
-
-def decompose_selected_weights(
-    weights_dict: Dict[str, float], columns: List[str]
-) -> Dict[str, pd.Series | float]:
-    validate_weight_universe(weights_dict, columns)
-    full_weights = normalize_weights(weights_dict, columns)
-    base_risk_free_ratio = float(full_weights.get("RiskFree", 0.0))
-    base_risky_ratio = float(full_weights.drop("RiskFree", errors="ignore").sum())
-    risky_weights = normalize_risky_weights(full_weights.to_dict(), columns)
-    return {
-        "full_weights": full_weights,
-        "risky_weights": risky_weights,
-        "base_risky_ratio": base_risky_ratio,
-        "base_risk_free_ratio": base_risk_free_ratio,
-    }
-
-
-def get_effective_single_weight_cap(num_assets: int) -> float:
-    if num_assets <= 1:
-        return 1.0
-    return max(MAX_SINGLE_WEIGHT, 1.0 / num_assets)
-
-
-def get_frontier_weight_bounds(columns: List[str]) -> tuple[tuple[float, float], ...]:
-    num_assets = len(columns)
-    max_single_weight = get_effective_single_weight_cap(num_assets)
-    bounds = []
-    for code in columns:
-        if code == "RiskFree":
-            bounds.append((0.0, 1.0))
-        else:
-            bounds.append((0.0, max_single_weight))
-    return tuple(bounds)
-
-
-def get_frontier_initial_guess(columns: List[str]) -> np.ndarray:
-    if "RiskFree" in columns:
-        guess = np.zeros(len(columns), dtype=float)
-        guess[columns.index("RiskFree")] = 1.0
-        return guess
-    return np.full(len(columns), 1.0 / len(columns), dtype=float)
-
-
-def get_max_return_weights(
-    expected_returns: pd.Series, bounds: tuple[tuple[float, float], ...]
-) -> np.ndarray:
-    weights = np.zeros(len(expected_returns), dtype=float)
-    remaining = 1.0
-    ranked_indices = sorted(
-        range(len(expected_returns)),
-        key=lambda idx: float(expected_returns.iloc[idx]),
-        reverse=True,
-    )
-
-    for idx in ranked_indices:
-        lower, upper = bounds[idx]
-        if remaining <= 0:
-            break
-        alloc = min(upper, remaining)
-        weights[idx] = max(lower, alloc)
-        remaining -= weights[idx]
-
-    if remaining > 1e-12:
-        for idx, (lower, upper) in enumerate(bounds):
-            available = upper - weights[idx]
-            if available <= 0:
-                continue
-            extra = min(available, remaining)
-            weights[idx] += extra
-            remaining -= extra
-            if remaining <= 1e-12:
-                break
-
-    total = weights.sum()
-    if total > 0:
-        weights /= total
-    return weights
-
-
-def append_fee_warnings(
-    warnings: List[str],
-    fund_fees: Dict[str, float],
-    *,
-    apply_fund_fees_to_history: bool,
-):
-    has_nonzero_fee = any(abs(fee) > 1e-12 for fee in fund_fees.values())
-    if not has_nonzero_fee:
-        return
-    if apply_fund_fees_to_history:
-        warnings.append(
-            "已按输入管理费对历史净值额外扣减。若使用的是公募基金单位净值，这通常会重复计入管理费。"
-        )
-    else:
-        warnings.append(
-            "历史回测默认不额外扣减管理费，因为基金单位净值通常已包含管理费影响。"
-        )
-
-
 def append_frontier_stability_warnings(
     warnings: List[str], df_nav: pd.DataFrame, fund_fees: Dict[str, float]
 ):
@@ -328,132 +196,6 @@ def append_frontier_stability_warnings(
         warnings.append(
             f"前沿中位点在前后半样本的权重漂移约为 {weight_drift * 100:.1f}%，说明基础配置对时间窗口较敏感。"
         )
-
-
-def shrink_frontier_expected_returns(raw_expected_returns: pd.Series) -> pd.Series:
-    expected_returns = raw_expected_returns.copy()
-    if "RiskFree" in raw_expected_returns.index:
-        risky_expected_returns = raw_expected_returns.drop("RiskFree")
-        if not risky_expected_returns.empty:
-            expected_returns.loc[risky_expected_returns.index] = (
-                (1 - RETURN_SHRINKAGE) * risky_expected_returns
-                + RETURN_SHRINKAGE * risky_expected_returns.mean()
-            )
-        expected_returns["RiskFree"] = raw_expected_returns["RiskFree"]
-    else:
-        expected_returns = (
-            1 - RETURN_SHRINKAGE
-        ) * raw_expected_returns + RETURN_SHRINKAGE * raw_expected_returns.mean()
-    return expected_returns
-
-
-def calculate_nav_max_drawdown(nav_series: pd.Series) -> float:
-    nav = pd.Series(nav_series, dtype=float)
-    if nav.empty:
-        return 0.0
-    rolling_max = nav.cummax().replace(0, np.nan)
-    drawdowns = nav / rolling_max - 1
-    finite_drawdowns = drawdowns.replace([np.inf, -np.inf], np.nan).dropna()
-    if finite_drawdowns.empty:
-        return 0.0
-    return float(abs(finite_drawdowns.min()))
-
-
-def calculate_asset_diagnostics(
-    df_nav: pd.DataFrame,
-    fund_names: Dict[str, str],
-    efficient_frontier: List[Dict],
-) -> List[Dict]:
-    if df_nav.empty:
-        return []
-
-    monthly_returns = df_nav.pct_change().fillna(0)
-    raw_expected_returns = monthly_returns.mean()
-    optimizer_expected_returns = shrink_frontier_expected_returns(raw_expected_returns)
-    annualized_volatility = monthly_returns.std(ddof=0) * np.sqrt(12)
-    years = max((df_nav.index[-1] - df_nav.index[0]).days / 365.25, 0.0)
-    frontier_weight_series = {
-        code: np.array(
-            [float(point["weights"].get(code, 0.0)) for point in efficient_frontier],
-            dtype=float,
-        )
-        for code in df_nav.columns
-    }
-
-    rf_return = float(optimizer_expected_returns.get("RiskFree", 0.0) * 12)
-    risky_sharpes = {}
-    for code in df_nav.columns:
-        if code == "RiskFree":
-            continue
-        vol = float(annualized_volatility.get(code, 0.0))
-        excess_return = float(
-            optimizer_expected_returns.get(code, 0.0) * 12 - rf_return
-        )
-        if vol <= 1e-12:
-            risky_sharpes[code] = float("inf") if excess_return > 0 else 0.0
-        else:
-            risky_sharpes[code] = excess_return / vol
-
-    sharpe_rank = {
-        code: rank
-        for rank, (code, _) in enumerate(
-            sorted(risky_sharpes.items(), key=lambda item: item[1], reverse=True),
-            start=1,
-        )
-    }
-
-    diagnostics = []
-    for code in df_nav.columns:
-        nav_series = df_nav[code]
-        total_return = float(nav_series.iloc[-1] / nav_series.iloc[0] - 1)
-        sample_cagr = (
-            float((nav_series.iloc[-1] / nav_series.iloc[0]) ** (1 / years) - 1)
-            if years > 0 and nav_series.iloc[0] > 0 and nav_series.iloc[-1] > 0
-            else 0.0
-        )
-        ann_return = float(raw_expected_returns.get(code, 0.0) * 12)
-        optimizer_return = float(optimizer_expected_returns.get(code, 0.0) * 12)
-        vol = float(annualized_volatility.get(code, 0.0))
-        max_drawdown = calculate_nav_max_drawdown(nav_series)
-        weights = frontier_weight_series.get(code, np.array([], dtype=float))
-        points_used = int(np.sum(weights > 1e-6))
-        max_weight = float(weights.max()) if weights.size else 0.0
-        avg_weight = float(weights.mean()) if weights.size else 0.0
-        sharpe = None if code == "RiskFree" else float(risky_sharpes.get(code, 0.0))
-        rank = None if code == "RiskFree" else sharpe_rank.get(code)
-
-        if code == "RiskFree":
-            status = "risk_free_anchor"
-        elif points_used > 0:
-            status = "selected_on_frontier"
-        elif optimizer_return <= rf_return + 1e-9:
-            status = "below_risk_free"
-        elif rank is not None and rank > 1:
-            status = "dominated_by_higher_sharpe_assets"
-        else:
-            status = "unused_in_sample"
-
-        diagnostics.append(
-            {
-                "code": code,
-                "name": fund_names.get(code, code),
-                "sample_total_return": total_return,
-                "sample_cagr": sample_cagr,
-                "sample_annualized_return": ann_return,
-                "optimizer_expected_return": optimizer_return,
-                "annualized_volatility": vol,
-                "max_drawdown": max_drawdown,
-                "sharpe_vs_riskfree": sharpe,
-                "sharpe_rank": rank,
-                "frontier_points_used": points_used,
-                "frontier_point_count": len(efficient_frontier),
-                "max_frontier_weight": max_weight,
-                "avg_frontier_weight": avg_weight,
-                "status": status,
-            }
-        )
-
-    return diagnostics
 
 
 def calculate_efficient_frontier(df, fund_fees):
@@ -703,15 +445,6 @@ def calculate_frontier_walk_forward_metrics(
         )
 
     return summarized_metrics
-
-
-def calculate_max_drawdown(nav_series: pd.Series) -> float:
-    """Return max drawdown as a decimal (e.g., 0.2 for -20%)."""
-    if nav_series.empty:
-        return 0.0
-    rolling_max = nav_series.cummax()
-    drawdowns = (nav_series - rolling_max) / rolling_max
-    return drawdowns.min()
 
 
 def backtest_lump_sum(
@@ -1245,24 +978,6 @@ def get_monthly_rf_return(risk_free_rate: float) -> float:
     if risk_free_rate <= -1:
         return -1.0
     return (1 + risk_free_rate) ** (1 / 12) - 1
-
-
-def calculate_cvar_loss(returns: pd.Series, confidence: float) -> float:
-    if returns.empty:
-        return 0.0
-    losses = -returns.astype(float)
-    var_loss = float(losses.quantile(confidence))
-    tail_losses = losses[losses >= var_loss]
-    if tail_losses.empty:
-        return max(0.0, var_loss)
-    return max(0.0, float(tail_losses.mean()))
-
-
-def calculate_drawdown_from_returns(returns: pd.Series) -> float:
-    if returns.empty:
-        return 0.0
-    nav = (1 + returns.astype(float)).cumprod()
-    return abs(float(calculate_max_drawdown(nav)))
 
 
 def calculate_max_feasible_risk_ratio(
