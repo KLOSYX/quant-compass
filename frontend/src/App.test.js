@@ -1,8 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
+import { LanguageProvider } from './LanguageContext';
 
-test('renders learn react link', () => {
-  render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+test('renders portfolio optimizer tab', () => {
+  render(
+    <LanguageProvider>
+      <App />
+    </LanguageProvider>
+  );
+  const tabElement = screen.getByRole('button', { name: /Portfolio Optimizer/ });
+  expect(tabElement).toBeInTheDocument();
 });

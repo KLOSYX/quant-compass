@@ -43,22 +43,11 @@ def test_riskfree_post_trade_calculation():
         riskfree_advice = next(
             item for item in result["fund_advice"] if item["code"] == "RiskFree"
         )
+        cash_advice = next(
+            item for item in result["fund_advice"] if item["code"] == "Cash"
+        )
 
-        print(f"RiskFree Ideal: {riskfree_advice['ideal_holding']}")
-        print(f"RiskFree Target (Post-Trade): {riskfree_advice['target_holding']}")
-
-        # Verification
-        # Total Wealth Projected = 1000 (RF) + 0 (Equity) + 0 (Cash) + 100 (Budget) = 1100.
-        # Target Equity Ratio = 0.5 (Neutral).
-        # Target Equity Value = 550.
-        # Gap = 550 - 0 = 550.
-        # Max Buy = Budget * 1.0 = 100.
-        # Buy Amount = 100.
-        # Net Cash Flow = Budget(100) - Buy(100) = 0.
-        # Current RF + Cash = 1000.
-        # Post-Trade RF should be 1000 + 0 = 1000.
-        # Ideal RF should be 1100 - 550 = 550.
-
-        assert riskfree_advice["ideal_holding"] == 550.0
-        assert riskfree_advice["target_holding"] == 550.0  # Should match Ideal
-        # assert riskfree_advice["target_holding"] != riskfree_advice["ideal_holding"]
+        assert riskfree_advice["ideal_holding"] == 0.0
+        assert riskfree_advice["target_holding"] == 0.0
+        assert riskfree_advice["action"] == "Sell"
+        assert cash_advice["target_holding"] == 550.0

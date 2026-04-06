@@ -108,13 +108,101 @@ def test_current_recommendation_success():
         risk_free = next(
             (item for item in advice_list if item["code"] == "RiskFree"), None
         )
-        assert risk_free is not None
-        assert risk_free["name"] == "无风险资产 (现金/理财)"
-        # Target RiskFree = Total Wealth (8000 + 2000 + 1000 = 11000) - Target Equity (11000 * ratio)
-        # Ratio is high (0.8) because undervalued
+        cash_row = next((item for item in advice_list if item["code"] == "Cash"), None)
+        assert risk_free is None
+        assert cash_row is not None
+        assert cash_row["name"] == "现金"
+        # No explicit RiskFree asset was selected, so all non-risky allocation stays in cash.
         expected_target_equity = 11000 * data["target_equity_ratio"]
-        expected_risk_free = 11000 - expected_target_equity
-        assert abs(risk_free["target_holding"] - expected_risk_free) < 1.0
+        expected_cash = 11000 - expected_target_equity
+        assert abs(cash_row["target_holding"] - expected_cash) < 1.0
+
+
+def test_backtest_strategies_supports_cash_sleeve_without_explicit_risk_free_rate():
+    dates = pd.date_range(start="2024-01-01", periods=14, freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0 - 0.02 * i for i in range(14)]}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        conservative = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 0.6, "RiskFree": 0.4},
+                "fund_fees": {"000001": 0.0},
+                "start_date": "2024-01-01",
+                "end_date": "2025-02-28",
+                "monthly_investment": 1000,
+                "risk_free_rate": None,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+        aggressive = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "fund_fees": {"000001": 0.0},
+                "start_date": "2024-01-01",
+                "end_date": "2025-02-28",
+                "monthly_investment": 1000,
+                "risk_free_rate": None,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+
+    assert conservative.status_code == 200
+    assert aggressive.status_code == 200
+    conservative_payload = conservative.json()
+    aggressive_payload = aggressive.json()
+    assert (
+        conservative_payload["lump_sum"]["final_value"]
+        > aggressive_payload["lump_sum"]["final_value"]
+    )
+
+
+def test_current_recommendation_separates_riskfree_and_cash_rows():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 0.6, "RiskFree": 0.4},
+                "current_holdings": {"000001": 0.0, "RiskFree": 1000.0},
+                "current_cash": 100.0,
+                "monthly_budget": 100.0,
+                "max_buy_multiplier": 10.0,
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+                "minimum_cash_reserve": 100.0,
+                "strategy_mode": "legacy_linear",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    advice_list = payload["fund_advice"]
+    risk_free = next(item for item in advice_list if item["code"] == "RiskFree")
+    cash_row = next(item for item in advice_list if item["code"] == "Cash")
+
+    assert abs(payload["target_equity_value"] - 360.0) < 1e-9
+    assert abs(payload["target_risk_free_value"] - 740.0) < 1e-9
+    assert abs(payload["target_cash_value"] - 100.0) < 1e-9
+    assert risk_free["action"] == "Sell"
+    assert abs(risk_free["amount"] - 260.0) < 1e-9
+    assert abs(risk_free["target_holding"] - 740.0) < 1e-9
+    assert cash_row["action"] == "持有"
+    assert abs(cash_row["target_holding"] - 100.0) < 1e-9
 
 
 def test_current_recommendation_default_optimized_mode():
@@ -153,6 +241,99 @@ def test_current_recommendation_default_optimized_mode():
         assert "drawdown_estimate_at_target" in payload["optimizer_info"]
         assert "constraint_applied" in payload["optimizer_info"]
         assert "constraint_binding" in payload["optimizer_info"]
+
+
+def test_current_recommendation_changes_with_selected_riskfree_sleeve():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+    mock_df.iloc[-1] = 0.5
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        conservative = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 0.6, "RiskFree": 0.4},
+                "current_holdings": {"000001": 5000},
+                "current_cash": 2000.0,
+                "monthly_budget": 1000,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+        aggressive = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 5000},
+                "current_cash": 2000.0,
+                "monthly_budget": 1000,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+
+    assert conservative.status_code == 200
+    assert aggressive.status_code == 200
+    conservative_payload = conservative.json()
+    aggressive_payload = aggressive.json()
+    assert (
+        conservative_payload["target_equity_value"]
+        < aggressive_payload["target_equity_value"]
+    )
+
+
+def test_current_recommendation_optimized_mode_changes_with_selected_riskfree_sleeve():
+    dates = pd.date_range(start="2023-01-01", periods=18, freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0 * (1.01**i) for i in range(len(dates))]}, index=dates
+    )
+
+    with patch("main.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        conservative = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 0.6, "RiskFree": 0.4},
+                "current_holdings": {"000001": 5000},
+                "current_cash": 2000.0,
+                "monthly_budget": 1000,
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+                "enable_cvar_constraint": False,
+                "enable_drawdown_constraint": False,
+            },
+        )
+        aggressive = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 5000},
+                "current_cash": 2000.0,
+                "monthly_budget": 1000,
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+                "enable_cvar_constraint": False,
+                "enable_drawdown_constraint": False,
+            },
+        )
+
+    assert conservative.status_code == 200
+    assert aggressive.status_code == 200
+    conservative_payload = conservative.json()
+    aggressive_payload = aggressive.json()
+    assert (
+        conservative_payload["target_equity_value"]
+        < aggressive_payload["target_equity_value"]
+    )
 
 
 def test_optimized_mode_uses_valuation_market_signal():
@@ -263,3 +444,51 @@ def test_legacy_mode_ignores_risk_constraints():
         payload = response.json()
         assert payload["market_signal"] == "undervalued"
         assert abs(payload["target_equity_ratio"] - 0.8) < 1e-9
+
+
+def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
+    with (
+        patch("akshare.fund_name_em", return_value=mock_fund_name_em()),
+        patch(
+            "akshare.fund_open_fund_info_em", side_effect=mock_fund_open_fund_info_em
+        ),
+    ):
+        conservative = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 0.36, "000002": 0.24, "RiskFree": 0.40},
+                "fund_fees": {"000001": 0.015, "000002": 0.01},
+                "start_date": "2023-01-15",
+                "end_date": "2023-03-15",
+                "monthly_investment": 1000,
+                "risk_free_rate": 0.02,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+        aggressive = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 0.6, "000002": 0.4},
+                "fund_fees": {"000001": 0.015, "000002": 0.01},
+                "start_date": "2023-01-15",
+                "end_date": "2023-03-15",
+                "monthly_investment": 1000,
+                "risk_free_rate": 0.02,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.5,
+                "max_weight": 0.5,
+            },
+        )
+
+    assert conservative.status_code == 200
+    assert aggressive.status_code == 200
+    conservative_payload = conservative.json()
+    aggressive_payload = aggressive.json()
+    assert (
+        conservative_payload["kelly_dca"]["final_value"]
+        < aggressive_payload["kelly_dca"]["final_value"]
+    )

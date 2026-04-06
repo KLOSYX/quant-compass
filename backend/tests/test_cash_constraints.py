@@ -567,10 +567,10 @@ def test_recommendation_sell_proceeds_not_double_counted():
         # Correct Deposit Amount should be exactly 6930.
 
         advice_list = data["fund_advice"]
-        risk_free = next(item for item in advice_list if item["code"] == "RiskFree")
+        cash_row = next(item for item in advice_list if item["code"] == "Cash")
 
-        assert risk_free["action"] == "存入"
-        assert abs(risk_free["amount"] - 6930.0) < 0.1
+        assert cash_row["action"] == "存入"
+        assert abs(cash_row["amount"] - 6930.0) < 0.1
 
 
 if __name__ == "__main__":

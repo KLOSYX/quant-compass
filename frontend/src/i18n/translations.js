@@ -19,7 +19,8 @@ export const translations = {
         header_fund: '基金',
         header_buy: '申购%',
         header_sell: '赎回%',
-        header_manage: '管理%',
+        header_manage: '管理%*',
+        manage_fee_note: '*默认不在历史回测中重复扣减管理费，避免对基金单位净值双重计费。',
 
         // PortfolioOptimizer - Backtest Params
         backtest_title: '回测参数',
@@ -74,11 +75,24 @@ export const translations = {
 
 
         // PortfolioOptimizer - Strategy Details
-        strategy_title: '3. 策略详情 & 模拟配置',
+        strategy_title: '3. 当前持仓与预算',
         selected_metrics: '选定组合指标',
+        recommended_point: '系统推荐点',
+        auto_selected_plan: '系统已自动选择更稳健的基础组合',
+        manual_override_hint: '如需手动调整，可点击上方图表中的其他点覆盖当前组合。',
+        view_base_portfolio: '查看基础组合',
+        hide_base_portfolio: '隐藏基础组合',
+        base_portfolio: '基础组合',
         expected_return: '预期回报',
         expected_risk: '预期风险',
         target_weight: '目标权重',
+        effective_risky_weight: '基础组合风险资产权重',
+        walk_forward_return: '样本外年化',
+        walk_forward_vol: '样本外波动',
+        walk_forward_sharpe: '样本外 Sharpe',
+        walk_forward_max_dd: '样本外最大回撤',
+        walk_forward_stability: '权重稳定性',
+        robust_score: '稳健分数',
 
         // PortfolioOptimizer - Inputs
         current_holdings_monthly: '当前持仓与月预算',
@@ -212,7 +226,8 @@ export const translations = {
         header_fund: 'Fund',
         header_buy: 'Buy Fee %',
         header_sell: 'Sell Fee %',
-        header_manage: 'Mgmt Fee %',
+        header_manage: 'Mgmt Fee %*',
+        manage_fee_note: '*Management fees are not deducted again from historical fund NAV by default.',
 
         // PortfolioOptimizer - Backtest Params
         backtest_title: 'Backtest Parameters',
@@ -265,11 +280,24 @@ export const translations = {
         strat_actual_kelly: 'VA/Kelly (Actual) Attribution',
 
         // PortfolioOptimizer - Strategy Details
-        strategy_title: '3. Strategy Details & Simulation',
+        strategy_title: '3. Current Holdings & Budget',
         selected_metrics: 'Selected Portfolio Metrics',
+        recommended_point: 'Recommended Point',
+        auto_selected_plan: 'The system automatically selected the more robust base portfolio',
+        manual_override_hint: 'You can still click another point on the chart above to override it.',
+        view_base_portfolio: 'View Base Portfolio',
+        hide_base_portfolio: 'Hide Base Portfolio',
+        base_portfolio: 'Base Portfolio',
         expected_return: 'Expected Return',
         expected_risk: 'Expected Risk',
         target_weight: 'Target Weight',
+        effective_risky_weight: 'Base Risky-Asset Weights',
+        walk_forward_return: 'Walk-Forward Ann.',
+        walk_forward_vol: 'Walk-Forward Vol.',
+        walk_forward_sharpe: 'Walk-Forward Sharpe',
+        walk_forward_max_dd: 'Walk-Forward Max Drawdown',
+        walk_forward_stability: 'Weight Stability',
+        robust_score: 'Robust Score',
 
         // PortfolioOptimizer - Inputs
         current_holdings_monthly: 'Current Holdings & Monthly Budget',

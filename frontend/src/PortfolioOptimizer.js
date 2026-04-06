@@ -125,9 +125,23 @@ function PortfolioOptimizer() {
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState({ analysis: false, strategy: false, recommendation: false });
     const [budgetError, setBudgetError] = useState('');
+    const [showPortfolioDetails, setShowPortfolioDetails] = useState(false);
     const [showBacktestNote, setShowBacktestNote] = useState(false);
     const [backtestNotePinned, setBacktestNotePinned] = useState(false);
     const backtestNoteRef = useRef(null);
+
+    const clearAnalysisOutputs = () => {
+        setAnalysisResult(null);
+        setSelectedPoint(null);
+        setStrategyResult(null);
+        setRecommendationResult(null);
+        setShowPortfolioDetails(false);
+    };
+
+    const getOptionalRiskFreeRate = () => {
+        if (!hasRiskFree) return null;
+        return (parseFloat(riskFreeRate) || 0) / 100;
+    };
 
     useEffect(() => {
         const savedFundCodes = localStorage.getItem('fundCodes');
@@ -162,6 +176,7 @@ function PortfolioOptimizer() {
         if (currentInput && !fundCodes.includes(currentInput)) {
             const newFundCodes = [...fundCodes, currentInput.trim()];
             const newFundFees = { ...fundFees, [currentInput.trim()]: '' };
+            clearAnalysisOutputs();
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
@@ -171,6 +186,7 @@ function PortfolioOptimizer() {
     };
 
     const handleRemoveAsset = (codeToRemove) => {
+        clearAnalysisOutputs();
         if (codeToRemove === 'RiskFree') {
             setHasRiskFree(false);
             localStorage.setItem('hasRiskFree', JSON.stringify(false));
@@ -186,6 +202,7 @@ function PortfolioOptimizer() {
     };
 
     const handleAddRiskFree = () => {
+        clearAnalysisOutputs();
         setHasRiskFree(true);
         localStorage.setItem('hasRiskFree', JSON.stringify(true));
     };
@@ -209,6 +226,7 @@ function PortfolioOptimizer() {
     };
 
     const handleRiskFreeRateChange = (rate) => {
+        clearAnalysisOutputs();
         setRiskFreeRate(rate);
         localStorage.setItem('riskFreeRate', rate);
     }
@@ -225,6 +243,7 @@ function PortfolioOptimizer() {
         start.setFullYear(start.getFullYear() - years);
         const startStr = getISODate(start);
         const endStr = getISODate(end);
+        clearAnalysisOutputs();
         setStartDate(startStr);
         setEndDate(endStr);
         localStorage.setItem('startDate', startStr);
@@ -262,7 +281,7 @@ function PortfolioOptimizer() {
                 fund_fees: feesAsFloats,
                 start_date: startDate,
                 end_date: endDate,
-                risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : null,
+                risk_free_rate: getOptionalRiskFreeRate(),
                 strategy_mode: strategyMode,
                 kelly_fraction: (Number.isNaN(parsedKellyFraction) ? 50 : parsedKellyFraction) / 100,
                 estimation_window: Number.isNaN(parsedEstimationWindow) ? 36 : parsedEstimationWindow,
@@ -281,7 +300,12 @@ function PortfolioOptimizer() {
 
             const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) throw new Error((await response.json()).detail);
-            setAnalysisResult(await response.json());
+            const result = await response.json();
+            setAnalysisResult(result);
+            if (result.recommended_point_index !== null && result.recommended_point_index !== undefined) {
+                setSelectedPoint(result.efficient_frontier[result.recommended_point_index] || null);
+            }
+            setShowPortfolioDetails(false);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -314,13 +338,12 @@ function PortfolioOptimizer() {
                 });
             }
 
-            // ACTUAL: User's real holdings + cash as RiskFree
+            // ACTUAL: User's real holdings + separate cash balance
             const actualHoldings = Object.entries(initialHoldings).reduce((acc, [code, val]) => {
                 const v = parseFloat(val);
                 if (v > 0) acc[code] = v;
                 return acc;
             }, {});
-            if (totalCash > 0) actualHoldings['RiskFree'] = (actualHoldings['RiskFree'] || 0) + totalCash;
 
             const basePayload = {
                 fund_codes: fundCodes,
@@ -329,7 +352,7 @@ function PortfolioOptimizer() {
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
-                risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : null,
+                risk_free_rate: getOptionalRiskFreeRate(),
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
@@ -368,8 +391,8 @@ function PortfolioOptimizer() {
 
             // Run BOTH backtests in parallel
             const [idealRes, actualRes] = await Promise.all([
-                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings }) }),
-                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings }) })
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings, initial_cash: 0 }) }),
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings, initial_cash: totalCash }) })
             ]);
 
             const idealData = await idealRes.json();
@@ -412,7 +435,7 @@ function PortfolioOptimizer() {
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
                 monthly_budget: parseFloat(monthlyInvestment) || 0,
-                risk_free_rate: hasRiskFree ? (parseFloat(riskFreeRate) || 0) / 100 : 0,
+                risk_free_rate: getOptionalRiskFreeRate(),
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
@@ -483,8 +506,10 @@ function PortfolioOptimizer() {
 
 
     const onChartClick = (params) => {
-        const [chartRisk, chartReturn, weights] = params.data;
-        setSelectedPoint({ risk: chartRisk, return: chartReturn, weights });
+        const selected = analysisResult?.efficient_frontier?.[params.dataIndex];
+        if (!selected) return;
+        const { risk: chartRisk } = selected;
+        setSelectedPoint(selected);
         setStrategyResult(null);
 
         // Auto-tune parameters based on risk/return profile
@@ -570,6 +595,12 @@ function PortfolioOptimizer() {
         const assetCodes = Object.keys(firstDateData);
 
         const getAssetName = (code) => {
+            if (code === 'Cash') {
+                return t('current_cash');
+            }
+            if (code === 'RiskFree') {
+                return analysisResult?.fund_names?.[code] || t('risk_free_asset');
+            }
             if (analysisResult && analysisResult.fund_names && analysisResult.fund_names[code]) {
                 return analysisResult.fund_names[code];
             }
@@ -682,6 +713,7 @@ function PortfolioOptimizer() {
                                                 <div>{t('header_manage')}</div>
                                                 <div></div>
                                             </div>
+                                            <p className="text-[11px] text-slate-400 mb-2">{t('manage_fee_note')}</p>
                                             {fundCodes.map(code => (
                                                 <div key={code} className="asset-item-row">
                                                     <span className="asset-name" title={analysisResult?.fund_names[code] || code}>{analysisResult?.fund_names[code] || code}</span>
@@ -706,11 +738,11 @@ function PortfolioOptimizer() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="form-group">
                                     <label className="form-label">{t('start_date')}</label>
-                                    <input type="date" className="form-input" value={startDate} onChange={(e) => { setStartDate(e.target.value); localStorage.setItem('startDate', e.target.value); }} />
+                                    <input type="date" className="form-input" value={startDate} onChange={(e) => { clearAnalysisOutputs(); setStartDate(e.target.value); localStorage.setItem('startDate', e.target.value); }} />
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">{t('end_date')}</label>
-                                    <input type="date" className="form-input" value={endDate} onChange={(e) => { setEndDate(e.target.value); localStorage.setItem('endDate', e.target.value); }} />
+                                    <input type="date" className="form-input" value={endDate} onChange={(e) => { clearAnalysisOutputs(); setEndDate(e.target.value); localStorage.setItem('endDate', e.target.value); }} />
                                 </div>
                             </div>
                             <div className="flex gap-2 mt-4">
@@ -753,34 +785,48 @@ function PortfolioOptimizer() {
                                 <div className="card-header">
                                     <h3 className="card-title"><Settings size={20} className="card-icon" /> {t('strategy_title')}</h3>
                                 </div>
-                                <div className="grid grid-cols-12 gap-8">
-                                    <div className="col-span-4">
-                                        <div className="p-4 bg-slate-900/50 rounded-lg mb-6">
-                                            <h4 className="text-slate-400 text-sm uppercase mb-4">{t('selected_metrics')}</h4>
-                                            <div className="flex justify-between mb-2">
-                                                <span>{t('expected_return')}</span>
-                                                <span className="text-emerald-400 font-mono font-bold">{(selectedPoint.return * 100).toFixed(2)}%</span>
+                                <div className="space-y-6">
+                                    <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                        {analysisResult?.recommended_point_index !== null && analysisResult?.recommended_point_index !== undefined && analysisResult?.efficient_frontier?.[analysisResult.recommended_point_index] === selectedPoint && (
+                                            <div className="text-sm text-sky-400 font-medium mb-2">{t('auto_selected_plan')}</div>
+                                        )}
+                                        <p className="text-sm text-slate-300">{t('manual_override_hint')}</p>
+                                        <button className="text-link-btn mt-3" onClick={() => setShowPortfolioDetails(prev => !prev)}>
+                                            <Settings size={14} />
+                                            {showPortfolioDetails ? t('hide_base_portfolio') : t('view_base_portfolio')}
+                                        </button>
+                                        {showPortfolioDetails && (
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+                                                <div className="p-4 bg-slate-950/40 rounded-lg">
+                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('selected_metrics')}</h4>
+                                                    <div className="flex justify-between mb-2">
+                                                        <span>{t('expected_return')}</span>
+                                                        <span className="text-emerald-400 font-mono font-bold">{(selectedPoint.return * 100).toFixed(2)}%</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>{t('expected_risk')}</span>
+                                                        <span className="text-amber-400 font-mono font-bold">{(selectedPoint.risk * 100).toFixed(2)}%</span>
+                                                    </div>
+                                                </div>
+                                                <div className="p-4 bg-slate-950/40 rounded-lg">
+                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('base_portfolio')}</h4>
+                                                    <table className="data-table">
+                                                        <thead><tr><th>{t('header_fund')}</th><th>{t('effective_risky_weight')}</th></tr></thead>
+                                                        <tbody>
+                                                            {Object.entries(selectedPoint.weights || {}).map(([code, weight]) => (
+                                                                <tr key={`effective-${code}`}>
+                                                                    <td className="text-sm">{analysisResult.fund_names[code] || code} <span className="text-slate-500 text-xs">({code})</span></td>
+                                                                    <td className="font-mono text-sky-400">{(weight * 100).toFixed(2)}%</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span>{t('expected_risk')}</span>
-                                                <span className="text-amber-400 font-mono font-bold">{(selectedPoint.risk * 100).toFixed(2)}%</span>
-                                            </div>
-                                        </div>
-
-                                        <table className="data-table">
-                                            <thead><tr><th>{t('header_fund')}</th><th>{t('target_weight')}</th></tr></thead>
-                                            <tbody>
-                                                {Object.entries(selectedPoint.weights).map(([code, weight]) => (
-                                                    <tr key={code}>
-                                                        <td className="text-sm">{analysisResult.fund_names[code]} <span className="text-slate-500 text-xs">({code})</span></td>
-                                                        <td className="font-mono text-emerald-400">{(weight * 100).toFixed(2)}%</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                        )}
                                     </div>
 
-                                    <div className="col-span-8">
+                                    <div>
                                         <h5 className="text-lg font-medium mb-4 flex items-center gap-2"><DollarSign size={18} className="text-sky-400" /> {t('current_holdings_monthly')}</h5>
 
                                         <div className="grid grid-cols-2 gap-6 mb-6">

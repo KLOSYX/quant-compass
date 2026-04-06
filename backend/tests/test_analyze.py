@@ -31,6 +31,7 @@ def test_analyze_portfolio_success():
     assert "fund_names" in data
     assert "backtest_period" in data
     assert len(data["efficient_frontier"]) > 0
+    assert any("全样本静态估计" in warning for warning in data["warnings"])
     assert data["fund_names"] == {
         "000001": "Fund A",
         "000002": "Fund B",
@@ -71,3 +72,22 @@ def test_analyze_with_risk_free_only():
     assert "return" in data["efficient_frontier"][0]
     assert data["efficient_frontier"][0]["weights"] == {"RiskFree": 1.0}
     assert data["fund_names"] == {"RiskFree": "无风险资产"}
+
+
+def test_analyze_warns_management_fee_not_reapplied_by_default():
+    with (
+        patch("akshare.fund_name_em", return_value=mock_fund_name_em()),
+        patch(
+            "akshare.fund_open_fund_info_em", side_effect=mock_fund_open_fund_info_em
+        ),
+    ):
+        request_data = {
+            "fund_codes": ["000001"],
+            "fund_fees": {"000001": 0.015},
+            "start_date": "2023-01-15",
+            "end_date": "2023-03-15",
+        }
+        response = client.post("/api/analyze", json=request_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert any("默认不额外扣减管理费" in warning for warning in data["warnings"])

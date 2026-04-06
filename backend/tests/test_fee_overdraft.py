@@ -56,7 +56,8 @@ def test_recommendation_fee_overdraft_prevention():
 
         # Verify fund advice amount is also 1000
         assert data["fund_advice"][0]["amount"] == 1000
-        assert data["fund_advice"][1]["action"] == "持有"  # RiskFree row
+        assert data["fund_advice"][1]["code"] == "Cash"
+        assert data["fund_advice"][1]["action"] == "持有"
 
 
 if __name__ == "__main__":
