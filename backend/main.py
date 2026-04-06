@@ -33,7 +33,8 @@ from core.data import (
 )
 from core.portfolio import (
     append_fee_warnings,
-    decompose_selected_weights,
+    decompose_selected_weights,  # noqa: F401 — re-exported for tests
+    get_effective_single_weight_cap,  # noqa: F401 — re-exported for tests
     get_frontier_initial_guess,
     get_frontier_weight_bounds,
     get_max_return_weights,
