@@ -182,7 +182,7 @@ def test_frontier_cleaning_does_not_break_single_asset_caps():
     optimized_weights = [0.5, 0.49, 0.005, 0.005]
     mock_result = SimpleNamespace(success=True, x=optimized_weights)
 
-    with patch("main.minimize", side_effect=[mock_result] * 21):
+    with patch("core.frontier.minimize", return_value=mock_result):
         frontier = calculate_efficient_frontier(
             df_nav, {column: 0.0 for column in df_nav.columns}
         )
