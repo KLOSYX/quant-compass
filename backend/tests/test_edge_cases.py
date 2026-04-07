@@ -16,7 +16,7 @@ def test_recommendation_zero_investment():
     data = {"000001": [1.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -44,7 +44,7 @@ def test_single_asset_100_percent():
     data = {"000001": [1.0] * len(dates), "000002": [2.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -75,7 +75,7 @@ def test_recommendation_sells_zero_weight_fund_even_when_other_assets_need_buys(
     data = {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -109,7 +109,7 @@ def test_invalid_cvar_limit_returns_400():
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},

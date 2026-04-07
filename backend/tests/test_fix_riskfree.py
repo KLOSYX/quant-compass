@@ -7,12 +7,13 @@ from unittest.mock import patch
 # Add backend to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from main import get_current_recommendation, CurrentRecommendationRequest
+from api.models import CurrentRecommendationRequest
+from api.routes import get_current_recommendation
 
 
 def test_riskfree_post_trade_calculation():
     # Mock get_fund_data to avoid external API calls
-    with patch("main.get_fund_data") as mock_get_data:
+    with patch("api.routes.get_fund_data") as mock_get_data:
         # Mock Data: 1 Fund + RiskFree
         import pandas as pd
 

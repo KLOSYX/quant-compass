@@ -1,5 +1,5 @@
 import pandas as pd
-from main import backtest_dca, backtest_kelly_dca
+from core.backtest import backtest_dca, backtest_kelly_dca
 
 
 def test_dca_drawdown_with_rising_market():

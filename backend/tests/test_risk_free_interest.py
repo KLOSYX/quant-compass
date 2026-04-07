@@ -1,6 +1,6 @@
 import pandas as pd
 
-from main import backtest_kelly_dca
+from core.backtest import backtest_kelly_dca
 
 
 def test_cash_balance_does_not_earn_risk_free_interest():

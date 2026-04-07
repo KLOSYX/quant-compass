@@ -70,7 +70,7 @@ def test_current_recommendation_success():
     # create price that is undervalued (0.5 vs 1.0 avg)
     mock_df.iloc[-1] = mock_df.iloc[-1] * 0.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -122,7 +122,7 @@ def test_backtest_strategies_supports_cash_sleeve_without_explicit_risk_free_rat
     dates = pd.date_range(start="2024-01-01", periods=14, freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0 - 0.02 * i for i in range(14)]}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
 
         conservative = client.post(
@@ -170,7 +170,7 @@ def test_current_recommendation_separates_riskfree_and_cash_rows():
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
 
         response = client.post(
@@ -211,7 +211,7 @@ def test_current_recommendation_default_optimized_mode():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = mock_df.iloc[-1] * 0.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -248,7 +248,7 @@ def test_current_recommendation_changes_with_selected_riskfree_sleeve():
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
     mock_df.iloc[-1] = 0.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
 
         conservative = client.post(
@@ -294,7 +294,7 @@ def test_current_recommendation_optimized_mode_changes_with_selected_riskfree_sl
         {"000001": [1.0 * (1.01**i) for i in range(len(dates))]}, index=dates
     )
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
 
         conservative = client.post(
@@ -342,7 +342,7 @@ def test_optimized_mode_uses_valuation_market_signal():
     trend[-1] = trend[-1] * 1.3  # push price significantly above MA
     mock_df = pd.DataFrame({"000001": trend}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -420,7 +420,7 @@ def test_legacy_mode_ignores_risk_constraints():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = 0.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},

@@ -20,7 +20,7 @@ def test_recommendation_insufficient_cash():
     # Create severe undervaluation to trigger large gap
     mock_df.iloc[-1] = mock_df.iloc[-1] * 0.3  # 70% drop
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -57,7 +57,7 @@ def test_recommendation_zero_cash():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = mock_df.iloc[-1] * 0.5  # Create undervaluation
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -88,7 +88,7 @@ def test_recommendation_respects_minimum_cash_reserve():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = mock_df.iloc[-1] * 0.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -118,7 +118,7 @@ def test_recommendation_zero_target_when_reserve_exceeds_wealth():
     data = {"000001": [1.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -159,7 +159,7 @@ def test_cvar_constraint_caps_target_ratio():
     ] * 3
     mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -204,7 +204,7 @@ def test_drawdown_constraint_caps_target_ratio():
     ] * 3
     mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -250,7 +250,7 @@ def test_combined_constraints_use_tighter_cap():
     ] * 3
     mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -298,7 +298,7 @@ def test_hard_constraints_override_min_weight():
     ] * 3
     mock_df = pd.DataFrame({"000001": nav_values[: len(dates)]}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -329,7 +329,7 @@ def test_hard_constraints_override_min_weight():
 
 def test_backtest_fee_no_overdraft():
     """Test that buy fees don't cause cash overdraft in backtest."""
-    from main import backtest_kelly_dca
+    from core.backtest import backtest_kelly_dca
 
     # Create simple NAV data
     dates = pd.date_range(start="2023-01-31", end="2023-06-30", freq="ME")
@@ -370,7 +370,7 @@ def test_backtest_fee_no_overdraft():
 
 
 def test_backtest_respects_minimum_cash_reserve_floor():
-    from main import backtest_kelly_dca
+    from core.backtest import backtest_kelly_dca
 
     dates = pd.date_range(start="2023-01-31", end="2023-06-30", freq="ME")
     nav_data = {"000001": [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]}
@@ -389,6 +389,36 @@ def test_backtest_respects_minimum_cash_reserve_floor():
         assert attribution.get("RiskFree", 0) >= 499.99
 
 
+def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
+    from core.backtest import backtest_kelly_dca
+
+    dates = pd.date_range(start="2023-01-31", periods=3, freq="ME")
+    df_nav = pd.DataFrame(
+        {
+            "000001": [1.0, 1.0, 1.0],
+            "RiskFree": [1.0, 1.001, 1.002],
+        },
+        index=dates,
+    )
+
+    result = backtest_kelly_dca(
+        df_nav,
+        {"000001": 0.4, "RiskFree": 0.6},
+        monthly_investment=100.0,
+        initial_holdings={},
+        initial_cash=1000.0,
+        max_buy_multiplier=1.0,
+        min_weight=1.0,
+        max_weight=1.0,
+        strategy_mode="legacy_linear",
+    )
+
+    first_month = result["attribution"][dates[0].strftime("%Y-%m")]
+    assert first_month["000001"] == 100.0
+    assert first_month["Cash"] < 1.0
+    assert first_month["RiskFree"] > 900.0
+
+
 def test_fee_calculation_accuracy():
     """Test that fees are calculated accurately in recommendations."""
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
@@ -396,7 +426,7 @@ def test_fee_calculation_accuracy():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = 0.8  # Slight undervaluation
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -451,7 +481,7 @@ def test_sell_threshold_boundary():
     # Create overvaluation to trigger potential sell
     mock_df.iloc[-1] = 1.3  # 30% above average
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},
@@ -493,7 +523,7 @@ def test_sell_threshold_boundary():
 
 def test_extreme_fee_handling():
     """Test handling of extreme fee rates."""
-    from main import backtest_kelly_dca
+    from core.backtest import backtest_kelly_dca
 
     dates = pd.date_range(start="2023-01-31", end="2023-03-31", freq="ME")
     nav_data = {"000001": [1.0, 0.9, 0.8]}
@@ -531,7 +561,7 @@ def test_recommendation_sell_proceeds_not_double_counted():
     # Create severe overvaluation to trigger sell signal (bias = 1.5)
     mock_df.iloc[-1] = 1.5
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},

@@ -23,7 +23,7 @@ def test_recommendation_fee_overdraft_prevention():
     mock_df = pd.DataFrame(data, index=dates)
     mock_df.iloc[-1] = 0.5  # Create large gap
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A"},

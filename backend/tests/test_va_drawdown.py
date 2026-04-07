@@ -1,5 +1,5 @@
 import pandas as pd
-from main import backtest_kelly_dca, backtest_lump_sum, backtest_dca
+from core.backtest import backtest_dca, backtest_kelly_dca, backtest_lump_sum
 
 
 def test_va_short_selling_prevention():

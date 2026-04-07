@@ -4,15 +4,11 @@ from unittest.mock import patch
 import pandas as pd
 from fastapi.testclient import TestClient
 
-from main import (
-    app,
-    backtest_dca,
-    backtest_kelly_dca,
-    backtest_lump_sum,
-    calculate_efficient_frontier,
-    decompose_selected_weights,
-    get_effective_single_weight_cap,
-)
+from main import app
+
+from core.backtest import backtest_dca, backtest_kelly_dca, backtest_lump_sum
+from core.frontier import calculate_efficient_frontier
+from core.portfolio import decompose_selected_weights, get_effective_single_weight_cap
 
 client = TestClient(app)
 
@@ -113,7 +109,7 @@ def test_current_recommendation_does_not_double_count_management_fee_by_default(
     dates = pd.date_range(start="2024-01-01", periods=14, freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
         request_data = {
             "fund_codes": ["000001"],
@@ -146,7 +142,7 @@ def test_analyze_returns_recommended_point_for_long_sample():
         index=dates,
     )
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (
             mock_df,
             {"000001": "Fund A", "000002": "Fund B"},
@@ -200,7 +196,7 @@ def test_current_recommendation_rejects_weights_for_missing_assets():
     dates = pd.date_range(start="2024-01-01", periods=14, freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
         request_data = {
             "fund_codes": ["000001"],
@@ -225,7 +221,7 @@ def test_backtest_strategies_rejects_weights_for_missing_assets():
     dates = pd.date_range(start="2024-01-01", periods=14, freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
 
-    with patch("main.get_fund_data") as mock_get_fund:
+    with patch("api.routes.get_fund_data") as mock_get_fund:
         mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
         request_data = {
             "fund_codes": ["000001"],

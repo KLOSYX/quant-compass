@@ -1,6 +1,9 @@
 import pandas as pd
 
-from main import calculate_efficient_frontier, calculate_frontier_walk_forward_metrics
+from core.frontier import (
+    calculate_efficient_frontier,
+    calculate_frontier_walk_forward_metrics,
+)
 
 
 def test_single_asset_frontier_is_feasible():
@@ -32,6 +35,63 @@ def test_frontier_allows_full_risk_free_allocation():
     assert frontier[0]["risk"] < 1e-6
     assert frontier[0]["weights"]["RiskFree"] > 0.99
     assert frontier[0]["weights"]["AssetA"] < 0.01
+
+
+def test_frontier_does_not_shrink_riskfree_expected_return():
+    dates = pd.date_range(start="2020-01-31", periods=60, freq="ME")
+    asset_returns = [0.03] * 60
+    risk_free_returns = [0.02 / 12] * 60
+    df = pd.DataFrame(
+        {
+            "AssetA": (1 + pd.Series(asset_returns, index=dates)).cumprod(),
+            "RiskFree": (1 + pd.Series(risk_free_returns, index=dates)).cumprod(),
+        },
+        index=dates,
+    )
+
+    frontier = calculate_efficient_frontier(df, {})
+    expected_risk_free_return = df.pct_change().fillna(0)["RiskFree"].mean() * 12
+
+    assert frontier
+    assert frontier[0]["weights"]["RiskFree"] > 0.99
+    assert abs(frontier[0]["return"] - expected_risk_free_return) < 1e-6
+
+
+def test_frontier_includes_high_sharpe_low_vol_asset_near_riskfree_segment():
+    dates = pd.date_range(start="2020-01-31", periods=60, freq="ME")
+    df = pd.DataFrame(
+        {
+            "AssetA": (
+                1
+                + pd.Series(
+                    [0.03 if i % 2 == 0 else -0.01 for i in range(60)], index=dates
+                )
+            ).cumprod(),
+            "BondLike": (
+                1
+                + pd.Series(
+                    [0.004 if i % 2 == 0 else 0.002 for i in range(60)], index=dates
+                )
+            ).cumprod(),
+            "GoldLike": (
+                1
+                + pd.Series(
+                    [
+                        0.025 if i % 3 == 0 else -0.005 if i % 3 == 1 else 0.018
+                        for i in range(60)
+                    ],
+                    index=dates,
+                )
+            ).cumprod(),
+            "RiskFree": (1 + pd.Series([0.02 / 12] * 60, index=dates)).cumprod(),
+        },
+        index=dates,
+    )
+
+    frontier = calculate_efficient_frontier(df, {})
+
+    assert frontier
+    assert max(point["weights"].get("BondLike", 0.0) for point in frontier) > 0.2
 
 
 def test_walk_forward_metrics_present_for_long_sample():
