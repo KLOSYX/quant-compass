@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
 import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar } from 'lucide-react';
+import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
 
 const getISODate = (date) => date.toISOString().split('T')[0];
 const formatDD = (obj, key, fallbackKey) => {
@@ -777,6 +778,7 @@ function PortfolioOptimizer() {
                             <ReactECharts option={getFrontierOptions()} style={{ height: 400 }} onEvents={{ 'click': onChartClick }} />
                             <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
                         </div>
+                        <AssetDiagnosticsPanel diagnostics={analysisResult.asset_diagnostics} />
                     </div>
 
                     {selectedPoint && (
