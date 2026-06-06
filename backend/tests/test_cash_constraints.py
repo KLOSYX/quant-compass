@@ -386,7 +386,7 @@ def test_backtest_respects_minimum_cash_reserve_floor():
     )
 
     for attribution in result["attribution"].values():
-        assert attribution.get("RiskFree", 0) >= 499.99
+        assert attribution.get("Cash", 0) >= 499.99
 
 
 def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
@@ -471,6 +471,80 @@ def test_fee_calculation_accuracy():
         print(
             f"Budget: {budget}, Buys: {buy_total}, Sells: {sell_total}, Deposit: {deposit_amount}"
         )
+
+
+def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)},
+        index=dates,
+    )
+    mock_df.iloc[-1] = 0.3
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Limited Fund", "000002": "Open Fund"},
+            [],
+        )
+
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 0.5, "000002": 0.5},
+                "current_holdings": {},
+                "current_cash": 0.0,
+                "monthly_budget": 10000,
+                "max_buy_multiplier": 10.0,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 0.8,
+                "max_weight": 0.8,
+                "fund_investment_limits": {
+                    "000001": {"monthly_limit": 500.0},
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    advice = {item["code"]: item for item in data["fund_advice"]}
+
+    assert advice["000001"]["action"] == "Buy"
+    assert advice["000001"]["amount"] == pytest.approx(500.0)
+    assert advice["000001"]["limit_applied"] is True
+    assert advice["000001"]["target_holding"] == pytest.approx(500.0)
+    assert advice["000001"]["ideal_holding"] == pytest.approx(4000.0)
+
+    assert advice["000002"]["action"] == "Buy"
+    assert advice["000002"]["amount"] == pytest.approx(4000.0)
+    assert data["recommended_monthly_investment"] == pytest.approx(4500.0)
+    assert advice["Cash"]["executable_holding"] == pytest.approx(5500.0)
+
+
+def test_backtest_respects_fund_monthly_buy_limits():
+    from core.backtest import backtest_kelly_dca
+
+    dates = pd.date_range(start="2023-01-31", periods=4, freq="ME")
+    df_nav = pd.DataFrame({"000001": [1.0, 1.0, 1.0, 1.0]}, index=dates)
+
+    result = backtest_kelly_dca(
+        df_nav,
+        {"000001": 1.0},
+        monthly_investment=1000.0,
+        initial_holdings={},
+        initial_cash=0.0,
+        max_buy_multiplier=10.0,
+        min_weight=1.0,
+        max_weight=1.0,
+        strategy_mode="legacy_linear",
+        fund_investment_limits={"000001": {"monthly_limit": 100.0}},
+    )
+
+    for idx, date in enumerate(dates, start=1):
+        attribution = result["attribution"][date.strftime("%Y-%m")]
+        assert attribution["000001"] == pytest.approx(idx * 100.0)
+        assert attribution["Cash"] == pytest.approx(idx * 900.0)
 
 
 def test_sell_threshold_boundary():
@@ -601,6 +675,58 @@ def test_recommendation_sell_proceeds_not_double_counted():
 
         assert cash_row["action"] == "存入"
         assert abs(cash_row["amount"] - 6930.0) < 0.1
+
+
+def test_backtests_do_not_label_cash_as_risk_free_without_risk_free_asset():
+    dates = pd.date_range(start="2024-01-31", periods=3, freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0, 1.1, 1.2]}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        response = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "fund_fees": {},
+                "start_date": "2024-01-31",
+                "end_date": "2024-03-31",
+                "monthly_investment": 100.0,
+                "initial_holdings": {},
+                "initial_cash": 50.0,
+                "strategy_mode": "legacy_linear",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for result_name in ["lump_sum", "dca", "kelly_dca"]:
+        first_attr = next(iter(payload[result_name]["attribution"].values()))
+        assert "Cash" in first_attr
+        assert "RiskFree" not in first_attr
+
+
+def test_current_recommendation_rejects_holdings_outside_universe():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 100.0, "999999": 50.0},
+                "current_cash": 0.0,
+                "monthly_budget": 1000.0,
+            },
+        )
+
+    assert response.status_code == 400
+    assert "current_holdings contain assets outside" in response.json()["detail"]
 
 
 if __name__ == "__main__":

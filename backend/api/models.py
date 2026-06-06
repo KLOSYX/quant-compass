@@ -14,6 +14,11 @@ from core.constants import (
 )
 
 
+class FundInvestmentLimit(BaseModel):
+    daily_limit: Optional[float] = None
+    monthly_limit: Optional[float] = None
+
+
 class AnalysisRequest(BaseModel):
     fund_codes: List[str]
     fund_fees: Dict[str, float]
@@ -37,6 +42,7 @@ class AnalysisRequest(BaseModel):
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
+    fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
     ma_window: int = 12
     include_strategy_frontier: bool = False
     initial_lump_sum: Optional[float] = 10000.0
@@ -69,6 +75,7 @@ class StrategyBacktestRequest(BaseModel):
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
+    fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
     ma_window: int = 12
 
 
@@ -96,4 +103,5 @@ class CurrentRecommendationRequest(BaseModel):
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
+    fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
     ma_window: int = 12

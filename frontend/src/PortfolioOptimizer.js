@@ -82,6 +82,7 @@ function PortfolioOptimizer() {
     const [fundFees, setFundFees] = useState({});
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
+    const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
     const [currentInput, setCurrentInput] = useState('');
     const [hasRiskFree, setHasRiskFree] = useState(false);
     const [riskFreeRate, setRiskFreeRate] = useState('2.0');
@@ -149,12 +150,14 @@ function PortfolioOptimizer() {
         const savedFundFees = localStorage.getItem('fundFees');
         const savedFundBuyFees = localStorage.getItem('fundBuyFees');
         const savedFundSellFees = localStorage.getItem('fundSellFees');
+        const savedFundInvestmentLimits = localStorage.getItem('fundInvestmentLimits');
         const savedHasRiskFree = localStorage.getItem('hasRiskFree');
         const savedRiskFreeRate = localStorage.getItem('riskFreeRate');
         if (savedFundCodes) setFundCodes(JSON.parse(savedFundCodes));
         if (savedFundFees) setFundFees(JSON.parse(savedFundFees));
         if (savedFundBuyFees) setFundBuyFees(JSON.parse(savedFundBuyFees));
         if (savedFundSellFees) setFundSellFees(JSON.parse(savedFundSellFees));
+        if (savedFundInvestmentLimits) setFundInvestmentLimits(JSON.parse(savedFundInvestmentLimits));
         if (savedHasRiskFree) setHasRiskFree(JSON.parse(savedHasRiskFree));
         if (savedRiskFreeRate) setRiskFreeRate(savedRiskFreeRate);
     }, []);
@@ -177,11 +180,14 @@ function PortfolioOptimizer() {
         if (currentInput && !fundCodes.includes(currentInput)) {
             const newFundCodes = [...fundCodes, currentInput.trim()];
             const newFundFees = { ...fundFees, [currentInput.trim()]: '' };
+            const newFundInvestmentLimits = { ...fundInvestmentLimits, [currentInput.trim()]: { daily_limit: '', monthly_limit: '' } };
             clearAnalysisOutputs();
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
+            setFundInvestmentLimits(newFundInvestmentLimits);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
             localStorage.setItem('fundFees', JSON.stringify(newFundFees));
+            localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
             setCurrentInput('');
         }
     };
@@ -194,11 +200,15 @@ function PortfolioOptimizer() {
         } else {
             const newFundCodes = fundCodes.filter(code => code !== codeToRemove);
             const newFundFees = { ...fundFees };
+            const newFundInvestmentLimits = { ...fundInvestmentLimits };
             delete newFundFees[codeToRemove];
+            delete newFundInvestmentLimits[codeToRemove];
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
+            setFundInvestmentLimits(newFundInvestmentLimits);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
             localStorage.setItem('fundFees', JSON.stringify(newFundFees));
+            localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
         }
     };
 
@@ -224,6 +234,30 @@ function PortfolioOptimizer() {
         const newFees = { ...fundSellFees, [code]: fee };
         setFundSellFees(newFees);
         localStorage.setItem('fundSellFees', JSON.stringify(newFees));
+    };
+
+    const handleInvestmentLimitChange = (code, field, value) => {
+        const newLimits = {
+            ...fundInvestmentLimits,
+            [code]: {
+                ...(fundInvestmentLimits[code] || {}),
+                [field]: value
+            }
+        };
+        setFundInvestmentLimits(newLimits);
+        localStorage.setItem('fundInvestmentLimits', JSON.stringify(newLimits));
+    };
+
+    const buildFundInvestmentLimitsPayload = () => {
+        return Object.entries(fundInvestmentLimits).reduce((acc, [code, limits]) => {
+            const dailyLimit = parseFloat(limits?.daily_limit);
+            const monthlyLimit = parseFloat(limits?.monthly_limit);
+            const parsed = {};
+            if (!Number.isNaN(dailyLimit) && dailyLimit >= 0) parsed.daily_limit = dailyLimit;
+            if (!Number.isNaN(monthlyLimit) && monthlyLimit >= 0) parsed.monthly_limit = monthlyLimit;
+            if (Object.keys(parsed).length > 0) acc[code] = parsed;
+            return acc;
+        }, {});
     };
 
     const handleRiskFreeRateChange = (rate) => {
@@ -296,6 +330,7 @@ function PortfolioOptimizer() {
                 sell_threshold: (Number.isNaN(parsedSellThreshold) ? 5.0 : parsedSellThreshold) / 100,
                 min_weight: (Number.isNaN(parsedMinWeight) ? 30 : parsedMinWeight) / 100,
                 max_weight: (Number.isNaN(parsedMaxWeight) ? 80 : parsedMaxWeight) / 100,
+                fund_investment_limits: buildFundInvestmentLimitsPayload(),
                 ma_window: Number.isNaN(parsedMaWindow) ? 12 : parsedMaWindow,
             };
 
@@ -387,6 +422,7 @@ function PortfolioOptimizer() {
                 })(),
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
+                fund_investment_limits: buildFundInvestmentLimitsPayload(),
                 ma_window: parseInt(maWindow)
             };
 
@@ -470,6 +506,7 @@ function PortfolioOptimizer() {
                 })(),
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
+                fund_investment_limits: buildFundInvestmentLimitsPayload(),
                 ma_window: parseInt(maWindow)
             };
 
@@ -712,6 +749,8 @@ function PortfolioOptimizer() {
                                                 <div>{t('header_buy')}</div>
                                                 <div>{t('header_sell')}</div>
                                                 <div>{t('header_manage')}</div>
+                                                <div>{t('header_daily_limit')}</div>
+                                                <div>{t('header_monthly_limit')}</div>
                                                 <div></div>
                                             </div>
                                             <p className="text-[11px] text-slate-400 mb-2">{t('manage_fee_note')}</p>
@@ -721,6 +760,8 @@ function PortfolioOptimizer() {
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" />
+                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.daily_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'daily_limit', e.target.value)} placeholder="100" />
+                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.monthly_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'monthly_limit', e.target.value)} placeholder="2000" />
                                                     <button type="button" className="icon-btn" onClick={() => handleRemoveAsset(code)}><X size={16} /></button>
                                                 </div>
                                             ))}
@@ -1118,7 +1159,7 @@ function PortfolioOptimizer() {
                                                             </span>
                                                         </td>
                                                         <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
-                                                        <td className="font-mono">¥{advice.target_holding?.toFixed(2) ?? '--'}</td>
+                                                        <td className="font-mono">¥{(advice.executable_holding ?? advice.target_holding)?.toFixed(2) ?? '--'}</td>
                                                         <td className="text-slate-500 text-xs">{advice.reason}</td>
                                                     </tr>
                                                 );

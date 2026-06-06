@@ -100,6 +100,10 @@ def get_fund_data(
         )
 
     if risk_free_rate is not None:
+        if risk_free_rate <= -1:
+            raise HTTPException(
+                status_code=400, detail="risk_free_rate must be greater than -1"
+            )
         monthly_rf_return = (1 + risk_free_rate) ** (1 / 12) - 1
         rf_index = pd.date_range(start=actual_start, end=actual_end, freq="ME")
         rf_returns = pd.Series(monthly_rf_return, index=rf_index)

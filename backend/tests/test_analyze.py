@@ -94,6 +94,33 @@ def test_analyze_warns_management_fee_not_reapplied_by_default():
     assert any("默认不额外扣减管理费" in warning for warning in data["warnings"])
 
 
+def test_analyze_uses_fee_adjusted_nav_for_frontier_when_enabled():
+    dates = pd.date_range(start="2020-01-31", periods=36, freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0 + 0.01 * i for i in range(len(dates))]}, index=dates
+    )
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+
+        response = client.post(
+            "/api/analyze",
+            json={
+                "fund_codes": ["000001"],
+                "fund_fees": {"000001": 1.2},
+                "apply_fund_fees_to_history": True,
+                "start_date": "2020-01-31",
+                "end_date": "2022-12-31",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["efficient_frontier"][0]["return"] < 0
+    diagnostics = {item["code"]: item for item in payload["asset_diagnostics"]}
+    assert diagnostics["000001"]["optimizer_expected_return"] < 0
+
+
 def test_analyze_returns_asset_diagnostics():
     dates = pd.date_range(start="2020-01-31", periods=60, freq="ME")
     mock_df = pd.DataFrame(

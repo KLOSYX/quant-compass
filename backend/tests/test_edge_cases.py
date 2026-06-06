@@ -127,3 +127,18 @@ def test_invalid_cvar_limit_returns_400():
 
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 400
+
+
+def test_invalid_risk_free_rate_returns_400():
+    request_data = {
+        "fund_codes": [],
+        "fund_fees": {},
+        "start_date": "2024-01-31",
+        "end_date": "2024-12-31",
+        "risk_free_rate": -1.0,
+    }
+
+    response = client.post("/api/analyze", json=request_data)
+
+    assert response.status_code == 400
+    assert "risk_free_rate" in response.json()["detail"]

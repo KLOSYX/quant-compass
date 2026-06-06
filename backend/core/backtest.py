@@ -11,6 +11,7 @@ from core.constants import (
     DEFAULT_MAX_DRAWDOWN_LIMIT,
     DEFAULT_STRATEGY_MODE,
 )
+from core.limits import allocate_capped_buy_amounts
 from core.portfolio import (
     decompose_selected_weights,
     normalize_weights,
@@ -81,7 +82,6 @@ def backtest_lump_sum(
         "attribution": {
             date.strftime("%Y-%m"): {
                 **row.to_dict(),
-                **({"RiskFree": cash_balance} if "RiskFree" not in row.index else {}),
                 "Cash": cash_balance,
             }
             for date, row in attribution_history.iterrows()
@@ -146,8 +146,6 @@ def backtest_dca(
         # 5. Record State
         current_asset_values = total_shares * nav_row
         attr = current_asset_values.to_dict()
-        if "RiskFree" not in current_asset_values.index:
-            attr["RiskFree"] = cash_balance
         attr["Cash"] = cash_balance
         attribution_history[timestamp] = attr
         portfolio_history[timestamp] = current_asset_values.sum() + cash_balance
@@ -216,6 +214,7 @@ def backtest_kelly_dca(
     enable_drawdown_constraint: bool = True,
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT,
     initial_cash: float = 0.0,
+    fund_investment_limits: Dict[str, object] = None,
 ):
     """
     Advanced Value Averaging (VA) Strategy.
@@ -237,6 +236,13 @@ def backtest_kelly_dca(
         max_drawdown_limit=max_drawdown_limit,
     )
 
+    # Initialize holdings from initial_holdings if provided
+    if initial_holdings is None:
+        initial_holdings = {}
+    if "RiskFree" not in df_nav.columns and initial_holdings.get("RiskFree", 0.0) > 0:
+        df_nav = df_nav.copy()
+        df_nav["RiskFree"] = 1.0
+
     selected = decompose_selected_weights(weights_dict, list(df_nav.columns))
     risky_weights = selected["risky_weights"]
     base_risky_ratio = float(selected["base_risky_ratio"])
@@ -244,9 +250,6 @@ def backtest_kelly_dca(
     risky_columns = list(risky_weights.index)
     has_risky_assets = base_risky_ratio > 0 and float(risky_weights.sum()) > 0
 
-    # Initialize holdings from initial_holdings if provided
-    if initial_holdings is None:
-        initial_holdings = {}
     can_use_risk_free_asset = "RiskFree" in df_nav.columns and (
         base_risk_free_ratio > 0 or initial_holdings.get("RiskFree", 0.0) > 0
     )
@@ -415,21 +418,29 @@ def backtest_kelly_dca(
             cash_for_buy = max(0.0, cash_balance - minimum_cash_reserve)
             if can_use_risk_free_asset:
                 cash_for_buy += current_risk_free_value
-            max_buyable_with_fees = (
-                cash_for_buy / (1 + avg_fee) if avg_fee < 1 else cash_for_buy
+
+            max_cash_to_spend = min(diff * (1 + avg_fee), cash_for_buy, buy_limit)
+            fund_gaps = {
+                code: diff * risky_weights.get(code, 0.0) for code in risky_columns
+            }
+            buy_allocations = allocate_capped_buy_amounts(
+                risky_columns,
+                fund_gaps,
+                risky_weights.to_dict(),
+                buy_fee or {},
+                max_cash_to_spend,
+                fund_investment_limits,
+                timestamp,
             )
+            total_cost_with_fees = sum(buy_allocations.values())
 
-            buy_amount = min(diff, max_buyable_with_fees, buy_limit)
-
-            if buy_amount > 0:
+            if total_cost_with_fees > 0:
                 # Buy shares and deduct fees
-                total_cost_with_fees = 0.0
-                for code, w in risky_weights.items():
-                    if w > 0:
+                for code, gross_amount in buy_allocations.items():
+                    if gross_amount > 0:
                         f = (buy_fee or {}).get(code, 0.0)
-                        amt = buy_amount * w
-                        total_cost_with_fees += amt * (1 + f)
-                        total_shares[code] += amt / nav_row[code]
+                        net_amount = gross_amount / (1 + f)
+                        total_shares[code] += net_amount / nav_row[code]
 
                 if can_use_risk_free_asset and total_cost_with_fees > cash_balance:
                     redeem_needed = min(
@@ -487,8 +498,6 @@ def backtest_kelly_dca(
         attribution_dict = current_asset_values.to_dict()
         if can_use_risk_free_asset:
             attribution_dict["RiskFree"] = risk_free_shares * nav_row["RiskFree"]
-        else:
-            attribution_dict["RiskFree"] = cash_balance
         attribution_dict["Cash"] = cash_balance
         attribution_history[timestamp] = attribution_dict
 
@@ -575,6 +584,7 @@ def simulate_strategy_frontier(
     max_drawdown_limit=DEFAULT_MAX_DRAWDOWN_LIMIT,
     initial_lump_sum=0.0,
     monthly_investment=1000.0,
+    fund_investment_limits=None,
 ):
     """
     Simulate VA/Kelly strategy for each point on the frontier to get separate 'Strategy Frontier'.
@@ -637,6 +647,7 @@ def simulate_strategy_frontier(
             cvar_limit=cvar_limit,
             enable_drawdown_constraint=enable_drawdown_constraint,
             max_drawdown_limit=max_drawdown_limit,
+            fund_investment_limits=fund_investment_limits,
         )
 
         # Strategy Return: Standard CAGR based on Strategy Unit NAV

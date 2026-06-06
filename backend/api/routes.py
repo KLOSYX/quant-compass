@@ -22,6 +22,7 @@ from core.frontier import (
     calculate_efficient_frontier,
     calculate_frontier_walk_forward_metrics,
 )
+from core.limits import allocate_capped_buy_amounts, get_monthly_investment_limits
 from core.portfolio import (
     append_fee_warnings,
     decompose_selected_weights,
@@ -71,15 +72,20 @@ async def analyze_portfolio(request: AnalysisRequest):
             request.fund_fees,
             apply_fund_fees_to_history=request.apply_fund_fees_to_history,
         )
-        append_frontier_stability_warnings(warnings, fund_df, request.fund_fees)
+        nav_adjusted = prepare_nav_for_analysis(
+            fund_df,
+            request.fund_fees,
+            apply_fund_fees_to_history=request.apply_fund_fees_to_history,
+        )
+        append_frontier_stability_warnings(warnings, nav_adjusted, request.fund_fees)
         efficient_frontier_points = calculate_efficient_frontier(
-            fund_df, request.fund_fees
+            nav_adjusted, request.fund_fees
         )
         asset_diagnostics = calculate_asset_diagnostics(
-            fund_df, fund_names, efficient_frontier_points
+            nav_adjusted, fund_names, efficient_frontier_points
         )
         walk_forward_metrics = calculate_frontier_walk_forward_metrics(
-            fund_df, request.fund_fees
+            nav_adjusted, request.fund_fees
         )
         for point, metric in zip(efficient_frontier_points, walk_forward_metrics):
             point["effective_risky_weights"] = normalize_risky_weights(
@@ -97,12 +103,6 @@ async def analyze_portfolio(request: AnalysisRequest):
             recommended_point_index = max(scored_points, key=lambda item: item[1])[0]
 
         # --- Simulate Strategy Frontier ---
-        nav_adjusted = prepare_nav_for_analysis(
-            fund_df,
-            request.fund_fees,
-            apply_fund_fees_to_history=request.apply_fund_fees_to_history,
-        )
-
         start_date_str = fund_df.index.min().strftime("%Y-%m-%d")
         end_date_str = fund_df.index.max().strftime("%Y-%m-%d")
 
@@ -133,6 +133,7 @@ async def analyze_portfolio(request: AnalysisRequest):
                 max_drawdown_limit=request.max_drawdown_limit,
                 initial_lump_sum=request.initial_lump_sum or 0.0,
                 monthly_investment=request.monthly_investment or 1000.0,
+                fund_investment_limits=request.fund_investment_limits,
             )
 
         return {
@@ -225,6 +226,21 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         latest_nav = float(reference_portfolio_nav.iloc[-1])
         current_price = latest_nav
         current_ma = float(ma_series.iloc[-1])
+
+        holding_codes = {
+            code
+            for code, value in request.current_holdings.items()
+            if code != "RiskFree" and float(value) > 1e-12
+        }
+        unknown_holdings = sorted(holding_codes - set(fund_df.columns))
+        if unknown_holdings:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "current_holdings contain assets outside the current analysis universe: "
+                    + ", ".join(unknown_holdings)
+                ),
+            )
 
         # Calculate current equity value
         # Handle 'RiskFree' if passed (filter it out for equity calc)
@@ -364,11 +380,28 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             if gap_val > 0:
                 positive_gap_sum += gap_val
 
+        fund_monthly_limits = get_monthly_investment_limits(
+            unique_fund_codes,
+            request.fund_investment_limits,
+            end_date_obj,
+        )
+        buy_allocations = allocate_capped_buy_amounts(
+            unique_fund_codes,
+            fund_gaps,
+            risky_weights.to_dict(),
+            request.buy_fee,
+            recommended_monthly_investment,
+            request.fund_investment_limits,
+            end_date_obj,
+        )
+        recommended_monthly_investment = sum(buy_allocations.values())
+
         # 2. Determine Actions
         for code in unique_fund_codes:
             current_val = equity_holdings.get(code, 0)
             gap_val = fund_gaps.get(code, 0)
-            target_val = current_val + gap_val
+            ideal_target_val = current_val + gap_val
+            target_val = ideal_target_val
             sell_threshold_value = total_wealth_projected * request.sell_threshold
 
             # Reset action and amount for each fund to prevent leakage
@@ -392,16 +425,23 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     action = "Hold"
                     reason = "未达卖出阈值"
             elif gap_val > 0:
-                if recommended_monthly_investment > 0 and positive_gap_sum > 0:
+                allocated_buy = buy_allocations.get(code, 0.0)
+                if allocated_buy > 0 and positive_gap_sum > 0:
                     action = "Buy"
                     # amount is the Gross Cash to spend on this fund
-                    amount = recommended_monthly_investment * (
-                        gap_val / positive_gap_sum
-                    )
-                    reason = f"价值平均补足缺口 (Gap: {gap_val:.1f})"
+                    amount = allocated_buy
+                    buy_fee = request.buy_fee.get(code, 0.0)
+                    target_val = current_val + amount / (1 + buy_fee)
+                    if amount + 1e-9 < gap_val * (1 + buy_fee):
+                        reason = "受申购限额约束，先买入可执行额度"
+                    else:
+                        reason = f"价值平均补足缺口 (Gap: {gap_val:.1f})"
                 else:
                     action = "Hold"
-                    reason = "低位观察不额外定投"
+                    if fund_monthly_limits.get(code, float("inf")) <= 1e-9:
+                        reason = "申购限额为0，本月无法买入"
+                    else:
+                        reason = "低位观察不额外定投"
             else:
                 action = "Hold"
                 reason = "仓位已达标"
@@ -413,11 +453,22 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     "code": code,
                     "name": fund_names.get(code, code),
                     "current_holding": current_val,
-                    "target_holding": target_val,  # Ideal Target (Current + Gap)
-                    "ideal_holding": target_val,  # This is Ideal Target (Current + Gap)
+                    "target_holding": target_val,
+                    "executable_holding": target_val,
+                    "ideal_holding": ideal_target_val,
                     "gap": gap_val,
                     "action": action,
                     "amount": amount,
+                    "monthly_buy_limit": (
+                        fund_monthly_limits.get(code)
+                        if np.isfinite(fund_monthly_limits.get(code, float("inf")))
+                        else None
+                    ),
+                    "limit_applied": bool(
+                        amount + 1e-9
+                        < max(0.0, gap_val) * (1 + request.buy_fee.get(code, 0.0))
+                        and fund_monthly_limits.get(code, float("inf")) < float("inf")
+                    ),
                     "reason": reason,
                 }
             )
@@ -477,6 +528,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     "name": "无风险资产 (货基)",
                     "current_holding": risk_free_balance,
                     "target_holding": target_risk_free_value,
+                    "executable_holding": risk_free_after_trades,
                     "ideal_holding": target_risk_free_value,
                     "gap": target_risk_free_value - risk_free_balance,
                     "action": risk_free_action,
@@ -502,6 +554,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 "name": "现金",
                 "current_holding": current_cash,
                 "target_holding": target_cash_value,
+                "executable_holding": cash_after_risky,
                 "ideal_holding": target_cash_value,
                 "gap": target_cash_value - current_cash,
                 "action": cash_action,
@@ -543,6 +596,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -625,6 +680,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             enable_drawdown_constraint=request.enable_drawdown_constraint,
             max_drawdown_limit=request.max_drawdown_limit,
             initial_cash=request.initial_cash,
+            fund_investment_limits=request.fund_investment_limits,
         )
 
         return {
@@ -634,6 +690,8 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

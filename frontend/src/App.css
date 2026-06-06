@@ -362,7 +362,7 @@ header.app-header {
 /* Asset List - Custom Grid Layout */
 .asset-list-header {
     display: grid;
-    grid-template-columns: 3fr 2fr 2fr 2fr 1fr;
+    grid-template-columns: minmax(120px, 3fr) repeat(5, minmax(72px, 1.5fr)) 36px;
     gap: 0.5rem;
     padding: 0 0.5rem;
     margin-bottom: 0.5rem;
@@ -373,7 +373,7 @@ header.app-header {
 
 .asset-item-row {
     display: grid;
-    grid-template-columns: 3fr 2fr 2fr 2fr 1fr;
+    grid-template-columns: minmax(120px, 3fr) repeat(5, minmax(72px, 1.5fr)) 36px;
     gap: 0.5rem;
     align-items: center;
     padding: 0.5rem;

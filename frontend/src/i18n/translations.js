@@ -20,6 +20,8 @@ export const translations = {
         header_buy: '申购%',
         header_sell: '赎回%',
         header_manage: '管理%*',
+        header_daily_limit: '日限额',
+        header_monthly_limit: '月限额',
         manage_fee_note: '*默认不在历史回测中重复扣减管理费，避免对基金单位净值双重计费。',
 
         // PortfolioOptimizer - Backtest Params
@@ -242,6 +244,8 @@ export const translations = {
         header_buy: 'Buy Fee %',
         header_sell: 'Sell Fee %',
         header_manage: 'Mgmt Fee %*',
+        header_daily_limit: 'Daily Cap',
+        header_monthly_limit: 'Monthly Cap',
         manage_fee_note: '*Management fees are not deducted again from historical fund NAV by default.',
 
         // PortfolioOptimizer - Backtest Params
