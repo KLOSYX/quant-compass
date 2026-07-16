@@ -198,8 +198,8 @@ def test_current_recommendation_separates_riskfree_and_cash_rows():
     assert abs(payload["target_equity_value"] - 360.0) < 1e-9
     assert abs(payload["target_risk_free_value"] - 740.0) < 1e-9
     assert abs(payload["target_cash_value"] - 100.0) < 1e-9
-    assert risk_free["action"] == "Sell"
-    assert abs(risk_free["amount"] - 260.0) < 1e-9
+    assert risk_free["action"] == "Hold"
+    assert abs(risk_free["amount"]) < 1e-9
     assert abs(risk_free["target_holding"] - 740.0) < 1e-9
     assert cash_row["action"] == "持有"
     assert abs(cash_row["target_holding"] - 100.0) < 1e-9
@@ -492,3 +492,64 @@ def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
         conservative_payload["kelly_dca"]["final_value"]
         < aggressive_payload["kelly_dca"]["final_value"]
     )
+
+
+def test_current_recommendation_omits_synthetic_risk_free_by_default():
+    dates = pd.date_range(start="2024-01-01", periods=13, freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 1000.0},
+                "monthly_budget": 100.0,
+                "strategy_mode": "legacy_linear",
+            },
+        )
+    assert response.status_code == 200
+    assert mock_get_fund.call_args.args[3] is None
+    assert all(item["code"] != "RiskFree" for item in response.json()["fund_advice"])
+
+
+def test_current_recommendation_rejects_retired_risk_free_holding():
+    dates = pd.date_range(start="2024-01-01", periods=13, freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 1000.0, "RiskFree": 300.0},
+                "monthly_budget": 100.0,
+                "strategy_mode": "legacy_linear",
+            },
+        )
+    assert response.status_code == 400
+    assert "RiskFree" in response.json()["detail"]
+
+
+def test_backtest_rejects_retired_risk_free_holding():
+    dates = pd.date_range(start="2024-01-01", periods=13, freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+        response = client.post(
+            "/api/backtest_strategies",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "fund_fees": {},
+                "start_date": "2024-01-01",
+                "end_date": "2025-01-31",
+                "monthly_investment": 100.0,
+                "initial_holdings": {"000001": 1000.0, "RiskFree": 300.0},
+                "strategy_mode": "legacy_linear",
+            },
+        )
+    assert response.status_code == 400
+    assert "RiskFree" in response.json()["detail"]

@@ -522,6 +522,82 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
     assert advice["Cash"]["executable_holding"] == pytest.approx(5500.0)
 
 
+def test_recommendation_does_not_blame_limit_when_only_dca_budget_is_partial():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Unlimited Fund"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {},
+                "current_cash": 9000.0,
+                "monthly_budget": 1000.0,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+            },
+        )
+
+    assert response.status_code == 200
+    advice = next(
+        item for item in response.json()["fund_advice"] if item["code"] == "000001"
+    )
+    assert advice["action"] == "Buy"
+    assert advice["amount"] == pytest.approx(1000.0)
+    assert advice["monthly_buy_limit"] is None
+    assert advice["limit_applied"] is False
+    assert advice["amount"] < advice["gap"]
+    assert "DCA" in advice["reason"]
+
+
+def test_recommendation_does_not_sell_overweight_fund_while_net_buy_is_capped():
+    """Do not create idle cash by executing the sell side of a capped rebalance."""
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)}, index=dates
+    )
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Overweight Fund", "000002": "Capped Buy Fund"},
+            [],
+        )
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 0.5, "000002": 0.5},
+                "current_holdings": {"000001": 10000.0},
+                "current_cash": 1000.0,
+                "monthly_budget": 100.0,
+                "max_buy_multiplier": 10.0,
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+                "sell_threshold": 0.01,
+                "strategy_mode": "legacy_linear",
+                "fund_investment_limits": {"000002": {"monthly_limit": 500.0}},
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    advice = {item["code"]: item for item in data["fund_advice"]}
+    assert data["gap"] > 0
+    assert advice["000002"]["action"] == "Buy"
+    assert advice["000002"]["amount"] == pytest.approx(100.0)
+    assert advice["000001"]["gap"] < 0
+    assert advice["000001"]["action"] == "Hold"
+    assert advice["000001"]["amount"] == 0.0
+    assert advice["000001"]["executable_holding"] == pytest.approx(10000.0)
+    assert "DCA 不因短期偏离卖出" in advice["000001"]["reason"]
+    assert advice["Cash"]["executable_holding"] == pytest.approx(1000.0)
+
+
 def test_backtest_respects_fund_monthly_buy_limits():
     from core.backtest import backtest_kelly_dca
 
@@ -592,7 +668,45 @@ def test_sell_threshold_boundary():
             assert fund_action["action"] in ["Hold", "Buy"]
         # If gap >= 5% and gap is negative, should sell
         elif data["gap"] < 0:
-            assert fund_action["action"] == "Sell"
+            assert fund_action["action"] == "Hold"
+
+
+def test_recommendation_hold_reason_distinguishes_small_overweight():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Fund A"},
+            [],
+        )
+
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 5200},
+                "current_cash": 0.0,
+                "monthly_budget": 0,
+                "min_weight": 0.98,
+                "max_weight": 0.98,
+                "sell_threshold": 0.1,
+                "strategy_mode": "legacy_linear",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    fund_action = next(item for item in data["fund_advice"] if item["code"] == "000001")
+    assert fund_action["action"] == "Hold"
+    assert fund_action["amount"] == 0.0
+    assert fund_action["gap"] < 0
+    assert fund_action["executable_holding"] == pytest.approx(
+        fund_action["current_holding"]
+    )
+    assert "DCA 不因短期偏离卖出" in fund_action["reason"]
 
 
 def test_extreme_fee_handling():
@@ -673,8 +787,8 @@ def test_recommendation_sell_proceeds_not_double_counted():
         advice_list = data["fund_advice"]
         cash_row = next(item for item in advice_list if item["code"] == "Cash")
 
-        assert cash_row["action"] == "存入"
-        assert abs(cash_row["amount"] - 6930.0) < 0.1
+        assert cash_row["action"] == "持有"
+        assert cash_row["amount"] == pytest.approx(0.0)
 
 
 def test_backtests_do_not_label_cash_as_risk_free_without_risk_free_asset():

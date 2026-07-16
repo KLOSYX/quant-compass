@@ -7,6 +7,72 @@ import pandas as pd
 from fastapi import HTTPException
 
 FUND_LIST_CACHE = None
+MONEY_FUND_NAV_CACHE = {}
+MONEY_FUND_NAV_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+
+def _fetch_with_retry(fetcher, code: str, max_retries: int = 5) -> pd.DataFrame:
+    retry_delay = 1
+    for attempt in range(max_retries):
+        try:
+            return fetcher()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            print(
+                f"Attempt {attempt + 1}/{max_retries} failed for {code}: {e}. "
+                f"Retrying in {retry_delay}s..."
+            )
+            time.sleep(retry_delay)
+            retry_delay *= 2
+
+
+def _build_money_fund_nav(fund_history: pd.DataFrame) -> pd.Series:
+    required_columns = {"净值日期", "每万份收益"}
+    if fund_history.empty or not required_columns.issubset(fund_history.columns):
+        raise ValueError("货币基金历史收益数据为空或缺少每万份收益字段")
+
+    dates = pd.to_datetime(fund_history["净值日期"], errors="coerce")
+    income_per_10k = pd.to_numeric(fund_history["每万份收益"], errors="coerce")
+    daily_returns = income_per_10k / 10000.0
+    valid = dates.notna() & daily_returns.notna()
+    if not valid.any():
+        raise ValueError("货币基金历史收益数据中没有可用记录")
+
+    nav = (1.0 + daily_returns.loc[valid]).cumprod()
+    nav.index = dates.loc[valid]
+    nav = nav.sort_index()
+    nav.name = "单位净值"
+    return nav
+
+
+def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
+    if "货币" in fund_type:
+        cached = MONEY_FUND_NAV_CACHE.get(code)
+        if cached is not None:
+            cached_at, cached_nav = cached
+            if time.time() - cached_at < MONEY_FUND_NAV_CACHE_TTL_SECONDS:
+                return cached_nav.copy()
+
+        fund_history = _fetch_with_retry(
+            lambda: ak.fund_money_fund_info_em(symbol=code), code
+        )
+        nav = _build_money_fund_nav(fund_history)
+        MONEY_FUND_NAV_CACHE[code] = (time.time(), nav.copy())
+        return nav
+
+    fund_history = _fetch_with_retry(
+        lambda: ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势"),
+        code,
+    )
+    required_columns = {"净值日期", "单位净值"}
+    if fund_history.empty or not required_columns.issubset(fund_history.columns):
+        raise ValueError("开放式基金净值数据为空或字段不完整")
+
+    fund_history["净值日期"] = pd.to_datetime(fund_history["净值日期"], errors="coerce")
+    nav = pd.to_numeric(fund_history["单位净值"], errors="coerce")
+    nav.index = fund_history["净值日期"]
+    return nav.dropna().sort_index()
 
 
 def get_fund_data(
@@ -34,39 +100,14 @@ def get_fund_data(
         for code in fund_codes:
             try:
                 try:
-                    fund_names[code] = FUND_LIST_CACHE.loc[code, "基金简称"]
+                    fund_record = FUND_LIST_CACHE.loc[code]
+                    fund_names[code] = fund_record["基金简称"]
+                    fund_type = str(fund_record.get("基金类型", ""))
                 except KeyError:
                     fund_names[code] = f"{code} (名称未找到)"
+                    fund_type = ""
 
-                # Implement simple retry logic with exponential backoff
-                # Increased retries and reduced timeout as requested by user
-                max_retries = 5
-                retry_delay = 1
-                fund_nav = None
-
-                for attempt in range(max_retries):
-                    try:
-                        fund_nav = ak.fund_open_fund_info_em(
-                            symbol=code, indicator="单位净值走势"
-                        )
-                        break
-                    except Exception as e:
-                        if attempt == max_retries - 1:
-                            raise e
-                        # Log to console for debugging
-                        print(
-                            f"Attempt {attempt + 1}/{max_retries} failed for {code}: {e}. Retrying in {retry_delay}s..."
-                        )
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-
-                if fund_nav is None:
-                    raise ValueError(
-                        f"Failed to fetch data for {code} after {max_retries} attempts"
-                    )
-
-                fund_nav["净值日期"] = pd.to_datetime(fund_nav["净值日期"])
-                fund_nav = fund_nav.set_index("净值日期")["单位净值"].astype(float)
+                fund_nav = _get_fund_nav(code, fund_type)
                 fund_data[code] = fund_nav.resample("ME").last()
 
             except Exception as e:

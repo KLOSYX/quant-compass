@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
-import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar } from 'lucide-react';
+import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download } from 'lucide-react';
 import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
+import { downloadPortfolioReport } from './exportPortfolioReport';
 
 const getISODate = (date) => date.toISOString().split('T')[0];
 const formatDD = (obj, key, fallbackKey) => {
@@ -76,16 +77,17 @@ const getStoredPercentWithLegacyRatioSupport = (key, fallback) => {
     return parsed;
 };
 
+export const sanitizeLegacyHoldings = (holdings = {}) => Object.fromEntries(
+    Object.entries(holdings).filter(([code]) => code !== 'RiskFree')
+);
 function PortfolioOptimizer() {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
     const [fundFees, setFundFees] = useState({});
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
     const [currentInput, setCurrentInput] = useState('');
-    const [hasRiskFree, setHasRiskFree] = useState(false);
-    const [riskFreeRate, setRiskFreeRate] = useState('2.0');
     const [startDate, setStartDate] = useState(() => {
         const saved = localStorage.getItem('startDate');
         if (saved) return saved;
@@ -97,7 +99,19 @@ function PortfolioOptimizer() {
     const [analysisResult, setAnalysisResult] = useState(null);
     const [selectedPoint, setSelectedPoint] = useState(null);
     const [monthlyInvestment, setMonthlyInvestment] = useState(() => localStorage.getItem('monthlyInvestment') || '');
-    const [initialHoldings, setInitialHoldings] = useState(() => JSON.parse(localStorage.getItem('initialHoldings') || '{}'));
+    const [initialHoldings, setInitialHoldings] = useState(() => {
+        let stored = {};
+        try {
+            stored = JSON.parse(localStorage.getItem('initialHoldings') || '{}');
+        } catch (_) {
+            stored = {};
+        }
+        const sanitized = sanitizeLegacyHoldings(stored);
+        if (Object.prototype.hasOwnProperty.call(stored, 'RiskFree')) {
+            localStorage.setItem('initialHoldings', JSON.stringify(sanitized));
+        }
+        return sanitized;
+    });
     const [currentCash, setCurrentCash] = useState(() => localStorage.getItem('currentCash') || '');
 
     // Advanced Strategy Parameters
@@ -140,10 +154,9 @@ function PortfolioOptimizer() {
         setShowPortfolioDetails(false);
     };
 
-    const getOptionalRiskFreeRate = () => {
-        if (!hasRiskFree) return null;
-        return (parseFloat(riskFreeRate) || 0) / 100;
-    };
+    const handleExport = () => downloadPortfolioReport({
+        language, selectedPoint, fundNames: analysisResult?.fund_names || {}, initialHoldings, currentCash, recommendationResult
+    });
 
     useEffect(() => {
         const savedFundCodes = localStorage.getItem('fundCodes');
@@ -151,15 +164,11 @@ function PortfolioOptimizer() {
         const savedFundBuyFees = localStorage.getItem('fundBuyFees');
         const savedFundSellFees = localStorage.getItem('fundSellFees');
         const savedFundInvestmentLimits = localStorage.getItem('fundInvestmentLimits');
-        const savedHasRiskFree = localStorage.getItem('hasRiskFree');
-        const savedRiskFreeRate = localStorage.getItem('riskFreeRate');
         if (savedFundCodes) setFundCodes(JSON.parse(savedFundCodes));
         if (savedFundFees) setFundFees(JSON.parse(savedFundFees));
         if (savedFundBuyFees) setFundBuyFees(JSON.parse(savedFundBuyFees));
         if (savedFundSellFees) setFundSellFees(JSON.parse(savedFundSellFees));
         if (savedFundInvestmentLimits) setFundInvestmentLimits(JSON.parse(savedFundInvestmentLimits));
-        if (savedHasRiskFree) setHasRiskFree(JSON.parse(savedHasRiskFree));
-        if (savedRiskFreeRate) setRiskFreeRate(savedRiskFreeRate);
     }, []);
 
     useEffect(() => {
@@ -194,28 +203,17 @@ function PortfolioOptimizer() {
 
     const handleRemoveAsset = (codeToRemove) => {
         clearAnalysisOutputs();
-        if (codeToRemove === 'RiskFree') {
-            setHasRiskFree(false);
-            localStorage.setItem('hasRiskFree', JSON.stringify(false));
-        } else {
-            const newFundCodes = fundCodes.filter(code => code !== codeToRemove);
-            const newFundFees = { ...fundFees };
-            const newFundInvestmentLimits = { ...fundInvestmentLimits };
-            delete newFundFees[codeToRemove];
-            delete newFundInvestmentLimits[codeToRemove];
-            setFundCodes(newFundCodes);
-            setFundFees(newFundFees);
-            setFundInvestmentLimits(newFundInvestmentLimits);
-            localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
-            localStorage.setItem('fundFees', JSON.stringify(newFundFees));
-            localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
-        }
-    };
-
-    const handleAddRiskFree = () => {
-        clearAnalysisOutputs();
-        setHasRiskFree(true);
-        localStorage.setItem('hasRiskFree', JSON.stringify(true));
+        const newFundCodes = fundCodes.filter(code => code !== codeToRemove);
+        const newFundFees = { ...fundFees };
+        const newFundInvestmentLimits = { ...fundInvestmentLimits };
+        delete newFundFees[codeToRemove];
+        delete newFundInvestmentLimits[codeToRemove];
+        setFundCodes(newFundCodes);
+        setFundFees(newFundFees);
+        setFundInvestmentLimits(newFundInvestmentLimits);
+        localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
+        localStorage.setItem('fundFees', JSON.stringify(newFundFees));
+        localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
     };
 
     const handleFeeChange = (code, fee) => {
@@ -259,12 +257,6 @@ function PortfolioOptimizer() {
             return acc;
         }, {});
     };
-
-    const handleRiskFreeRateChange = (rate) => {
-        clearAnalysisOutputs();
-        setRiskFreeRate(rate);
-        localStorage.setItem('riskFreeRate', rate);
-    }
 
     const handleHoldingChange = (code, value) => {
         const newHoldings = { ...initialHoldings, [code]: value };
@@ -316,7 +308,6 @@ function PortfolioOptimizer() {
                 fund_fees: feesAsFloats,
                 start_date: startDate,
                 end_date: endDate,
-                risk_free_rate: getOptionalRiskFreeRate(),
                 strategy_mode: strategyMode,
                 kelly_fraction: (Number.isNaN(parsedKellyFraction) ? 50 : parsedKellyFraction) / 100,
                 estimation_window: Number.isNaN(parsedEstimationWindow) ? 36 : parsedEstimationWindow,
@@ -375,7 +366,7 @@ function PortfolioOptimizer() {
             }
 
             // ACTUAL: User's real holdings + separate cash balance
-            const actualHoldings = Object.entries(initialHoldings).reduce((acc, [code, val]) => {
+            const actualHoldings = Object.entries(sanitizeLegacyHoldings(initialHoldings)).reduce((acc, [code, val]) => {
                 const v = parseFloat(val);
                 if (v > 0) acc[code] = v;
                 return acc;
@@ -388,7 +379,6 @@ function PortfolioOptimizer() {
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
-                risk_free_rate: getOptionalRiskFreeRate(),
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
@@ -451,7 +441,7 @@ function PortfolioOptimizer() {
     const getRecommendation = async () => {
         setLoading((prev) => ({ ...prev, recommendation: true }));
         try {
-            const holdingsAsFloats = Object.entries(initialHoldings).reduce((acc, [code, val]) => {
+            const holdingsAsFloats = Object.entries(sanitizeLegacyHoldings(initialHoldings)).reduce((acc, [code, val]) => {
                 const parsed = parseFloat(val);
                 if (!isNaN(parsed) && parsed > 0) {
                     acc[code] = parsed;
@@ -472,7 +462,6 @@ function PortfolioOptimizer() {
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
                 monthly_budget: parseFloat(monthlyInvestment) || 0,
-                risk_free_rate: getOptionalRiskFreeRate(),
                 max_buy_multiplier: parseFloat(maxBuyMultiplier),
                 sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
@@ -636,9 +625,6 @@ function PortfolioOptimizer() {
             if (code === 'Cash') {
                 return t('current_cash');
             }
-            if (code === 'RiskFree') {
-                return analysisResult?.fund_names?.[code] || t('risk_free_asset');
-            }
             if (analysisResult && analysisResult.fund_names && analysisResult.fund_names[code]) {
                 return analysisResult.fund_names[code];
             }
@@ -723,22 +709,7 @@ function PortfolioOptimizer() {
                                 </div>
                             </div>
 
-                            <div className="form-group">
-                                <button type="button" className="btn btn-secondary w-full" onClick={handleAddRiskFree} disabled={hasRiskFree}>
-                                    {t('add_risk_free_btn')}
-                                </button>
-                            </div>
-
-                            {(fundCodes.length > 0 || hasRiskFree) && <div className="border-t border-glass my-4"></div>}
-
-                            {hasRiskFree && (
-                                <div className="risk-free-row">
-                                    <span className="risk-free-label">{t('risk_free_asset')}</span>
-                                    <span className="text-xs text-slate-400">{t('annual_return')}</span>
-                                    <input type="number" className="form-input risk-free-input" value={riskFreeRate} onChange={(e) => handleRiskFreeRateChange(e.target.value)} placeholder="%" />
-                                    <button type="button" className="icon-btn" onClick={() => handleRemoveAsset('RiskFree')}><X size={16} /></button>
-                                </div>
-                            )}
+                            {fundCodes.length > 0 && <div className="border-t border-glass my-4"></div>}
 
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                                 {fundCodes.length > 0 && (
@@ -760,8 +731,8 @@ function PortfolioOptimizer() {
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" />
-                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.daily_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'daily_limit', e.target.value)} placeholder="100" />
-                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.monthly_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'monthly_limit', e.target.value)} placeholder="2000" />
+                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.daily_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'daily_limit', e.target.value)} placeholder={t('limit_unlimited')} />
+                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.monthly_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'monthly_limit', e.target.value)} placeholder={t('limit_unlimited')} />
                                                     <button type="button" className="icon-btn" onClick={() => handleRemoveAsset(code)}><X size={16} /></button>
                                                 </div>
                                             ))}
@@ -793,7 +764,7 @@ function PortfolioOptimizer() {
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(5)}>{t('last_5_years')}</button>
                             </div>
                         </div>
-                        <button type="submit" className="btn btn-primary w-full py-4 text-lg shadow-lg-glow" disabled={loading.analysis || (fundCodes.length === 0 && !hasRiskFree)}>
+                        <button type="submit" className="btn btn-primary w-full py-4 text-lg shadow-lg-glow" disabled={loading.analysis || fundCodes.length === 0}>
                             {loading.analysis ? t('analyzing') : t('analyze_btn')} <ArrowRight size={20} />
                         </button>
                     </div>
@@ -1108,6 +1079,9 @@ function PortfolioOptimizer() {
                             <div className="recommendation-card">
                                 <div className="card-header">
                                     <h3 className="card-title text-xl text-emerald-400"><TrendingUp size={24} /> {t('recommend_title')}</h3>
+                                    <button className="text-link-btn" onClick={handleExport} aria-label={t('export_report')}>
+                                        <Download size={16} /> {t('export_report')}
+                                    </button>
                                 </div>
 
                                 <div className="recommendation-header">
@@ -1127,7 +1101,7 @@ function PortfolioOptimizer() {
                                         <div className="recommendation-stat-value">{(recommendationResult.target_equity_ratio * 100).toFixed(0)}%</div>
                                     </div>
                                     <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('suggested_monthly')}</div>
+                                        <div className="recommendation-stat-label">{t('suggested_buy_total')}</div>
                                         <div className="recommendation-stat-value text-white">¥{recommendationResult.recommended_monthly_investment.toFixed(2)}</div>
                                     </div>
                                     <div className="recommendation-stat">
@@ -1136,20 +1110,42 @@ function PortfolioOptimizer() {
                                     </div>
                                 </div>
 
+                                {recommendationResult.window_robustness && (
+                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.window_robustness.status === 'unstable' ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                        <div className="font-semibold">Kelly 回看窗口稳健性（3 年基准）</div>
+                                        <div className="mt-1">{recommendationResult.window_robustness.message}</div>
+                                        {recommendationResult.window_robustness.measurements?.length > 0 && (
+                                            <div className="mt-2 text-xs text-slate-400">
+                                                {recommendationResult.window_robustness.measurements.map((item) => (
+                                                    <span key={item.window_months} className="mr-3">
+                                                        {item.window_months}月：{item.available ? `${(item.target_risky_ratio * 100).toFixed(1)}%` : '数据不足'}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 {recommendationResult.fund_advice && (
                                     <table className="recommendation-table">
                                         <thead>
                                             <tr>
                                                 <th>{t('table_fund')}</th>
                                                 <th>{t('table_action')}</th>
+                                                <th>{t('table_current')}</th>
                                                 <th>{t('table_amount')}</th>
+                                                <th>{t('table_gap')}</th>
                                                 <th>{t('table_target')}</th>
+                                                <th>{t('table_ideal_target')}</th>
                                                 <th>{t('table_reason')}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {recommendationResult.fund_advice.map(advice => {
                                                 const actionMeta = getAdviceActionMeta(advice.action, t);
+                                                const currentHolding = advice.current_holding ?? 0;
+                                                const afterTrade = advice.executable_holding ?? advice.target_holding;
+                                                const executableGap = afterTrade === undefined || afterTrade === null ? null : afterTrade - currentHolding;
+                                                const idealTarget = advice.ideal_holding ?? advice.target_holding;
                                                 return (
                                                     <tr key={advice.code}>
                                                         <td>{advice.name}</td>
@@ -1158,8 +1154,11 @@ function PortfolioOptimizer() {
                                                                 {actionMeta.label}
                                                             </span>
                                                         </td>
+                                                        <td className="font-mono">¥{advice.current_holding?.toFixed(2) ?? '--'}</td>
                                                         <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
-                                                        <td className="font-mono">¥{(advice.executable_holding ?? advice.target_holding)?.toFixed(2) ?? '--'}</td>
+                                                        <td className={`font-mono ${executableGap > 0 ? 'text-emerald-400' : executableGap < 0 ? 'text-amber-400' : ''}`}>{executableGap === undefined || executableGap === null ? '--' : `¥${executableGap.toFixed(2)}`}</td>
+                                                        <td className="font-mono">¥{afterTrade?.toFixed(2) ?? '--'}</td>
+                                                        <td className="font-mono text-slate-400">¥{idealTarget?.toFixed(2) ?? '--'}</td>
                                                         <td className="text-slate-500 text-xs">{advice.reason}</td>
                                                     </tr>
                                                 );

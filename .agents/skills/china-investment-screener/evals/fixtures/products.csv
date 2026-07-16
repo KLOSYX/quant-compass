@@ -1,0 +1,4 @@
+code,name,type,purchase_status,channel_status
+000001,示例稳健债券A,债券型,开放申购,public_open
+000002,示例短历史债券A,债券型,开放申购,unknown
+000003,示例封闭债券A,债券型,暂停申购,ant_verified

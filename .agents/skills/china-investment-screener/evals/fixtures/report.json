@@ -1,0 +1,85 @@
+{
+  "as_of_date": "2026-07-12",
+  "coverage": {
+    "products_received": 3,
+    "nav_valid": 3,
+    "nav_failed": 0,
+    "eligible": 1,
+    "filtered": 2
+  },
+  "channel_note": "public_open does not mean ant_verified",
+  "candidates": [
+    {
+      "code": "000001",
+      "name": "示例稳健债券A",
+      "type": "债券型",
+      "purchase_status": "开放申购",
+      "channel_status": "public_open",
+      "valid": true,
+      "start_date": "2024-01-31",
+      "end_date": "2026-07-10",
+      "history_days": 891,
+      "nav_points": 31,
+      "total_return": 0.08699999999999997,
+      "annual_return": 0.03478869010197139,
+      "annual_volatility": 0.006278225071553971,
+      "max_drawdown": 0.0,
+      "positive_month_ratio": 1.0,
+      "calmar": null,
+      "stale_days": 2,
+      "hard_filter_reasons": [],
+      "eligible": true,
+      "peer_score": 100.0
+    },
+    {
+      "code": "000002",
+      "name": "示例短历史债券A",
+      "type": "债券型",
+      "purchase_status": "开放申购",
+      "channel_status": "unknown",
+      "valid": true,
+      "start_date": "2026-01-31",
+      "end_date": "2026-07-10",
+      "history_days": 160,
+      "nav_points": 7,
+      "total_return": 0.02200000000000002,
+      "annual_return": 0.05093201675318726,
+      "annual_volatility": 0.10495885476880534,
+      "max_drawdown": -0.004950495049505066,
+      "positive_month_ratio": 0.6666666666666666,
+      "calmar": 10.288267384143586,
+      "stale_days": 2,
+      "hard_filter_reasons": [
+        "history_too_short",
+        "too_few_nav_points"
+      ],
+      "eligible": false,
+      "peer_score": null
+    },
+    {
+      "code": "000003",
+      "name": "示例封闭债券A",
+      "type": "债券型",
+      "purchase_status": "暂停申购",
+      "channel_status": "ant_verified",
+      "valid": true,
+      "start_date": "2024-01-31",
+      "end_date": "2026-07-10",
+      "history_days": 891,
+      "nav_points": 7,
+      "total_return": 0.10099999999999998,
+      "annual_return": 0.04023146645563824,
+      "annual_volatility": 0.11912091174625637,
+      "max_drawdown": 0.0,
+      "positive_month_ratio": 1.0,
+      "calmar": null,
+      "stale_days": 2,
+      "hard_filter_reasons": [
+        "not_currently_open",
+        "too_few_nav_points"
+      ],
+      "eligible": false,
+      "peer_score": null
+    }
+  ]
+}

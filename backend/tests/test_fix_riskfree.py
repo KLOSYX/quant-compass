@@ -36,6 +36,7 @@ def test_riskfree_post_trade_calculation():
             min_weight=0.5,
             max_weight=0.5,
             ma_window=5,
+            risk_free_rate=0.03,
         )
 
         # Async run wrapper

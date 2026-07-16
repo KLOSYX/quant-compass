@@ -87,7 +87,7 @@ class CurrentRecommendationRequest(BaseModel):
     current_holdings: Dict[str, float] = {}
     current_cash: float = 0.0
     monthly_budget: float
-    risk_free_rate: Optional[float] = 0.0
+    risk_free_rate: Optional[float] = None
     max_buy_multiplier: float = 3.0
     sell_threshold: float = 0.05
     min_weight: float = 0.3

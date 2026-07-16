@@ -315,3 +315,91 @@ def calculate_target_ratio_optimized(
         target_ratio, lower_bound, final_upper, OPTIMIZED_SIGNAL_EPSILON
     )
     return target_ratio, allocation_signal, optimizer_info
+
+
+WINDOW_ROBUSTNESS_WINDOWS = (24, 36, 48, 60)
+WINDOW_ROBUSTNESS_SPREAD_LIMIT = 0.15
+
+
+def assess_kelly_window_robustness(
+    *,
+    reference_portfolio_nav: pd.Series,
+    min_weight: float,
+    max_weight: float,
+    kelly_fraction: float,
+    risk_free_rate: float,
+    total_wealth: float,
+    minimum_cash_reserve: float,
+    enable_cvar_constraint: bool,
+    cvar_confidence: float,
+    cvar_limit: float,
+    enable_drawdown_constraint: bool,
+    max_drawdown_limit: float,
+):
+    """Diagnose whether the fixed 36-month Kelly estimate is window-stable."""
+    clean_nav = reference_portfolio_nav.dropna()
+    history_count = max(0, len(clean_nav) - 1)
+    measurements = []
+    for window in WINDOW_ROBUSTNESS_WINDOWS:
+        if history_count < window:
+            measurements.append(
+                {
+                    "window_months": window,
+                    "available": False,
+                    "reason": f"需要至少 {window} 个月收益数据，当前只有 {history_count} 个月",
+                }
+            )
+            continue
+        ratio, signal, optimizer_info = calculate_target_ratio_optimized(
+            reference_portfolio_nav=clean_nav,
+            timestamp=clean_nav.index[-1],
+            min_weight=min_weight,
+            max_weight=max_weight,
+            kelly_fraction=kelly_fraction,
+            estimation_window=window,
+            risk_free_rate=risk_free_rate,
+            total_wealth=total_wealth,
+            minimum_cash_reserve=minimum_cash_reserve,
+            enable_cvar_constraint=enable_cvar_constraint,
+            cvar_confidence=cvar_confidence,
+            cvar_limit=cvar_limit,
+            enable_drawdown_constraint=enable_drawdown_constraint,
+            max_drawdown_limit=max_drawdown_limit,
+        )
+        measurements.append(
+            {
+                "window_months": window,
+                "available": True,
+                "target_risky_ratio": ratio,
+                "allocation_signal": signal,
+                "optimizer_info": optimizer_info,
+            }
+        )
+
+    available = [item for item in measurements if item["available"]]
+    base = next((item for item in available if item["window_months"] == 36), None)
+    long_windows = [item for item in available if item["window_months"] in {36, 48, 60}]
+    if base is None or len(long_windows) < 2:
+        return {
+            "status": "insufficient_data",
+            "base_window_months": 36,
+            "measurements": measurements,
+            "message": "基金共同历史不足，无法验证 3 年窗口是否稳健；未使用代理历史回填。",
+        }
+
+    ratios = [item["target_risky_ratio"] for item in long_windows]
+    ratio_spread = float(max(ratios) - min(ratios))
+    signals = {item["allocation_signal"] for item in long_windows}
+    unstable = ratio_spread > WINDOW_ROBUSTNESS_SPREAD_LIMIT or len(signals) > 1
+    return {
+        "status": "unstable" if unstable else "stable",
+        "base_window_months": 36,
+        "measurements": measurements,
+        "target_ratio_spread": ratio_spread,
+        "signal_consistent": len(signals) == 1,
+        "message": (
+            "36、48、60 个月窗口给出的 Kelly 配比差异较大；本月应降低对 Kelly 倾斜的信任，优先按固定 DCA 执行。"
+            if unstable
+            else "36、48、60 个月窗口的 Kelly 配比较接近，3 年窗口目前处于稳定平台。"
+        ),
+    }

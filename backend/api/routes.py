@@ -30,6 +30,7 @@ from core.portfolio import (
 )
 from core.risk import calculate_asset_diagnostics
 from core.strategy import (
+    assess_kelly_window_robustness,
     calculate_target_ratio,
     calculate_target_ratio_optimized,
     infer_valuation_signal,
@@ -37,6 +38,21 @@ from core.strategy import (
 )
 
 router = APIRouter()
+
+
+def _reject_implicit_legacy_risk_free(
+    *,
+    weights: dict[str, float],
+    holdings: dict[str, float],
+    risk_free_rate: float | None,
+) -> None:
+    legacy_holding = float(holdings.get("RiskFree", 0.0))
+    explicit_weight = float(weights.get("RiskFree", 0.0))
+    if legacy_holding > 1e-12 and explicit_weight <= 1e-12 and risk_free_rate is None:
+        raise HTTPException(
+            status_code=400,
+            detail="检测到旧版合成资产 RiskFree 持仓。请删除该旧持仓，并使用实际货币基金代码。",
+        )
 
 
 @router.post("/analyze")
@@ -159,6 +175,11 @@ async def analyze_portfolio(request: AnalysisRequest):
 async def get_current_recommendation(request: CurrentRecommendationRequest):
     """Calculate current investment recommendation based on latest market data."""
     try:
+        _reject_implicit_legacy_risk_free(
+            weights=request.weights,
+            holdings=request.current_holdings,
+            risk_free_rate=request.risk_free_rate,
+        )
         validate_strategy_params(
             strategy_mode=request.strategy_mode,
             min_weight=request.min_weight,
@@ -176,7 +197,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         # Fetch latest fund data (last 12 months for MA calculation)
         end_date_obj = date.today()
         start_date_obj = date(
-            end_date_obj.year - 2, end_date_obj.month, end_date_obj.day
+            end_date_obj.year - 5, end_date_obj.month, end_date_obj.day
         )
 
         fund_df, fund_names, _ = get_fund_data(
@@ -201,7 +222,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         )
         has_risky_assets = base_risky_ratio > 0 and float(risky_weights.sum()) > 0
 
-        # Kelly/VA strategy treats cash as the risk-free sleeve outside the risky basket.
+        # Kelly+DCA strategy treats cash as the risk-free sleeve outside the risky basket.
         if has_risky_assets:
             reference_portfolio_nav = adjusted_fund_df[risky_weights.index].dot(
                 risky_weights
@@ -307,6 +328,28 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 max_drawdown_limit=request.max_drawdown_limit,
             )
 
+        if has_risky_assets and request.strategy_mode != "legacy_linear":
+            window_robustness = assess_kelly_window_robustness(
+                reference_portfolio_nav=reference_portfolio_nav,
+                min_weight=request.min_weight,
+                max_weight=request.max_weight,
+                kelly_fraction=request.kelly_fraction,
+                risk_free_rate=request.risk_free_rate or 0.0,
+                total_wealth=total_wealth_projected,
+                minimum_cash_reserve=request.minimum_cash_reserve,
+                enable_cvar_constraint=request.enable_cvar_constraint,
+                cvar_confidence=request.cvar_confidence,
+                cvar_limit=request.cvar_limit,
+                enable_drawdown_constraint=request.enable_drawdown_constraint,
+                max_drawdown_limit=request.max_drawdown_limit,
+            )
+        else:
+            window_robustness = {
+                "status": "not_applicable",
+                "base_window_months": 36,
+                "measurements": [],
+                "message": "窗口稳健性评估仅适用于优化 Kelly 模式。",
+            }
         # Calculate target equity value
         target_equity_ratio = float(
             np.clip(base_risky_ratio * tactical_ratio, 0.0, 1.0)
@@ -327,40 +370,12 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         # Calculate gap
         gap = target_equity_value - current_equity_value
 
-        # Calculate recommended investment with Limits
-        recommended_monthly_investment = 0.0
-
-        if gap > 0:
-            # Calculate available cash including new budget
-            available_cash = max(
-                0.0,
-                (risk_free_balance if can_use_risk_free_asset else 0.0)
-                + current_cash
-                + request.monthly_budget
-                - target_cash_value,
-            )
-
-            # Pre-calculate average buy fee rate based on effective risky weights
-            total_weight = risky_weights.sum()
-            avg_fee = 0.0
-            if total_weight > 0:
-                avg_fee = (
-                    sum(
-                        request.buy_fee.get(code, 0.0) * w
-                        for code, w in risky_weights.items()
-                    )
-                    / total_weight
-                )
-
-            # Apply triple constraint: Gap (converted to gross), Budget Limit, Available Cash
-            # gap is the NAV gap. To fill it, we need gap * (1 + avg_fee) cash.
-            gross_gap = gap * (1 + avg_fee)
-            limit = request.monthly_budget * request.max_buy_multiplier
-
-            # recommended_monthly_investment is now the TOTAL CASH to be spent (Gross)
-            recommended_monthly_investment = min(gross_gap, limit, available_cash)
-
-        recommended_monthly_investment = max(0, recommended_monthly_investment)
+        # Kelly selects the target mix, while DCA fixes this period's total
+        # contribution. Existing Cash and RiskFree are not consumed to chase a
+        # target, and max_buy_multiplier is retained only for API compatibility.
+        recommended_monthly_investment = (
+            max(0.0, request.monthly_budget) if gap > 0 else 0.0
+        )
 
         # Calculate Detailed Fund Advice
         fund_advice = []
@@ -402,7 +417,9 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             gap_val = fund_gaps.get(code, 0)
             ideal_target_val = current_val + gap_val
             target_val = ideal_target_val
-            sell_threshold_value = total_wealth_projected * request.sell_threshold
+            buy_fee = request.buy_fee.get(code, 0.0)
+            gross_gap = max(0.0, gap_val) * (1 + buy_fee)
+            monthly_buy_limit = fund_monthly_limits.get(code, float("inf"))
 
             # Reset action and amount for each fund to prevent leakage
             # Using a more robust if-elif-else structure
@@ -411,31 +428,32 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             reason = "持有"
 
             if gap_val < 0:
-                # Sells must be evaluated per fund, even when the portfolio is net-buying elsewhere.
-                # Otherwise zero-target assets can get stuck as "Hold".
+                # A zero target is an explicit removal from the selected
+                # analysis universe, so it is the one DCA exception that may
+                # sell. Other overweights are corrected by later contributions.
                 if target_val <= 1e-9:
                     action = "Sell"
                     amount = abs(gap_val)
                     reason = "目标仓位为0，建议卖出"
-                elif abs(gap_val) > sell_threshold_value:
-                    action = "Sell"
-                    amount = abs(gap_val)
-                    reason = f"严重高估触发减持 (Gap: {gap_val:.1f})"
                 else:
                     action = "Hold"
-                    reason = "未达卖出阈值"
+                    reason = "DCA 不因短期偏离卖出；后续新增资金将优先投向低配资产"
             elif gap_val > 0:
                 allocated_buy = buy_allocations.get(code, 0.0)
+                limit_applied = bool(
+                    np.isfinite(monthly_buy_limit)
+                    and gross_gap > monthly_buy_limit + 1e-9
+                    and allocated_buy + 1e-9 >= monthly_buy_limit
+                )
                 if allocated_buy > 0 and positive_gap_sum > 0:
                     action = "Buy"
                     # amount is the Gross Cash to spend on this fund
                     amount = allocated_buy
-                    buy_fee = request.buy_fee.get(code, 0.0)
                     target_val = current_val + amount / (1 + buy_fee)
-                    if amount + 1e-9 < gap_val * (1 + buy_fee):
+                    if limit_applied:
                         reason = "受申购限额约束，先买入可执行额度"
                     else:
-                        reason = f"价值平均补足缺口 (Gap: {gap_val:.1f})"
+                        reason = f"按 DCA 预算向低配资产投入 (Gap: {gap_val:.1f})"
                 else:
                     action = "Hold"
                     if fund_monthly_limits.get(code, float("inf")) <= 1e-9:
@@ -446,6 +464,9 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 action = "Hold"
                 reason = "仓位已达标"
 
+            if gap_val <= 0:
+                limit_applied = False
+
             # target_val is already calculated as the ideal target (current + gap)
 
             fund_advice.append(
@@ -454,21 +475,19 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     "name": fund_names.get(code, code),
                     "current_holding": current_val,
                     "target_holding": target_val,
-                    "executable_holding": target_val,
+                    "executable_holding": (
+                        current_val + amount / (1 + request.buy_fee.get(code, 0.0))
+                        if action == "Buy"
+                        else current_val
+                    ),
                     "ideal_holding": ideal_target_val,
                     "gap": gap_val,
                     "action": action,
                     "amount": amount,
                     "monthly_buy_limit": (
-                        fund_monthly_limits.get(code)
-                        if np.isfinite(fund_monthly_limits.get(code, float("inf")))
-                        else None
+                        monthly_buy_limit if np.isfinite(monthly_buy_limit) else None
                     ),
-                    "limit_applied": bool(
-                        amount + 1e-9
-                        < max(0.0, gap_val) * (1 + request.buy_fee.get(code, 0.0))
-                        and fund_monthly_limits.get(code, float("inf")) < float("inf")
-                    ),
+                    "limit_applied": limit_applied,
                     "reason": reason,
                 }
             )
@@ -581,6 +600,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "current_price": float(current_price),
             "strategy_mode": request.strategy_mode,
             "optimizer_info": optimizer_info,
+            "window_robustness": window_robustness,
             "effective_risky_weights": risky_weights.to_dict(),
             "warnings": [
                 (
@@ -606,6 +626,12 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
 @router.post("/backtest_strategies")
 async def run_strategy_backtests(request: StrategyBacktestRequest):
     try:
+        _reject_implicit_legacy_risk_free(
+            weights=request.weights,
+            holdings=request.initial_holdings,
+            risk_free_rate=request.risk_free_rate,
+        )
+
         validate_strategy_params(
             strategy_mode=request.strategy_mode,
             min_weight=request.min_weight,

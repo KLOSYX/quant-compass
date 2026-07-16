@@ -1,0 +1,10 @@
+{
+  "objective": "三年内稳健增值",
+  "horizon_years": 3,
+  "max_drawdown": 0.08,
+  "allowed_types": ["债券型"],
+  "as_of_date": "2026-07-12",
+  "min_history_days": 365,
+  "min_nav_points": 12,
+  "max_stale_days": 14
+}

@@ -216,11 +216,11 @@ def backtest_kelly_dca(
     initial_cash: float = 0.0,
     fund_investment_limits: Dict[str, object] = None,
 ):
-    """
-    Advanced Value Averaging (VA) Strategy.
-    Note: Sometimes referred to as "Kelly DCA" in this codebase, but technically
-    it implements Value Averaging by dynamically adjusting investment based on
-    market valuation (Price vs MA bias).
+    """Kelly-guided DCA strategy.
+
+    Every period adds the fixed external contribution. Kelly determines the
+    target risk mix and directs that contribution to underweight funds; it does
+    not increase the contribution or force sales to close a target-value gap.
     """
     validate_strategy_params(
         strategy_mode=strategy_mode,
@@ -391,83 +391,42 @@ def backtest_kelly_dca(
                     max_drawdown_limit=max_drawdown_limit,
                 )
 
-        # 4. Rebalance Step
+        # 4. DCA execution: this month's external contribution is the only
+        # risky-asset purchase budget. Kelly chooses the target mix; it does
+        # not create a VA-style catch-up contribution or forced rebalancing.
         final_target_risky_ratio = float(
             np.clip(base_risky_ratio * tactical_ratio, 0.0, 1.0)
         )
         target_equity_value = total_wealth * final_target_risky_ratio
-        diff = target_equity_value - current_equity_value
+        current_asset_values = total_shares * nav_row[total_shares.index]
+        target_asset_values = risky_weights * target_equity_value
+        fund_gaps = target_asset_values - current_asset_values
+        positive_gross_gap = sum(
+            max(0.0, float(fund_gaps.get(code, 0.0)))
+            * (1 + max(0.0, float((buy_fee or {}).get(code, 0.0))))
+            for code in risky_columns
+        )
+        dca_budget = max(0.0, monthly_investment)
+        max_cash_to_spend = min(positive_gross_gap, dca_budget)
+        buy_allocations = allocate_capped_buy_amounts(
+            risky_columns,
+            fund_gaps.to_dict(),
+            risky_weights.to_dict(),
+            buy_fee or {},
+            max_cash_to_spend,
+            fund_investment_limits,
+            timestamp,
+        )
+        total_cost_with_fees = sum(buy_allocations.values())
 
-        if diff > 0:
-            # Buy Limit: Min(Gap, Cash Balance considering fees, Budget * Multiplier)
-            buy_limit = monthly_investment * max_buy_multiplier
-
-            # Pre-calculate average fee rate to prevent cash overdraft
-            total_weight = risky_weights[risky_weights > 0].sum()
-            avg_fee = 0.0
-            if total_weight > 0:
-                avg_fee = (
-                    sum(
-                        (buy_fee or {}).get(code, 0.0) * w
-                        for code, w in risky_weights[risky_weights > 0].items()
-                    )
-                    / total_weight
-                )
-
-            # Calculate max buyable amount considering fees and cash reserve floor
-            cash_for_buy = max(0.0, cash_balance - minimum_cash_reserve)
-            if can_use_risk_free_asset:
-                cash_for_buy += current_risk_free_value
-
-            max_cash_to_spend = min(diff * (1 + avg_fee), cash_for_buy, buy_limit)
-            fund_gaps = {
-                code: diff * risky_weights.get(code, 0.0) for code in risky_columns
-            }
-            buy_allocations = allocate_capped_buy_amounts(
-                risky_columns,
-                fund_gaps,
-                risky_weights.to_dict(),
-                buy_fee or {},
-                max_cash_to_spend,
-                fund_investment_limits,
-                timestamp,
-            )
-            total_cost_with_fees = sum(buy_allocations.values())
-
-            if total_cost_with_fees > 0:
-                # Buy shares and deduct fees
-                for code, gross_amount in buy_allocations.items():
-                    if gross_amount > 0:
-                        f = (buy_fee or {}).get(code, 0.0)
-                        net_amount = gross_amount / (1 + f)
-                        total_shares[code] += net_amount / nav_row[code]
-
-                if can_use_risk_free_asset and total_cost_with_fees > cash_balance:
-                    redeem_needed = min(
-                        total_cost_with_fees - cash_balance, current_risk_free_value
-                    )
-                    if redeem_needed > 0:
-                        risk_free_shares -= redeem_needed / nav_row["RiskFree"]
-                        cash_balance += redeem_needed
-                cash_balance -= total_cost_with_fees
-        elif diff < 0:
-            # Sell Limit: Only if gap > threshold
-            if abs(diff) > total_wealth * sell_threshold:
-                sell_amount = abs(diff)
-                if sell_amount > 0:
-                    net_proceeds = 0.0
-                    for code, w in risky_weights.items():
-                        if w > 0:
-                            f = (sell_fee or {}).get(code, 0.0)
-                            # CRITICAL FIX: Cannot sell more than what we have (No short selling)
-                            # target_amt_to_sell is sell_amount * weight
-                            available_val = total_shares[code] * nav_row[code]
-                            actual_amt_to_sell = min(sell_amount * w, available_val)
-
-                            if actual_amt_to_sell > 0:
-                                net_proceeds += actual_amt_to_sell * (1 - f)
-                                total_shares[code] -= actual_amt_to_sell / nav_row[code]
-                    cash_balance += net_proceeds
+        if total_cost_with_fees > 0:
+            for code, gross_amount in buy_allocations.items():
+                if gross_amount <= 0:
+                    continue
+                fee = max(0.0, float((buy_fee or {}).get(code, 0.0)))
+                net_amount = gross_amount / (1 + fee)
+                total_shares[code] += net_amount / nav_row[code]
+            cash_balance -= total_cost_with_fees
 
         if can_use_risk_free_asset:
             current_risk_free_value = risk_free_shares * nav_row["RiskFree"]
@@ -587,7 +546,7 @@ def simulate_strategy_frontier(
     fund_investment_limits=None,
 ):
     """
-    Simulate VA/Kelly strategy for each point on the frontier to get separate 'Strategy Frontier'.
+    Simulate the Kelly-guided DCA strategy for each frontier point.
     If user_min_weight / user_max_weight are provided, use them (Manual Mode).
     Otherwise, use auto-tuning logic (Auto Mode).
     """

@@ -29,7 +29,7 @@ def append_frontier_stability_warnings(
         return
 
     warnings.append(
-        "有效前沿权重仍基于全样本静态估计，不属于样本外结果；实际投入请优先参考 Kelly/VA 回测而不是理论前沿本身。"
+        "有效前沿权重仍基于全样本静态估计，不属于样本外结果；实际投入请优先参考 Kelly+DCA 回测而不是理论前沿本身。"
     )
 
     if len(risky_df) < 24:
