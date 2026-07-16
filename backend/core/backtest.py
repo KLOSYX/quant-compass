@@ -3,6 +3,10 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+from core.classification import (
+    calculate_exposure_metrics,
+    normalize_asset_categories,
+)
 from core.constants import (
     DEFAULT_CVAR_CONFIDENCE,
     DEFAULT_CVAR_LIMIT,
@@ -217,6 +221,7 @@ def backtest_kelly_dca(
     fund_investment_limits: Dict[str, object] = None,
     exit_fund_codes=None,
     reuse_settled_sale_proceeds: bool = False,
+    asset_categories: Dict[str, str] = None,
 ):
     """Kelly-guided DCA strategy.
 
@@ -246,6 +251,9 @@ def backtest_kelly_dca(
         df_nav["RiskFree"] = 1.0
 
     selected = decompose_selected_weights(weights_dict, list(df_nav.columns))
+    normalized_asset_categories = normalize_asset_categories(
+        list(df_nav.columns), asset_categories
+    )
     risky_weights = selected["risky_weights"]
     base_risky_ratio = float(selected["base_risky_ratio"])
     base_risk_free_ratio = float(selected["base_risk_free_ratio"])
@@ -279,6 +287,7 @@ def backtest_kelly_dca(
     portfolio_history = {}
     attribution_history = {}
     execution_history = {}
+    category_attribution_history = {}
     invested_history = {}
 
     if has_risky_assets:
@@ -483,6 +492,20 @@ def backtest_kelly_dca(
             )
             + cash_balance
         )
+        category_metrics = calculate_exposure_metrics(
+            {code: value for code, value in attribution_dict.items() if code != "Cash"},
+            total_wealth=total_portfolio_value,
+            asset_categories=normalized_asset_categories,
+        )
+        category_attribution_history[timestamp] = {
+            **category_metrics,
+            "cash_value": cash_balance,
+            "cash_exposure": (
+                cash_balance / total_portfolio_value
+                if total_portfolio_value > 0
+                else 0.0
+            ),
+        }
         portfolio_history[timestamp] = total_portfolio_value
         invested_history[timestamp] = accumulated_investment
 
@@ -520,6 +543,7 @@ def backtest_kelly_dca(
         "strategy_mode": strategy_mode,
         "optimizer_info": optimizer_info_current,
         "effective_risky_weights": risky_weights.to_dict(),
+        "asset_categories": normalized_asset_categories,
         "history": {
             date.strftime("%Y-%m"): value for date, value in portfolio_history.items()
         },
@@ -531,6 +555,10 @@ def backtest_kelly_dca(
         },
         "execution": {
             date.strftime("%Y-%m"): value for date, value in execution_history.items()
+        },
+        "category_attribution": {
+            date.strftime("%Y-%m"): value
+            for date, value in category_attribution_history.items()
         },
     }
 
@@ -545,8 +573,6 @@ def simulate_strategy_frontier(
     ma_window=12,
     buy_fee=None,
     sell_fee=None,
-    max_buy_multiplier=3.0,
-    sell_threshold=0.05,
     user_min_weight=None,
     user_max_weight=None,
     strategy_mode=DEFAULT_STRATEGY_MODE,
@@ -561,6 +587,7 @@ def simulate_strategy_frontier(
     initial_lump_sum=0.0,
     monthly_investment=1000.0,
     fund_investment_limits=None,
+    asset_categories=None,
 ):
     """
     Simulate the Kelly-guided DCA strategy for each frontier point.
@@ -606,8 +633,6 @@ def simulate_strategy_frontier(
             initial_holdings={
                 code: initial_lump_sum * w for code, w in weights.items() if w > 0
             },
-            max_buy_multiplier=max_buy_multiplier,
-            sell_threshold=sell_threshold,
             min_weight=min_weight,
             max_weight=max_weight,
             buy_fee=buy_fee or {},
@@ -624,6 +649,7 @@ def simulate_strategy_frontier(
             enable_drawdown_constraint=enable_drawdown_constraint,
             max_drawdown_limit=max_drawdown_limit,
             fund_investment_limits=fund_investment_limits,
+            asset_categories=asset_categories,
         )
 
         # Strategy Return: Standard CAGR based on Strategy Unit NAV

@@ -80,6 +80,10 @@ const getStoredPercentWithLegacyRatioSupport = (key, fallback) => {
 export const sanitizeLegacyHoldings = (holdings = {}) => Object.fromEntries(
     Object.entries(holdings).filter(([code]) => code !== 'RiskFree')
 );
+export const ASSET_CATEGORY_OPTIONS = ['equity', 'bond', 'commodity', 'gold', 'money_market', 'cash_equivalent', 'other'];
+export const buildAssetCategoriesPayload = (fundCodes, categories = {}) => Object.fromEntries(
+    fundCodes.map(code => [code, ASSET_CATEGORY_OPTIONS.includes(categories[code]) ? categories[code] : 'other'])
+);
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -87,6 +91,13 @@ function PortfolioOptimizer() {
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
+    const [fundAssetCategories, setFundAssetCategories] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundAssetCategories') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
     const [currentInput, setCurrentInput] = useState('');
     const [startDate, setStartDate] = useState(() => {
         const saved = localStorage.getItem('startDate');
@@ -131,8 +142,6 @@ function PortfolioOptimizer() {
         return saved === null ? true : JSON.parse(saved);
     });
     const [maxDrawdownLimit, setMaxDrawdownLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('maxDrawdownLimit', 20)); // pct
-    const [maxBuyMultiplier, setMaxBuyMultiplier] = useState(() => getStoredNumber('maxBuyMultiplier', 3.0));
-    const [sellThreshold, setSellThreshold] = useState(() => getStoredPercentWithLegacyRatioSupport('sellThreshold', 5.0)); // pct
     const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
     const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
     const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
@@ -190,13 +199,16 @@ function PortfolioOptimizer() {
             const newFundCodes = [...fundCodes, currentInput.trim()];
             const newFundFees = { ...fundFees, [currentInput.trim()]: '' };
             const newFundInvestmentLimits = { ...fundInvestmentLimits, [currentInput.trim()]: { daily_limit: '', monthly_limit: '' } };
+            const newFundAssetCategories = { ...fundAssetCategories, [currentInput.trim()]: 'other' };
             clearAnalysisOutputs();
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
             setFundInvestmentLimits(newFundInvestmentLimits);
+            setFundAssetCategories(newFundAssetCategories);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
             localStorage.setItem('fundFees', JSON.stringify(newFundFees));
             localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
+            localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
             setCurrentInput('');
         }
     };
@@ -206,14 +218,18 @@ function PortfolioOptimizer() {
         const newFundCodes = fundCodes.filter(code => code !== codeToRemove);
         const newFundFees = { ...fundFees };
         const newFundInvestmentLimits = { ...fundInvestmentLimits };
+        const newFundAssetCategories = { ...fundAssetCategories };
         delete newFundFees[codeToRemove];
         delete newFundInvestmentLimits[codeToRemove];
+        delete newFundAssetCategories[codeToRemove];
         setFundCodes(newFundCodes);
         setFundFees(newFundFees);
         setFundInvestmentLimits(newFundInvestmentLimits);
+        setFundAssetCategories(newFundAssetCategories);
         localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
         localStorage.setItem('fundFees', JSON.stringify(newFundFees));
         localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
+        localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
     };
 
     const handleFeeChange = (code, fee) => {
@@ -244,6 +260,13 @@ function PortfolioOptimizer() {
         };
         setFundInvestmentLimits(newLimits);
         localStorage.setItem('fundInvestmentLimits', JSON.stringify(newLimits));
+    };
+
+    const handleAssetCategoryChange = (code, category) => {
+        const newCategories = { ...fundAssetCategories, [code]: category };
+        clearAnalysisOutputs();
+        setFundAssetCategories(newCategories);
+        localStorage.setItem('fundAssetCategories', JSON.stringify(newCategories));
     };
 
     const buildFundInvestmentLimitsPayload = () => {
@@ -297,8 +320,6 @@ function PortfolioOptimizer() {
             const parsedCvarConfidence = parseFloat(cvarConfidence);
             const parsedCvarLimit = parseFloat(cvarLimit);
             const parsedMaxDrawdownLimit = parseFloat(maxDrawdownLimit);
-            const parsedMaxBuyMultiplier = parseFloat(maxBuyMultiplier);
-            const parsedSellThreshold = parseFloat(sellThreshold);
             const parsedMinWeight = parseFloat(minWeight);
             const parsedMaxWeight = parseFloat(maxWeight);
             const parsedMaWindow = parseInt(maWindow, 10);
@@ -306,6 +327,7 @@ function PortfolioOptimizer() {
             const payload = {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
+                asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 start_date: startDate,
                 end_date: endDate,
                 strategy_mode: strategyMode,
@@ -317,8 +339,6 @@ function PortfolioOptimizer() {
                 cvar_limit: (Number.isNaN(parsedCvarLimit) ? 8 : parsedCvarLimit) / 100,
                 enable_drawdown_constraint: enableDrawdownConstraint,
                 max_drawdown_limit: (Number.isNaN(parsedMaxDrawdownLimit) ? 20 : parsedMaxDrawdownLimit) / 100,
-                max_buy_multiplier: Number.isNaN(parsedMaxBuyMultiplier) ? 3.0 : parsedMaxBuyMultiplier,
-                sell_threshold: (Number.isNaN(parsedSellThreshold) ? 5.0 : parsedSellThreshold) / 100,
                 min_weight: (Number.isNaN(parsedMinWeight) ? 30 : parsedMinWeight) / 100,
                 max_weight: (Number.isNaN(parsedMaxWeight) ? 80 : parsedMaxWeight) / 100,
                 fund_investment_limits: buildFundInvestmentLimitsPayload(),
@@ -376,11 +396,10 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 weights,
                 fund_fees: feesAsFloats,
+                asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
-                max_buy_multiplier: parseFloat(maxBuyMultiplier),
-                sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
                 max_weight: parseFloat(maxWeight) / 100,
                 strategy_mode: strategyMode,
@@ -458,12 +477,11 @@ function PortfolioOptimizer() {
             const payload = {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
+                asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
                 monthly_budget: parseFloat(monthlyInvestment) || 0,
-                max_buy_multiplier: parseFloat(maxBuyMultiplier),
-                sell_threshold: parseFloat(sellThreshold) / 100,
                 min_weight: parseFloat(minWeight) / 100,
                 max_weight: parseFloat(maxWeight) / 100,
                 strategy_mode: strategyMode,
@@ -717,6 +735,7 @@ function PortfolioOptimizer() {
                                         <>
                                             <div className="asset-list-header">
                                                 <div>{t('header_fund')}</div>
+                                                <div>{t('header_asset_category')}</div>
                                                 <div>{t('header_buy')}</div>
                                                 <div>{t('header_sell')}</div>
                                                 <div>{t('header_manage')}</div>
@@ -728,6 +747,11 @@ function PortfolioOptimizer() {
                                             {fundCodes.map(code => (
                                                 <div key={code} className="asset-item-row">
                                                     <span className="asset-name" title={analysisResult?.fund_names[code] || code}>{analysisResult?.fund_names[code] || code}</span>
+                                                    <select className="asset-input-small" value={ASSET_CATEGORY_OPTIONS.includes(fundAssetCategories[code]) ? fundAssetCategories[code] : 'other'} onChange={(e) => handleAssetCategoryChange(code, e.target.value)}>
+                                                        {ASSET_CATEGORY_OPTIONS.map(category => (
+                                                            <option key={category} value={category}>{t(`asset_category_${category}`)}</option>
+                                                        ))}
+                                                    </select>
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" />
                                                     <input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" />
@@ -889,16 +913,6 @@ function PortfolioOptimizer() {
                                                         <option value="legacy_linear">{t('mode_legacy_linear')}</option>
                                                     </select>
                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('max_buy_mult')}</label>
-                                                    <input className="form-input text-sm" type="number" step="0.1" value={maxBuyMultiplier} onChange={(e) => { setMaxBuyMultiplier(e.target.value); localStorage.setItem('maxBuyMultiplier', e.target.value); }} />
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_buy_mult_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('sell_threshold')}</label>
-                                                    <input className="form-input text-sm" type="number" step="0.5" value={sellThreshold} onChange={(e) => { setSellThreshold(e.target.value); localStorage.setItem('sellThreshold', e.target.value); }} />
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('sell_threshold_help')}</p>
                                                 </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('min_equity_ratio')}</label>
@@ -1099,6 +1113,14 @@ function PortfolioOptimizer() {
                                     <div className="recommendation-stat">
                                         <div className="recommendation-stat-label">{t('suggested_target')}</div>
                                         <div className="recommendation-stat-value">{((recommendationResult.target_fund_ratio ?? recommendationResult.target_equity_ratio) * 100).toFixed(0)}%</div>
+                                    </div>
+                                    <div className="recommendation-stat">
+                                        <div className="recommendation-stat-label">{t('target_equity_exposure')}</div>
+                                        <div className="recommendation-stat-value">{((recommendationResult.target_equity_exposure ?? 0) * 100).toFixed(0)}%</div>
+                                    </div>
+                                    <div className="recommendation-stat">
+                                        <div className="recommendation-stat-label">{t('target_risk_exposure')}</div>
+                                        <div className="recommendation-stat-value">{((recommendationResult.target_risk_asset_exposure ?? 0) * 100).toFixed(0)}%</div>
                                     </div>
                                     <div className="recommendation-stat">
                                         <div className="recommendation-stat-label">{t('suggested_buy_total')}</div>

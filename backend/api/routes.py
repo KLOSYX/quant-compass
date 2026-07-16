@@ -10,6 +10,10 @@ from api.models import (
     CurrentRecommendationRequest,
     StrategyBacktestRequest,
 )
+from core.classification import (
+    calculate_exposure_metrics,
+    normalize_asset_categories,
+)
 from core.backtest import (
     backtest_dca,
     backtest_kelly_dca,
@@ -95,6 +99,9 @@ async def analyze_portfolio(request: AnalysisRequest):
             apply_fund_fees_to_history=request.apply_fund_fees_to_history,
         )
         append_frontier_stability_warnings(warnings, nav_adjusted, request.fund_fees)
+        asset_categories = normalize_asset_categories(
+            list(fund_df.columns), request.asset_categories
+        )
         efficient_frontier_points = calculate_efficient_frontier(
             nav_adjusted, request.fund_fees
         )
@@ -108,6 +115,11 @@ async def analyze_portfolio(request: AnalysisRequest):
             point["effective_risky_weights"] = normalize_risky_weights(
                 point["weights"], list(fund_df.columns)
             ).to_dict()
+            point["category_weights"] = calculate_exposure_metrics(
+                point["weights"],
+                total_wealth=1.0,
+                asset_categories=asset_categories,
+            )["category_values"]
             point.update(metric)
 
         recommended_point_index = None
@@ -135,8 +147,6 @@ async def analyze_portfolio(request: AnalysisRequest):
                 ma_window=request.ma_window,
                 buy_fee=request.buy_fee,
                 sell_fee=request.sell_fee,
-                max_buy_multiplier=request.max_buy_multiplier,
-                sell_threshold=request.sell_threshold,
                 user_min_weight=request.min_weight,
                 user_max_weight=request.max_weight,
                 strategy_mode=request.strategy_mode,
@@ -151,6 +161,7 @@ async def analyze_portfolio(request: AnalysisRequest):
                 initial_lump_sum=request.initial_lump_sum or 0.0,
                 monthly_investment=request.monthly_investment or 1000.0,
                 fund_investment_limits=request.fund_investment_limits,
+                asset_categories=asset_categories,
             )
 
         return {
@@ -158,6 +169,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             "strategy_frontier": strategy_frontier_points,
             "recommended_point_index": recommended_point_index,
             "fund_names": fund_names,
+            "asset_categories": asset_categories,
             "asset_diagnostics": asset_diagnostics,
             "backtest_period": {
                 "start_date": start_date_str,
@@ -167,6 +179,8 @@ async def analyze_portfolio(request: AnalysisRequest):
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -212,6 +226,9 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             fund_names,
             weights_dict=request.weights,
             holdings_dict=request.current_holdings,
+        )
+        asset_categories = normalize_asset_categories(
+            list(fund_df.columns), request.asset_categories
         )
         selected = decompose_selected_weights(request.weights, list(fund_df.columns))
         risky_weights = selected["risky_weights"]
@@ -557,11 +574,50 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             }
         )
 
+        current_asset_values = dict(equity_holdings)
+        if can_use_risk_free_asset and risk_free_balance > 0:
+            current_asset_values["RiskFree"] = risk_free_balance
+        current_total_wealth = current_equity_value + risk_free_balance + current_cash
+        current_exposures = calculate_exposure_metrics(
+            current_asset_values,
+            total_wealth=current_total_wealth,
+            asset_categories=asset_categories,
+        )
+
+        target_asset_values = dict(target_holdings)
+        if target_has_risk_free_asset and target_risk_free_value > 0:
+            target_asset_values["RiskFree"] = target_risk_free_value
+        target_exposures = calculate_exposure_metrics(
+            target_asset_values,
+            total_wealth=total_wealth_projected,
+            asset_categories=asset_categories,
+        )
+        target_fund_ratio = (
+            (target_equity_value + target_risk_free_value) / total_wealth_projected
+            if total_wealth_projected > 0
+            else 0.0
+        )
+        current_fund_ratio = (
+            (current_equity_value + risk_free_balance) / current_total_wealth
+            if current_total_wealth > 0
+            else 0.0
+        )
+
         return {
             "market_signal": market_signal,
             "allocation_signal": allocation_signal,
-            "target_fund_ratio": target_equity_ratio,
+            "target_fund_ratio": target_fund_ratio,
             "target_equity_ratio": target_equity_ratio,
+            "target_equity_exposure": target_exposures["equity_exposure"],
+            "target_risk_asset_exposure": target_exposures["risk_asset_exposure"],
+            "target_category_values": target_exposures["category_values"],
+            "target_category_exposures": target_exposures["category_exposures"],
+            "current_fund_ratio": current_fund_ratio,
+            "current_equity_exposure": current_exposures["equity_exposure"],
+            "current_risk_asset_exposure": current_exposures["risk_asset_exposure"],
+            "current_category_values": current_exposures["category_values"],
+            "current_category_exposures": current_exposures["category_exposures"],
+            "asset_categories": asset_categories,
             "current_equity_value": current_equity_value,
             "current_risk_free_value": risk_free_balance,
             "current_cash": current_cash,
@@ -636,6 +692,9 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             weights_dict=request.weights,
             holdings_dict=request.initial_holdings,
         )
+        asset_categories = normalize_asset_categories(
+            list(fund_df.columns), request.asset_categories
+        )
 
         nav_adjusted = prepare_nav_for_analysis(
             fund_df,
@@ -665,14 +724,12 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             nav_adjusted,
             request.weights,
             request.monthly_investment,
-            request.initial_holdings,
-            request.max_buy_multiplier,
-            request.sell_threshold,
-            request.min_weight,
-            request.max_weight,
-            request.buy_fee,
-            request.sell_fee,
-            request.ma_window,
+            initial_holdings=request.initial_holdings,
+            min_weight=request.min_weight,
+            max_weight=request.max_weight,
+            buy_fee=request.buy_fee,
+            sell_fee=request.sell_fee,
+            ma_window=request.ma_window,
             risk_free_rate=request.risk_free_rate or 0.0,
             strategy_mode=request.strategy_mode,
             kelly_fraction=request.kelly_fraction,
@@ -687,12 +744,14 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             fund_investment_limits=request.fund_investment_limits,
             exit_fund_codes=request.exit_fund_codes,
             reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
+            asset_categories=asset_categories,
         )
 
         return {
             "lump_sum": lump_sum_results,
             "dca": dca_results,
             "kelly_dca": kelly_results,
+            "asset_categories": asset_categories,
         }
     except HTTPException:
         raise
