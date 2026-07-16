@@ -11,6 +11,32 @@ MONEY_FUND_NAV_CACHE = {}
 MONEY_FUND_NAV_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 
+def _get_fund_list() -> pd.DataFrame:
+    global FUND_LIST_CACHE
+    if FUND_LIST_CACHE is None:
+        try:
+            print("Initializing fund list cache...")
+            FUND_LIST_CACHE = ak.fund_name_em()
+            FUND_LIST_CACHE.set_index("基金代码", inplace=True)
+            print("Fund list cache initialized.")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to initialize fund list cache: {e}"
+            )
+    return FUND_LIST_CACHE
+
+
+def get_fund_names(fund_codes: List[str]) -> Dict[str, str]:
+    fund_list = _get_fund_list()
+    names = {}
+    for code in dict.fromkeys(fund_codes):
+        try:
+            names[code] = str(fund_list.loc[code]["基金简称"])
+        except KeyError:
+            names[code] = f"{code} (名称未找到)"
+    return names
+
+
 def _fetch_with_retry(fetcher, code: str, max_retries: int = 5) -> pd.DataFrame:
     retry_delay = 1
     for attempt in range(max_retries):
@@ -81,17 +107,7 @@ def get_fund_data(
     end_date: Optional[date],
     risk_free_rate: Optional[float],
 ) -> (pd.DataFrame, Dict[str, str], List[str]):
-    global FUND_LIST_CACHE
-    if FUND_LIST_CACHE is None:
-        try:
-            print("Initializing fund list cache...")
-            FUND_LIST_CACHE = ak.fund_name_em()
-            FUND_LIST_CACHE.set_index("基金代码", inplace=True)
-            print("Fund list cache initialized.")
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to initialize fund list cache: {e}"
-            )
+    fund_list = _get_fund_list()
 
     fund_data = {}
     fund_names = {}
@@ -100,7 +116,7 @@ def get_fund_data(
         for code in fund_codes:
             try:
                 try:
-                    fund_record = FUND_LIST_CACHE.loc[code]
+                    fund_record = fund_list.loc[code]
                     fund_names[code] = fund_record["基金简称"]
                     fund_type = str(fund_record.get("基金类型", ""))
                 except KeyError:

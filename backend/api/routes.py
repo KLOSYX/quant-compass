@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from api.models import (
     AnalysisRequest,
     CurrentRecommendationRequest,
+    FundNamesRequest,
     StrategyBacktestRequest,
 )
 from core.classification import (
@@ -20,7 +21,12 @@ from core.backtest import (
     backtest_lump_sum,
     simulate_strategy_frontier,
 )
-from core.data import ensure_risk_free_column, get_fund_data, prepare_nav_for_analysis
+from core.data import (
+    ensure_risk_free_column,
+    get_fund_data,
+    get_fund_names,
+    prepare_nav_for_analysis,
+)
 from core.execution import execute_monthly_plan
 from core.frontier import (
     append_frontier_stability_warnings,
@@ -43,6 +49,11 @@ from core.strategy import (
 )
 
 router = APIRouter()
+
+
+@router.post("/fund_names")
+async def resolve_fund_names(request: FundNamesRequest):
+    return {"fund_names": get_fund_names(request.fund_codes)}
 
 
 def _reject_implicit_legacy_risk_free(

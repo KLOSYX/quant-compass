@@ -1,5 +1,13 @@
+import { render, screen, waitFor } from '@testing-library/react';
 import { buildAssetCategoriesPayload, sanitizeLegacyHoldings } from './PortfolioOptimizer';
+import PortfolioOptimizer from './PortfolioOptimizer';
+import { LanguageProvider } from './LanguageContext';
 import { translations } from './i18n/translations';
+
+beforeEach(() => {
+    localStorage.clear();
+    jest.restoreAllMocks();
+});
 
 test('removes the retired synthetic RiskFree holding from persisted state', () => {
     expect(sanitizeLegacyHoldings({ '000001': '1200', RiskFree: '300' })).toEqual({
@@ -23,6 +31,34 @@ test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
     expect(translations.en.min_equity_ratio).toContain('Fund Portfolio');
     expect(translations.zh.target_equity_exposure).toContain('股票权益');
     expect(translations.en.target_equity_exposure).toContain('Equity Exposure');
+});
+
+test('shows a cached fund name before portfolio analysis', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['016149']));
+    localStorage.setItem('fundNames', JSON.stringify({ '016149': '招商安泰债券A' }));
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+
+    expect(await screen.findByText('招商安泰债券A')).toBeInTheDocument();
+    expect(screen.getByText('016149')).toBeInTheDocument();
+});
+
+test('resolves and persists missing fund names before analysis', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['270023']));
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ fund_names: { '270023': '广发全球精选股票' } })
+    });
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+
+    expect(await screen.findByText('广发全球精选股票')).toBeInTheDocument();
+    await waitFor(() => {
+        expect(JSON.parse(localStorage.getItem('fundNames'))).toEqual({
+            '270023': '广发全球精选股票'
+        });
+    });
+    expect(global.fetch).toHaveBeenCalledWith('/api/fund_names', expect.objectContaining({ method: 'POST' }));
 });
 
 test('labels Kelly DCA backtests without legacy VA terminology', () => {

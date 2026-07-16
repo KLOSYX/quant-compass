@@ -19,6 +19,10 @@ class FundInvestmentLimit(BaseModel):
     monthly_limit: Optional[float] = None
 
 
+class FundNamesRequest(BaseModel):
+    fund_codes: List[str]
+
+
 class AnalysisRequest(BaseModel):
     fund_codes: List[str]
     fund_fees: Dict[str, float]

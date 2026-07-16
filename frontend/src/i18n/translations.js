@@ -17,6 +17,7 @@ export const translations = {
 
         // PortfolioOptimizer - Asset List
         header_fund: '基金',
+        fund_name_loading: '名称查询中…',
         header_asset_category: '资产类别',
         asset_category_equity: '股票权益',
         asset_category_bond: '债券',
@@ -253,6 +254,7 @@ export const translations = {
 
         // PortfolioOptimizer - Asset List
         header_fund: 'Fund',
+        fund_name_loading: 'Resolving name…',
         header_asset_category: 'Asset Category',
         asset_category_equity: 'Equity',
         asset_category_bond: 'Bond',

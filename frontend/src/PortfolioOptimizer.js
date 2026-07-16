@@ -91,6 +91,13 @@ function PortfolioOptimizer() {
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
+    const [fundNames, setFundNames] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundNames') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
     const [fundAssetCategories, setFundAssetCategories] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem('fundAssetCategories') || '{}');
@@ -164,7 +171,7 @@ function PortfolioOptimizer() {
     };
 
     const handleExport = () => downloadPortfolioReport({
-        language, selectedPoint, fundNames: analysisResult?.fund_names || {}, initialHoldings, currentCash, recommendationResult
+        language, selectedPoint, fundNames, initialHoldings, currentCash, recommendationResult
     });
 
     useEffect(() => {
@@ -179,6 +186,33 @@ function PortfolioOptimizer() {
         if (savedFundSellFees) setFundSellFees(JSON.parse(savedFundSellFees));
         if (savedFundInvestmentLimits) setFundInvestmentLimits(JSON.parse(savedFundInvestmentLimits));
     }, []);
+
+    useEffect(() => {
+        const missingCodes = fundCodes.filter(code => !fundNames[code]);
+        if (missingCodes.length === 0) return undefined;
+        let cancelled = false;
+        fetch('/api/fund_names', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fund_codes: missingCodes })
+        })
+            .then(async response => {
+                if (!response.ok) throw new Error((await response.json()).detail);
+                return response.json();
+            })
+            .then(result => {
+                if (cancelled) return;
+                setFundNames(previous => {
+                    const merged = { ...previous, ...(result.fund_names || {}) };
+                    localStorage.setItem('fundNames', JSON.stringify(merged));
+                    return merged;
+                });
+            })
+            .catch(() => {
+                // Name lookup is helpful metadata and must not block portfolio setup.
+            });
+        return () => { cancelled = true; };
+    }, [fundCodes, fundNames]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -348,6 +382,13 @@ function PortfolioOptimizer() {
             const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) throw new Error((await response.json()).detail);
             const result = await response.json();
+            if (result.fund_names) {
+                setFundNames(previous => {
+                    const merged = { ...previous, ...result.fund_names };
+                    localStorage.setItem('fundNames', JSON.stringify(merged));
+                    return merged;
+                });
+            }
             setAnalysisResult(result);
             if (result.recommended_point_index !== null && result.recommended_point_index !== undefined) {
                 setSelectedPoint(result.efficient_frontier[result.recommended_point_index] || null);
@@ -643,8 +684,8 @@ function PortfolioOptimizer() {
             if (code === 'Cash') {
                 return t('current_cash');
             }
-            if (analysisResult && analysisResult.fund_names && analysisResult.fund_names[code]) {
-                return analysisResult.fund_names[code];
+            if (fundNames[code]) {
+                return fundNames[code];
             }
             return code;
         };
@@ -729,7 +770,7 @@ function PortfolioOptimizer() {
 
                             {fundCodes.length > 0 && <div className="border-t border-glass my-4"></div>}
 
-                            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                            <div className="asset-list-scroll space-y-3 max-h-[400px] pr-2">
                                 {fundCodes.length > 0 && (
                                     <>
                                         <>
@@ -746,17 +787,23 @@ function PortfolioOptimizer() {
                                             <p className="text-[11px] text-slate-400 mb-2">{t('manage_fee_note')}</p>
                                             {fundCodes.map(code => (
                                                 <div key={code} className="asset-item-row">
-                                                    <span className="asset-name" title={analysisResult?.fund_names[code] || code}>{analysisResult?.fund_names[code] || code}</span>
-                                                    <select className="asset-input-small" value={ASSET_CATEGORY_OPTIONS.includes(fundAssetCategories[code]) ? fundAssetCategories[code] : 'other'} onChange={(e) => handleAssetCategoryChange(code, e.target.value)}>
-                                                        {ASSET_CATEGORY_OPTIONS.map(category => (
-                                                            <option key={category} value={category}>{t(`asset_category_${category}`)}</option>
-                                                        ))}
-                                                    </select>
-                                                    <input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" />
-                                                    <input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" />
-                                                    <input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" />
-                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.daily_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'daily_limit', e.target.value)} placeholder={t('limit_unlimited')} />
-                                                    <input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.monthly_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'monthly_limit', e.target.value)} placeholder={t('limit_unlimited')} />
+                                                    <span className="asset-name" title={fundNames[code] || code}>
+                                                        <span className="asset-name-label">{fundNames[code] || t('fund_name_loading')}</span>
+                                                        <span className="asset-code">{code}</span>
+                                                    </span>
+                                                    <label className="asset-field">
+                                                        <span className="asset-mobile-label">{t('header_asset_category')}</span>
+                                                        <select className="asset-input-small" value={ASSET_CATEGORY_OPTIONS.includes(fundAssetCategories[code]) ? fundAssetCategories[code] : 'other'} onChange={(e) => handleAssetCategoryChange(code, e.target.value)}>
+                                                            {ASSET_CATEGORY_OPTIONS.map(category => (
+                                                                <option key={category} value={category}>{t(`asset_category_${category}`)}</option>
+                                                            ))}
+                                                        </select>
+                                                    </label>
+                                                    <label className="asset-field"><span className="asset-mobile-label">{t('header_buy')}</span><input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" /></label>
+                                                    <label className="asset-field"><span className="asset-mobile-label">{t('header_sell')}</span><input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" /></label>
+                                                    <label className="asset-field"><span className="asset-mobile-label">{t('header_manage')}</span><input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" /></label>
+                                                    <label className="asset-field"><span className="asset-mobile-label">{t('header_daily_limit')}</span><input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.daily_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'daily_limit', e.target.value)} placeholder={t('limit_unlimited')} /></label>
+                                                    <label className="asset-field"><span className="asset-mobile-label">{t('header_monthly_limit')}</span><input type="number" step="1" min="0" className="asset-input-small" value={fundInvestmentLimits[code]?.monthly_limit || ''} onChange={(e) => handleInvestmentLimitChange(code, 'monthly_limit', e.target.value)} placeholder={t('limit_unlimited')} /></label>
                                                     <button type="button" className="icon-btn" onClick={() => handleRemoveAsset(code)}><X size={16} /></button>
                                                 </div>
                                             ))}
@@ -853,7 +900,7 @@ function PortfolioOptimizer() {
                                                         <tbody>
                                                             {Object.entries(selectedPoint.weights || {}).map(([code, weight]) => (
                                                                 <tr key={`effective-${code}`}>
-                                                                    <td className="text-sm">{analysisResult.fund_names[code] || code} <span className="text-slate-500 text-xs">({code})</span></td>
+                                                                    <td className="text-sm">{fundNames[code] || analysisResult.fund_names[code] || code} <span className="text-slate-500 text-xs">({code})</span></td>
                                                                     <td className="font-mono text-sky-400">{(weight * 100).toFixed(2)}%</td>
                                                                 </tr>
                                                             ))}
@@ -884,7 +931,7 @@ function PortfolioOptimizer() {
                                                 <tbody>
                                                     {Object.entries(selectedPoint.weights).map(([code, weight]) => (
                                                         <tr key={code}>
-                                                            <td>{analysisResult.fund_names[code]}</td>
+                                                            <td>{fundNames[code] || analysisResult.fund_names[code] || code}</td>
                                                             <td><input type="number" className="form-input py-1 text-sm w-32" value={initialHoldings[code] || ''} onChange={(e) => handleHoldingChange(code, e.target.value)} placeholder="0" /></td>
                                                         </tr>
                                                     ))}
