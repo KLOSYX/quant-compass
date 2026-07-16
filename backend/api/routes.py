@@ -47,6 +47,7 @@ from core.strategy import (
     infer_valuation_signal,
     validate_strategy_params,
 )
+from core.walk_forward import evaluate_executable_walk_forward
 
 router = APIRouter()
 
@@ -120,7 +121,9 @@ async def analyze_portfolio(request: AnalysisRequest):
             nav_adjusted, fund_names, efficient_frontier_points
         )
         walk_forward_metrics = calculate_frontier_walk_forward_metrics(
-            nav_adjusted, request.fund_fees
+            nav_adjusted,
+            request.fund_fees,
+            cvar_confidence=request.cvar_confidence,
         )
         for point, metric in zip(efficient_frontier_points, walk_forward_metrics):
             point["effective_risky_weights"] = normalize_risky_weights(
@@ -134,13 +137,36 @@ async def analyze_portfolio(request: AnalysisRequest):
             point.update(metric)
 
         recommended_point_index = None
-        scored_points = [
-            (idx, point.get("robust_score"))
+        recommendation_candidates = [
+            (idx, point)
             for idx, point in enumerate(efficient_frontier_points)
-            if point.get("robust_score") is not None
+            if (point.get("frontier_walk_forward_observations") or 0) >= 12
+            and (point.get("frontier_walk_forward_max_drawdown") or 0.0)
+            <= request.max_drawdown_limit
+            and (
+                not request.enable_cvar_constraint
+                or (point.get("frontier_walk_forward_cvar_loss") or 0.0)
+                <= request.cvar_limit
+            )
+            and (point.get("frontier_walk_forward_weight_stability") or 0.0) >= 0.5
         ]
-        if scored_points:
-            recommended_point_index = max(scored_points, key=lambda item: item[1])[0]
+        if recommendation_candidates:
+            recommended_point_index = max(
+                recommendation_candidates,
+                key=lambda item: (
+                    (
+                        item[1]["frontier_walk_forward_sharpe"]
+                        if item[1].get("frontier_walk_forward_sharpe") is not None
+                        else float("-inf")
+                    ),
+                    item[1].get("frontier_walk_forward_weight_stability") or 0.0,
+                    -item[1]["risk"],
+                ),
+            )[0]
+        else:
+            warnings.append(
+                "没有基础前沿点同时满足样本外观察数、最大回撤和权重稳定性要求；本次不自动选择推荐点。"
+            )
 
         # --- Simulate Strategy Frontier ---
         start_date_str = fund_df.index.min().strftime("%Y-%m-%d")
@@ -179,6 +205,15 @@ async def analyze_portfolio(request: AnalysisRequest):
             "efficient_frontier": efficient_frontier_points,
             "strategy_frontier": strategy_frontier_points,
             "recommended_point_index": recommended_point_index,
+            "recommended_point_selection": {
+                "minimum_observations": 12,
+                "maximum_drawdown": request.max_drawdown_limit,
+                "cvar_enabled": request.enable_cvar_constraint,
+                "cvar_confidence": request.cvar_confidence,
+                "maximum_cvar_loss": request.cvar_limit,
+                "minimum_weight_stability": 0.5,
+                "ranking": ["oos_sharpe", "weight_stability", "lower_risk"],
+            },
             "fund_names": fund_names,
             "asset_categories": asset_categories,
             "asset_diagnostics": asset_diagnostics,
@@ -757,12 +792,38 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
             asset_categories=asset_categories,
         )
+        walk_forward = (
+            evaluate_executable_walk_forward(
+                nav_adjusted,
+                request.fund_fees,
+                monthly_investment=request.monthly_investment,
+                initial_holdings=request.initial_holdings,
+                initial_cash=request.initial_cash,
+                buy_fees=request.buy_fee,
+                sell_fees=request.sell_fee,
+                fund_investment_limits=request.fund_investment_limits,
+                min_weight=request.min_weight,
+                max_weight=request.max_weight,
+                kelly_fraction=request.kelly_fraction,
+                estimation_window=request.estimation_window,
+                risk_free_rate=request.risk_free_rate or 0.0,
+                minimum_cash_reserve=request.minimum_cash_reserve,
+                enable_cvar_constraint=request.enable_cvar_constraint,
+                cvar_confidence=request.cvar_confidence,
+                cvar_limit=request.cvar_limit,
+                enable_drawdown_constraint=request.enable_drawdown_constraint,
+                max_drawdown_limit=request.max_drawdown_limit,
+            )
+            if request.include_walk_forward
+            else None
+        )
 
         return {
             "lump_sum": lump_sum_results,
             "dca": dca_results,
             "kelly_dca": kelly_results,
             "asset_categories": asset_categories,
+            "walk_forward": walk_forward,
         }
     except HTTPException:
         raise

@@ -85,6 +85,7 @@ class StrategyBacktestRequest(BaseModel):
     exit_fund_codes: List[str] = []
     reuse_settled_sale_proceeds: bool = False
     ma_window: int = 12
+    include_walk_forward: bool = False
 
 
 class CurrentRecommendationRequest(BaseModel):

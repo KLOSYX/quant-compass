@@ -107,5 +107,7 @@ def test_walk_forward_metrics_present_for_long_sample():
     metrics = calculate_frontier_walk_forward_metrics(df, {})
 
     assert metrics
-    assert any(item["walk_forward_observations"] > 0 for item in metrics)
-    assert all("robust_score" in item for item in metrics)
+    assert any(item["frontier_walk_forward_observations"] > 0 for item in metrics)
+    assert all("frontier_walk_forward_sharpe" in item for item in metrics)
+    assert all("frontier_walk_forward_cvar_loss" in item for item in metrics)
+    assert all("robust_score" not in item for item in metrics)

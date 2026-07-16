@@ -478,9 +478,12 @@ function PortfolioOptimizer() {
 
             // Run BOTH backtests in parallel
             const [idealRes, actualRes] = await Promise.all([
-                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings, initial_cash: 0 }) }),
-                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings, initial_cash: totalCash }) })
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings, initial_cash: 0, include_walk_forward: false }) }),
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings, initial_cash: totalCash, include_walk_forward: true }) })
             ]);
+
+            if (!idealRes.ok) throw new Error((await idealRes.json()).detail);
+            if (!actualRes.ok) throw new Error((await actualRes.json()).detail);
 
             const idealData = await idealRes.json();
             const actualData = await actualRes.json();
@@ -489,7 +492,8 @@ function PortfolioOptimizer() {
             setStrategyResult({
                 ...idealData,
                 ideal_kelly_dca: idealData.kelly_dca,
-                actual_kelly_dca: actualData.kelly_dca
+                actual_kelly_dca: actualData.kelly_dca,
+                walk_forward: actualData.walk_forward
             });
         } catch (err) {
             setError(err.message);
@@ -1131,6 +1135,44 @@ function PortfolioOptimizer() {
                                         <div><ReactECharts option={getStrategyChartOptions('actual_kelly_dca')} style={{ height: 300 }} /></div>
                                     )}
                                 </div>
+
+                                {strategyResult.walk_forward?.status === 'ok' && (
+                                    <div className="mt-8 overflow-x-auto">
+                                        <h4 className="text-lg font-semibold text-sky-400 mb-2">{t('executable_walk_forward_title')}</h4>
+                                        <p className="text-xs text-slate-400 mb-4">{t('executable_walk_forward_note')}</p>
+                                        <table className="data-table min-w-[900px]">
+                                            <thead>
+                                                <tr>
+                                                    <th>{t('wf_strategy')}</th>
+                                                    <th>{t('walk_forward_return')}</th>
+                                                    <th>{t('walk_forward_max_dd')}</th>
+                                                    <th>{t('wf_final_wealth')}</th>
+                                                    <th>{t('wf_fees')}</th>
+                                                    <th>{t('wf_avg_cash')}</th>
+                                                    <th>{t('wf_execution_deviation')}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {Object.entries(strategyResult.walk_forward.strategies).map(([name, metrics]) => (
+                                                    <tr key={name} className={name === 'full_strategy' ? 'bg-sky-500/5' : ''}>
+                                                        <td>{t(`wf_${name}`)}</td>
+                                                        <td>{(metrics.annualized_return * 100).toFixed(2)}%</td>
+                                                        <td>{(metrics.max_drawdown * 100).toFixed(2)}%</td>
+                                                        <td>¥{metrics.final_wealth.toFixed(2)}</td>
+                                                        <td>¥{metrics.total_transaction_fees.toFixed(2)}</td>
+                                                        <td>{(metrics.average_cash_exposure * 100).toFixed(2)}%</td>
+                                                        <td>{(metrics.average_execution_deviation * 100).toFixed(2)}%</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                                {strategyResult.walk_forward?.status === 'insufficient_data' && (
+                                    <div className="mt-6 p-3 rounded-lg border border-amber-500/40 bg-amber-900/10 text-amber-300 text-sm">
+                                        {t('wf_insufficient_data')}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

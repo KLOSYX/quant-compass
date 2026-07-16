@@ -160,7 +160,7 @@ def test_analyze_returns_recommended_point_for_long_sample():
     payload = response.json()
     assert payload["recommended_point_index"] is not None
     recommended = payload["efficient_frontier"][payload["recommended_point_index"]]
-    assert "robust_score" in recommended
+    assert "frontier_walk_forward_sharpe" in recommended
 
 
 def test_frontier_cleaning_does_not_break_single_asset_caps():

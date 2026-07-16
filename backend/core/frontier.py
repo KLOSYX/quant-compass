@@ -6,6 +6,7 @@ from scipy.optimize import minimize
 
 from core.constants import (
     COVARIANCE_SHRINKAGE,
+    DEFAULT_CVAR_CONFIDENCE,
     MIN_WALK_FORWARD_TRAIN_MONTHS,
     MIN_WEIGHT_THRESHOLD,
 )
@@ -18,7 +19,7 @@ from core.portfolio import (
     normalize_weights,
     shrink_frontier_expected_returns,
 )
-from core.risk import calculate_drawdown_from_returns
+from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
 
 
 def append_frontier_stability_warnings(
@@ -29,7 +30,7 @@ def append_frontier_stability_warnings(
         return
 
     warnings.append(
-        "有效前沿权重仍基于全样本静态估计，不属于样本外结果；实际投入请优先参考 Kelly+DCA 回测而不是理论前沿本身。"
+        "有效前沿权重仍基于全样本静态估计；前沿 Walk-forward 只诊断基础篮子，不能替代完整可执行策略的样本外对比。"
     )
 
     if len(risky_df) < 24:
@@ -213,6 +214,7 @@ def calculate_frontier_walk_forward_metrics(
     fund_fees: Dict[str, float],
     *,
     min_train_months: int = MIN_WALK_FORWARD_TRAIN_MONTHS,
+    cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE,
 ):
     full_frontier = calculate_efficient_frontier(df_nav, fund_fees)
     if not full_frontier:
@@ -267,13 +269,13 @@ def calculate_frontier_walk_forward_metrics(
         if observations == 0:
             summarized_metrics.append(
                 {
-                    "walk_forward_observations": 0,
-                    "walk_forward_annualized_return": None,
-                    "walk_forward_volatility": None,
-                    "walk_forward_sharpe": None,
-                    "walk_forward_max_drawdown": None,
-                    "walk_forward_weight_stability": None,
-                    "robust_score": None,
+                    "frontier_walk_forward_observations": 0,
+                    "frontier_walk_forward_annualized_return": None,
+                    "frontier_walk_forward_volatility": None,
+                    "frontier_walk_forward_sharpe": None,
+                    "frontier_walk_forward_max_drawdown": None,
+                    "frontier_walk_forward_cvar_loss": None,
+                    "frontier_walk_forward_weight_stability": None,
                 }
             )
             continue
@@ -286,23 +288,22 @@ def calculate_frontier_walk_forward_metrics(
         volatility = float(oos_returns.std(ddof=0) * np.sqrt(12))
         sharpe = float(ann_return / volatility) if volatility > 1e-9 else 0.0
         max_drawdown = float(calculate_drawdown_from_returns(oos_returns))
+        cvar_loss = float(calculate_cvar_loss(oos_returns, cvar_confidence))
         avg_drift = (
             float(np.mean(point_metrics["weight_drifts"]))
             if point_metrics["weight_drifts"]
             else 1.0
         )
         weight_stability = float(max(0.0, 1.0 - avg_drift))
-        robust_score = float(sharpe - max_drawdown)
-
         summarized_metrics.append(
             {
-                "walk_forward_observations": observations,
-                "walk_forward_annualized_return": ann_return,
-                "walk_forward_volatility": volatility,
-                "walk_forward_sharpe": sharpe,
-                "walk_forward_max_drawdown": max_drawdown,
-                "walk_forward_weight_stability": weight_stability,
-                "robust_score": robust_score,
+                "frontier_walk_forward_observations": observations,
+                "frontier_walk_forward_annualized_return": ann_return,
+                "frontier_walk_forward_volatility": volatility,
+                "frontier_walk_forward_sharpe": sharpe,
+                "frontier_walk_forward_max_drawdown": max_drawdown,
+                "frontier_walk_forward_cvar_loss": cvar_loss,
+                "frontier_walk_forward_weight_stability": weight_stability,
             }
         )
 
