@@ -370,12 +370,10 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         # Calculate gap
         gap = target_equity_value - current_equity_value
 
-        # Kelly selects the target mix, while DCA fixes this period's total
+        # Kelly selects the target mix, while DCA fixes this period's external
         # contribution. Existing Cash and RiskFree are not consumed to chase a
         # target, and max_buy_multiplier is retained only for API compatibility.
-        recommended_monthly_investment = (
-            max(0.0, request.monthly_budget) if gap > 0 else 0.0
-        )
+        external_buy_budget = max(0.0, request.monthly_budget) if gap > 0 else 0.0
 
         # Calculate Detailed Fund Advice
         fund_advice = []
@@ -386,6 +384,30 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         # 1. Distribute Gap Calculation
         # Use a list of dict keys to ensure uniqueness if codes were somehow repeated
         unique_fund_codes = list(dict.fromkeys(request.fund_codes))
+        exit_fund_codes = set(request.exit_fund_codes)
+        unknown_exit_codes = sorted(exit_fund_codes - set(unique_fund_codes))
+        if unknown_exit_codes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "exit_fund_codes contain assets outside the current analysis universe: "
+                    + ", ".join(unknown_exit_codes)
+                ),
+            )
+        conflicting_exit_codes = sorted(
+            code
+            for code in exit_fund_codes
+            if float(risky_weights.get(code, 0.0)) > 1e-12
+        )
+        if conflicting_exit_codes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "exit_fund_codes must have zero target weight: "
+                    + ", ".join(conflicting_exit_codes)
+                ),
+            )
+
         for code in unique_fund_codes:
             w = risky_weights.get(code, 0.0) / total_weight if total_weight > 0 else 0
             current_val = equity_holdings.get(code, 0)
@@ -394,6 +416,19 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             fund_gaps[code] = gap_val
             if gap_val > 0:
                 positive_gap_sum += gap_val
+
+        explicit_sell_amounts = {
+            code: max(0.0, float(equity_holdings.get(code, 0.0)))
+            for code in exit_fund_codes
+        }
+        total_sell_net_proceeds = sum(
+            amount * (1 - max(0.0, float(request.sell_fee.get(code, 0.0))))
+            for code, amount in explicit_sell_amounts.items()
+        )
+        reusable_sale_proceeds = (
+            total_sell_net_proceeds if request.reuse_settled_sale_proceeds else 0.0
+        )
+        available_buy_budget = external_buy_budget + reusable_sale_proceeds
 
         fund_monthly_limits = get_monthly_investment_limits(
             unique_fund_codes,
@@ -405,7 +440,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             fund_gaps,
             risky_weights.to_dict(),
             request.buy_fee,
-            recommended_monthly_investment,
+            available_buy_budget,
             request.fund_investment_limits,
             end_date_obj,
         )
@@ -416,10 +451,18 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             current_val = equity_holdings.get(code, 0)
             gap_val = fund_gaps.get(code, 0)
             ideal_target_val = current_val + gap_val
-            target_val = ideal_target_val
             buy_fee = request.buy_fee.get(code, 0.0)
             gross_gap = max(0.0, gap_val) * (1 + buy_fee)
             monthly_buy_limit = fund_monthly_limits.get(code, float("inf"))
+            allocation_state = (
+                "EXIT"
+                if code in exit_fund_codes
+                else (
+                    "ACTIVE"
+                    if float(risky_weights.get(code, 0.0)) > 1e-12
+                    else "NO_NEW_BUY"
+                )
+            )
 
             # Reset action and amount for each fund to prevent leakage
             # Using a more robust if-elif-else structure
@@ -427,16 +470,19 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             amount = 0.0
             reason = "持有"
 
-            if gap_val < 0:
-                # A zero target is an explicit removal from the selected
-                # analysis universe, so it is the one DCA exception that may
-                # sell. Other overweights are corrected by later contributions.
-                if target_val <= 1e-9:
+            if allocation_state == "EXIT":
+                amount = explicit_sell_amounts.get(code, 0.0)
+                if amount > 1e-9:
                     action = "Sell"
-                    amount = abs(gap_val)
-                    reason = "目标仓位为0，建议卖出"
+                    reason = "资产已被显式标记为退出，建议卖出"
                 else:
                     action = "Hold"
+                    reason = "资产已标记退出，但当前没有可卖持仓"
+            elif gap_val < 0:
+                action = "Hold"
+                if allocation_state == "NO_NEW_BUY":
+                    reason = "目标权重为数值零，暂停新增买入但不自动卖出"
+                else:
                     reason = "DCA 不因短期偏离卖出；后续新增资金将优先投向低配资产"
             elif gap_val > 0:
                 allocated_buy = buy_allocations.get(code, 0.0)
@@ -449,7 +495,6 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     action = "Buy"
                     # amount is the Gross Cash to spend on this fund
                     amount = allocated_buy
-                    target_val = current_val + amount / (1 + buy_fee)
                     if limit_applied:
                         reason = "受申购限额约束，先买入可执行额度"
                     else:
@@ -474,10 +519,12 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     "code": code,
                     "name": fund_names.get(code, code),
                     "current_holding": current_val,
-                    "target_holding": target_val,
+                    "target_holding": ideal_target_val,
                     "executable_holding": (
                         current_val + amount / (1 + request.buy_fee.get(code, 0.0))
                         if action == "Buy"
+                        else max(0.0, current_val - amount)
+                        if action == "Sell"
                         else current_val
                     ),
                     "ideal_holding": ideal_target_val,
@@ -488,6 +535,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                         monthly_buy_limit if np.isfinite(monthly_buy_limit) else None
                     ),
                     "limit_applied": limit_applied,
+                    "allocation_state": allocation_state,
                     "reason": reason,
                 }
             )
@@ -497,12 +545,6 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         for item in fund_advice:
             if item["action"] == "Buy":
                 total_buy_with_fees += item["amount"]
-
-        total_sell_net_proceeds = 0.0
-        for item in fund_advice:
-            if item["action"] == "Sell":
-                f = request.sell_fee.get(item["code"], 0.0)
-                total_sell_net_proceeds += item["amount"] * (1 - f)
 
         cash_after_risky = (
             current_cash
@@ -585,6 +627,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         return {
             "market_signal": market_signal,
             "allocation_signal": allocation_signal,
+            "target_fund_ratio": target_equity_ratio,
             "target_equity_ratio": target_equity_ratio,
             "current_equity_value": current_equity_value,
             "current_risk_free_value": risk_free_balance,
@@ -594,6 +637,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "target_cash_value": target_cash_value,
             "gap": gap,
             "recommended_monthly_investment": recommended_monthly_investment,
+            "total_sell_net_proceeds": total_sell_net_proceeds,
+            "reused_sale_proceeds": reusable_sale_proceeds,
             "monthly_budget": request.monthly_budget,
             "latest_nav": latest_nav,
             "ma_value": float(current_ma),

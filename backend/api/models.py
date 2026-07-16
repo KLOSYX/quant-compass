@@ -104,4 +104,6 @@ class CurrentRecommendationRequest(BaseModel):
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
+    exit_fund_codes: List[str] = []
+    reuse_settled_sale_proceeds: bool = False
     ma_window: int = 12

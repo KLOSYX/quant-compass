@@ -513,7 +513,8 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
     assert advice["000001"]["action"] == "Buy"
     assert advice["000001"]["amount"] == pytest.approx(500.0)
     assert advice["000001"]["limit_applied"] is True
-    assert advice["000001"]["target_holding"] == pytest.approx(500.0)
+    assert advice["000001"]["target_holding"] == pytest.approx(4000.0)
+    assert advice["000001"]["executable_holding"] == pytest.approx(500.0)
     assert advice["000001"]["ideal_holding"] == pytest.approx(4000.0)
 
     assert advice["000002"]["action"] == "Buy"
@@ -596,6 +597,118 @@ def test_recommendation_does_not_sell_overweight_fund_while_net_buy_is_capped():
     assert advice["000001"]["executable_holding"] == pytest.approx(10000.0)
     assert "DCA 不因短期偏离卖出" in advice["000001"]["reason"]
     assert advice["Cash"]["executable_holding"] == pytest.approx(1000.0)
+
+
+def test_zero_target_is_no_new_buy_unless_exit_is_explicit():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)},
+        index=dates,
+    )
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Active Fund", "000002": "Tiny Weight Fund"},
+            [],
+        )
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 1.0, "000002": 0.0},
+                "current_holdings": {"000002": 1000.0},
+                "monthly_budget": 100.0,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+            },
+        )
+
+    assert response.status_code == 200
+    advice = {item["code"]: item for item in response.json()["fund_advice"]}
+    zero_weight = advice["000002"]
+    assert zero_weight["allocation_state"] == "NO_NEW_BUY"
+    assert zero_weight["action"] == "Hold"
+    assert zero_weight["amount"] == 0.0
+    assert zero_weight["target_holding"] == 0.0
+    assert zero_weight["executable_holding"] == pytest.approx(1000.0)
+
+
+def test_explicit_exit_can_reuse_net_sale_proceeds_for_second_buy_round():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame(
+        {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)},
+        index=dates,
+    )
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (
+            mock_df,
+            {"000001": "Active Fund", "000002": "Exit Fund"},
+            [],
+        )
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001", "000002"],
+                "weights": {"000001": 1.0, "000002": 0.0},
+                "current_holdings": {"000002": 1000.0},
+                "monthly_budget": 100.0,
+                "sell_fee": {"000002": 0.01},
+                "exit_fund_codes": ["000002"],
+                "reuse_settled_sale_proceeds": True,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    advice = {item["code"]: item for item in data["fund_advice"]}
+    exited = advice["000002"]
+    active = advice["000001"]
+    assert exited["allocation_state"] == "EXIT"
+    assert exited["action"] == "Sell"
+    assert exited["amount"] == pytest.approx(1000.0)
+    assert exited["executable_holding"] == 0.0
+    assert active["target_holding"] == pytest.approx(1100.0)
+    assert active["executable_holding"] == pytest.approx(1090.0)
+    assert active["amount"] == pytest.approx(1090.0)
+    assert data["recommended_monthly_investment"] == pytest.approx(1090.0)
+    assert advice["Cash"]["executable_holding"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "expected_detail"),
+    [
+        ("000001", "must have zero target weight"),
+        ("999999", "outside the current analysis universe"),
+    ],
+)
+def test_explicit_exit_must_be_in_universe_with_zero_target(exit_code, expected_detail):
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Fund A"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "current_holdings": {"000001": 1000.0},
+                "monthly_budget": 100.0,
+                "exit_fund_codes": [exit_code],
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+            },
+        )
+
+    assert response.status_code == 400
+    assert expected_detail in response.json()["detail"]
 
 
 def test_backtest_respects_fund_monthly_buy_limits():

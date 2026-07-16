@@ -69,8 +69,8 @@ def test_single_asset_100_percent():
         assert advice_map["000001"]["target_holding"] > 0
 
 
-def test_recommendation_sells_zero_weight_fund_even_when_other_assets_need_buys():
-    """Funds with a zero target should still be reduced when the portfolio is net-buying elsewhere."""
+def test_recommendation_sells_explicit_exit_even_when_other_assets_need_buys():
+    """Only an explicit exit may sell a zero-weight holding."""
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     data = {"000001": [1.0] * len(dates), "000002": [1.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
@@ -88,6 +88,7 @@ def test_recommendation_sells_zero_weight_fund_even_when_other_assets_need_buys(
             "current_holdings": {"000001": 0.0, "000002": 100.0},
             "current_cash": 0.0,
             "monthly_budget": 1000.0,
+            "exit_fund_codes": ["000002"],
             "strategy_mode": "legacy_linear",
             "min_weight": 1.0,
             "max_weight": 1.0,
@@ -101,6 +102,7 @@ def test_recommendation_sells_zero_weight_fund_even_when_other_assets_need_buys(
 
     advice_map = {item["code"]: item for item in payload["fund_advice"]}
     assert advice_map["000002"]["target_holding"] == 0.0
+    assert advice_map["000002"]["allocation_state"] == "EXIT"
     assert advice_map["000002"]["action"] == "Sell"
     assert advice_map["000002"]["amount"] == 100.0
 

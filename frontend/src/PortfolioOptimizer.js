@@ -1098,7 +1098,7 @@ function PortfolioOptimizer() {
                                     </div>
                                     <div className="recommendation-stat">
                                         <div className="recommendation-stat-label">{t('suggested_target')}</div>
-                                        <div className="recommendation-stat-value">{(recommendationResult.target_equity_ratio * 100).toFixed(0)}%</div>
+                                        <div className="recommendation-stat-value">{((recommendationResult.target_fund_ratio ?? recommendationResult.target_equity_ratio) * 100).toFixed(0)}%</div>
                                     </div>
                                     <div className="recommendation-stat">
                                         <div className="recommendation-stat-label">{t('suggested_buy_total')}</div>
