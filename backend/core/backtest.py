@@ -11,7 +11,7 @@ from core.constants import (
     DEFAULT_MAX_DRAWDOWN_LIMIT,
     DEFAULT_STRATEGY_MODE,
 )
-from core.limits import allocate_capped_buy_amounts
+from core.execution import execute_monthly_plan
 from core.portfolio import (
     decompose_selected_weights,
     normalize_weights,
@@ -215,6 +215,8 @@ def backtest_kelly_dca(
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT,
     initial_cash: float = 0.0,
     fund_investment_limits: Dict[str, object] = None,
+    exit_fund_codes=None,
+    reuse_settled_sale_proceeds: bool = False,
 ):
     """Kelly-guided DCA strategy.
 
@@ -276,6 +278,7 @@ def backtest_kelly_dca(
 
     portfolio_history = {}
     attribution_history = {}
+    execution_history = {}
     invested_history = {}
 
     if has_risky_assets:
@@ -315,7 +318,6 @@ def backtest_kelly_dca(
         # --- Unit NAV Calculation End ---
 
         # 1. Income Step (External Inflow)
-        cash_balance += monthly_investment
         accumulated_investment += monthly_investment
 
         # Buy Strategy Units
@@ -327,7 +329,12 @@ def backtest_kelly_dca(
         current_risk_free_value = (
             risk_free_shares * nav_row["RiskFree"] if can_use_risk_free_asset else 0.0
         )
-        total_wealth = current_equity_value + current_risk_free_value + cash_balance
+        total_wealth = (
+            current_equity_value
+            + current_risk_free_value
+            + cash_balance
+            + monthly_investment
+        )
 
         # 3. Target Ratio
         if not has_risky_assets:
@@ -400,57 +407,64 @@ def backtest_kelly_dca(
         target_equity_value = total_wealth * final_target_risky_ratio
         current_asset_values = total_shares * nav_row[total_shares.index]
         target_asset_values = risky_weights * target_equity_value
-        fund_gaps = target_asset_values - current_asset_values
-        positive_gross_gap = sum(
-            max(0.0, float(fund_gaps.get(code, 0.0)))
-            * (1 + max(0.0, float((buy_fee or {}).get(code, 0.0))))
-            for code in risky_columns
-        )
-        dca_budget = max(0.0, monthly_investment)
-        max_cash_to_spend = min(positive_gross_gap, dca_budget)
-        buy_allocations = allocate_capped_buy_amounts(
-            risky_columns,
-            fund_gaps.to_dict(),
-            risky_weights.to_dict(),
-            buy_fee or {},
-            max_cash_to_spend,
-            fund_investment_limits,
-            timestamp,
-        )
-        total_cost_with_fees = sum(buy_allocations.values())
+        non_risky_target_value = max(0.0, total_wealth - target_equity_value)
+        if target_has_risk_free_asset:
+            target_cash_balance = min(minimum_cash_reserve, non_risky_target_value)
+            target_risk_free_value = max(
+                0.0, non_risky_target_value - target_cash_balance
+            )
+        else:
+            target_cash_balance = non_risky_target_value
+            target_risk_free_value = 0.0
 
-        if total_cost_with_fees > 0:
-            for code, gross_amount in buy_allocations.items():
-                if gross_amount <= 0:
-                    continue
-                fee = max(0.0, float((buy_fee or {}).get(code, 0.0)))
-                net_amount = gross_amount / (1 + fee)
-                total_shares[code] += net_amount / nav_row[code]
-            cash_balance -= total_cost_with_fees
+        execution = execute_monthly_plan(
+            fund_codes=risky_columns,
+            current_holdings=current_asset_values.to_dict(),
+            target_holdings=target_asset_values.to_dict(),
+            target_weights=risky_weights.to_dict(),
+            current_cash=cash_balance,
+            monthly_budget=monthly_investment,
+            buy_fees=buy_fee or {},
+            sell_fees=sell_fee or {},
+            investment_limits=fund_investment_limits,
+            timestamp=timestamp,
+            minimum_cash_reserve=minimum_cash_reserve,
+            exit_fund_codes=exit_fund_codes,
+            reuse_settled_sale_proceeds=reuse_settled_sale_proceeds,
+            current_risk_free=current_risk_free_value,
+            target_risk_free=target_risk_free_value,
+            target_cash=target_cash_balance,
+            can_manage_risk_free=can_use_risk_free_asset,
+            target_has_risk_free=target_has_risk_free_asset,
+        )
 
+        for code, fund_execution in execution.funds.items():
+            total_shares[code] = fund_execution.executable_holding / nav_row[code]
         if can_use_risk_free_asset:
-            current_risk_free_value = risk_free_shares * nav_row["RiskFree"]
-            non_risky_after_risky_trades = current_risk_free_value + cash_balance
-
-            if target_has_risk_free_asset:
-                target_cash_balance = min(
-                    minimum_cash_reserve, non_risky_after_risky_trades
-                )
-                if cash_balance < target_cash_balance:
-                    redeem_needed = min(
-                        target_cash_balance - cash_balance, current_risk_free_value
-                    )
-                    if redeem_needed > 0:
-                        risk_free_shares -= redeem_needed / nav_row["RiskFree"]
-                        cash_balance += redeem_needed
-                elif cash_balance > target_cash_balance:
-                    rf_buy_amount = cash_balance - target_cash_balance
-                    if rf_buy_amount > 0:
-                        risk_free_shares += rf_buy_amount / nav_row["RiskFree"]
-                        cash_balance -= rf_buy_amount
-            elif current_risk_free_value > 0:
-                risk_free_shares = 0.0
-                cash_balance += current_risk_free_value
+            risk_free_shares = execution.risk_free_after / nav_row["RiskFree"]
+        cash_balance = execution.cash_after
+        execution_history[timestamp] = {
+            "total_gross_buy": execution.total_gross_buy,
+            "total_gross_sell": execution.total_gross_sell,
+            "total_net_sell_proceeds": execution.total_net_sell_proceeds,
+            "reused_sale_proceeds": execution.reused_sale_proceeds,
+            "cash_after": execution.cash_after,
+            "risk_free_after": execution.risk_free_after,
+            "accounting_error": execution.accounting_error,
+            "funds": {
+                code: {
+                    "action": item.action,
+                    "allocation_state": item.allocation_state,
+                    "current_holding": item.current_holding,
+                    "target_holding": item.target_holding,
+                    "executable_holding": item.executable_holding,
+                    "gross_buy": item.gross_buy,
+                    "gross_sell": item.gross_sell,
+                    "net_sell_proceeds": item.net_sell_proceeds,
+                }
+                for code, item in execution.funds.items()
+            },
+        }
 
         # 5. Record State
         current_asset_values = total_shares * nav_row[total_shares.index]
@@ -514,6 +528,9 @@ def backtest_kelly_dca(
         },
         "attribution": {
             date.strftime("%Y-%m"): value for date, value in attribution_history.items()
+        },
+        "execution": {
+            date.strftime("%Y-%m"): value for date, value in execution_history.items()
         },
     }
 
