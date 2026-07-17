@@ -39,6 +39,11 @@ test('explains the executable walk-forward comparison separately from the fronti
     expect(translations.en.wf_full_strategy).toContain('Kelly');
 });
 
+test('states that covariance ablation does not auto-switch the production model', () => {
+    expect(translations.zh.covariance_ablation_note).toContain('不会自动切换');
+    expect(translations.en.covariance_ablation_note).toContain('never switched automatically');
+});
+
 test('shows a cached fund name before portfolio analysis', async () => {
     localStorage.setItem('fundCodes', JSON.stringify(['016149']));
     localStorage.setItem('fundNames', JSON.stringify({ '016149': '招商安泰债券A' }));

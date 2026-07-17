@@ -74,6 +74,98 @@ def _select_stable_kelly_platform(window_metrics: dict[int, dict]) -> dict:
     }
 
 
+def _summarize_ablation_slice(
+    returns: list[float], weight_drifts: list[float], risk_free_rate: float
+) -> dict:
+    series = pd.Series(returns, dtype=float)
+    if series.empty:
+        return {"status": "insufficient_data", "observations": 0}
+    annualized_return = (
+        float((1 + series).prod() ** (12 / len(series)) - 1)
+        if (series > -1).all()
+        else -1.0
+    )
+    volatility = float(series.std(ddof=0) * np.sqrt(12))
+    average_drift = float(np.mean(weight_drifts)) if weight_drifts else 0.0
+    return {
+        "status": "ok",
+        "observations": int(len(series)),
+        "annualized_return": annualized_return,
+        "sharpe": (
+            (annualized_return - risk_free_rate) / volatility
+            if volatility > 1e-9
+            else 0.0
+        ),
+        "max_drawdown": float(calculate_drawdown_from_returns(series)),
+        "weight_stability": float(max(0.0, 1.0 - average_drift)),
+    }
+
+
+def _compare_complete_covariance_states(
+    fixed_state: "_StrategyState",
+    candidate_state: "_StrategyState",
+    risk_free_rate: float,
+) -> dict:
+    observations = min(len(fixed_state.returns), len(candidate_state.returns))
+    midpoint = observations // 2
+    slices = {
+        "full_sample": (0, observations),
+        "first_half": (0, midpoint),
+        "second_half": (midpoint, observations),
+    }
+    segments = {}
+    qualifying_segments = 0
+    strict_improvements = 0
+    for name, (start, end) in slices.items():
+        fixed = _summarize_ablation_slice(
+            fixed_state.returns[start:end],
+            fixed_state.weight_drifts[start : max(start, end - 1)],
+            risk_free_rate,
+        )
+        candidate = _summarize_ablation_slice(
+            candidate_state.returns[start:end],
+            candidate_state.weight_drifts[start : max(start, end - 1)],
+            risk_free_rate,
+        )
+        qualifies = (
+            fixed["status"] == "ok"
+            and candidate["status"] == "ok"
+            and candidate["sharpe"] >= fixed["sharpe"] - 0.05
+            and candidate["weight_stability"] >= fixed["weight_stability"] - 0.01
+            and candidate["max_drawdown"] <= fixed["max_drawdown"] + 0.01
+        )
+        strict = (
+            qualifies
+            and candidate["sharpe"] > fixed["sharpe"] + 0.02
+            and candidate["weight_stability"] > fixed["weight_stability"]
+        )
+        qualifying_segments += int(qualifies)
+        strict_improvements += int(strict)
+        segments[name] = {
+            "fixed_20": fixed,
+            "ledoit_wolf": candidate,
+            "candidate_qualifies": qualifies,
+        }
+
+    available_segments = sum(
+        item["fixed_20"]["status"] == "ok" and item["ledoit_wolf"]["status"] == "ok"
+        for item in segments.values()
+    )
+    candidate_ready = (
+        available_segments == len(segments)
+        and qualifying_segments == len(segments)
+        and strict_improvements >= 2
+    )
+    return {
+        "evaluation_scope": "complete_executable_strategy",
+        "default_method": "fixed_20",
+        "candidate_method": "ledoit_wolf",
+        "promotion_status": "candidate" if candidate_ready else "retain_fixed",
+        "auto_switched": False,
+        "segments": segments,
+    }
+
+
 @dataclass
 class _StrategyState:
     shares: pd.Series
@@ -246,6 +338,7 @@ def evaluate_executable_walk_forward(
     max_drawdown_limit: float = 0.2,
     daily_nav: pd.DataFrame | None = None,
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
+    include_covariance_ablation: bool = False,
 ) -> dict:
     """Evaluate executable strategies using only information available at each split."""
     if monthly_investment < 0:
@@ -317,6 +410,14 @@ def evaluate_executable_walk_forward(
             for name in window_state_names
         },
     }
+    if include_covariance_ablation:
+        states["full_strategy_ledoit_wolf"] = _initialize_state(
+            df_nav,
+            first_signal_position,
+            risky_codes,
+            initial_holdings,
+            initial_cash,
+        )
     equal_weights = {code: 1.0 / len(risky_codes) for code in risky_codes}
     fixed_weights = None
 
@@ -329,6 +430,17 @@ def evaluate_executable_walk_forward(
         if not frontier:
             continue
         dynamic_weights = _select_train_point(frontier, risk_free_rate)["weights"]
+        candidate_weights = None
+        if include_covariance_ablation:
+            candidate_frontier = calculate_efficient_frontier(
+                train_df,
+                dict(fund_fees),
+                covariance_method="ledoit_wolf",
+            )
+            if candidate_frontier:
+                candidate_weights = _select_train_point(
+                    candidate_frontier, risk_free_rate
+                )["weights"]
         if fixed_weights is None:
             fixed_weights = dict(dynamic_weights)
 
@@ -340,6 +452,11 @@ def evaluate_executable_walk_forward(
             **(
                 {name: dynamic_weights for name in window_state_names}
                 if signal_position >= comparison_signal_position
+                else {}
+            ),
+            **(
+                {"full_strategy_ledoit_wolf": candidate_weights}
+                if candidate_weights is not None
                 else {}
             ),
         }
@@ -380,7 +497,10 @@ def evaluate_executable_walk_forward(
                 if total_wealth > 0
                 else 0.0
             )
-            if strategy_name == "full_strategy" or strategy_name in window_state_names:
+            if (
+                strategy_name in {"full_strategy", "full_strategy_ledoit_wolf"}
+                or strategy_name in window_state_names
+            ):
                 reference_nav = train_df[risky_weights.index].dot(risky_weights)
                 daily_reference_nav = (
                     daily_nav.loc[:signal_date, risky_weights.index].dot(risky_weights)
@@ -563,6 +683,15 @@ def evaluate_executable_walk_forward(
         window: _summarize_state(states[name], risk_free_rate)
         for name, window in window_state_names.items()
     }
+    covariance_ablation = (
+        _compare_complete_covariance_states(
+            states["full_strategy"],
+            states["full_strategy_ledoit_wolf"],
+            risk_free_rate,
+        )
+        if include_covariance_ablation
+        else None
+    )
     return {
         "status": "ok",
         "minimum_training_months": min_train_months,
@@ -579,4 +708,5 @@ def evaluate_executable_walk_forward(
             ],
             **_select_stable_kelly_platform(window_metrics),
         },
+        "covariance_ablation": covariance_ablation,
     }

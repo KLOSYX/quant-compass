@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,61 @@ from core.portfolio import (
     shrink_frontier_expected_returns,
 )
 from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
+
+CovarianceMethod = Literal["fixed_20", "ledoit_wolf"]
+
+
+def estimate_covariance(
+    monthly_returns: pd.DataFrame,
+    method: CovarianceMethod = "fixed_20",
+) -> tuple[pd.DataFrame, float]:
+    """Estimate covariance and return the applied shrinkage intensity."""
+    clean_returns = monthly_returns.astype(float).replace([np.inf, -np.inf], np.nan)
+    clean_returns = clean_returns.dropna(how="any")
+    columns = list(monthly_returns.columns)
+    if clean_returns.empty:
+        return pd.DataFrame(0.0, index=columns, columns=columns), 0.0
+
+    risky_columns = [code for code in columns if code != "RiskFree"]
+    result = pd.DataFrame(0.0, index=columns, columns=columns)
+    if not risky_columns:
+        return result, 0.0
+
+    risky_returns = clean_returns[risky_columns]
+    empirical = risky_returns.cov()
+    if method == "fixed_20":
+        target = pd.DataFrame(
+            np.diag(np.diag(empirical.values)),
+            index=risky_columns,
+            columns=risky_columns,
+        )
+        shrunk = (1 - COVARIANCE_SHRINKAGE) * empirical + COVARIANCE_SHRINKAGE * target
+        intensity = COVARIANCE_SHRINKAGE
+    elif method == "ledoit_wolf":
+        values = risky_returns.to_numpy(dtype=float)
+        values -= values.mean(axis=0, keepdims=True)
+        observations, dimensions = values.shape
+        empirical_values = values.T @ values / max(observations, 1)
+        mu = float(np.trace(empirical_values) / dimensions)
+        delta = float(
+            np.sum((empirical_values - mu * np.eye(dimensions)) ** 2) / dimensions
+        )
+        squared = values**2
+        beta = float(
+            np.sum(squared.T @ squared / max(observations, 1) - empirical_values**2)
+            / max(dimensions * observations, 1)
+        )
+        beta = min(max(beta, 0.0), delta)
+        intensity = float(beta / delta) if delta > 1e-18 else 0.0
+        shrunk_values = (1 - intensity) * empirical_values + intensity * mu * np.eye(
+            dimensions
+        )
+        shrunk = pd.DataFrame(shrunk_values, index=risky_columns, columns=risky_columns)
+    else:
+        raise ValueError(f"unsupported covariance method: {method}")
+
+    result.loc[risky_columns, risky_columns] = shrunk
+    return result, float(intensity)
 
 
 def append_frontier_stability_warnings(
@@ -61,7 +116,12 @@ def append_frontier_stability_warnings(
         )
 
 
-def calculate_efficient_frontier(df, fund_fees):
+def calculate_efficient_frontier(
+    df,
+    fund_fees,
+    *,
+    covariance_method: CovarianceMethod = "fixed_20",
+):
     if list(df.columns) == ["RiskFree"]:
         monthly_returns = df.pct_change().fillna(0)
         expected_return = monthly_returns["RiskFree"].mean()
@@ -79,21 +139,9 @@ def calculate_efficient_frontier(df, fund_fees):
     monthly_returns = df.pct_change().fillna(0)
 
     raw_expected_returns = monthly_returns.mean()
-    cov_matrix = monthly_returns.cov()
-    if "RiskFree" in cov_matrix.columns:
-        cov_matrix["RiskFree"] = 0
-        cov_matrix.loc["RiskFree"] = 0
-
     # Simple shrinkage makes the frontier less sensitive to small-sample noise.
     expected_returns = shrink_frontier_expected_returns(raw_expected_returns)
-    diagonal_target = pd.DataFrame(
-        np.diag(np.diag(cov_matrix.values)),
-        index=cov_matrix.index,
-        columns=cov_matrix.columns,
-    )
-    cov_matrix = (
-        1 - COVARIANCE_SHRINKAGE
-    ) * cov_matrix + COVARIANCE_SHRINKAGE * diagonal_target
+    cov_matrix, _ = estimate_covariance(monthly_returns, covariance_method)
 
     columns = list(df.columns)
     bounds = get_frontier_weight_bounds(columns)
@@ -207,6 +255,140 @@ def calculate_efficient_frontier(df, fund_fees):
             )
 
     return frontier_points
+
+
+def _minimum_variance_weights(
+    train_returns: pd.DataFrame, covariance_method: CovarianceMethod
+) -> tuple[pd.Series, float]:
+    covariance, intensity = estimate_covariance(train_returns, covariance_method)
+    columns = list(train_returns.columns)
+    bounds = get_frontier_weight_bounds(columns)
+    initial_guess = get_frontier_initial_guess(columns)
+
+    def variance(weights):
+        return float(weights.T @ covariance.values @ weights)
+
+    result = minimize(
+        variance,
+        initial_guess,
+        method="SLSQP",
+        bounds=bounds,
+        constraints={"type": "eq", "fun": lambda weights: np.sum(weights) - 1},
+    )
+    weights = result.x if result.success else initial_guess
+    return pd.Series(weights, index=columns, dtype=float), intensity
+
+
+def _evaluate_covariance_segment(
+    df_nav: pd.DataFrame,
+    covariance_method: CovarianceMethod,
+    min_train_months: int,
+) -> dict:
+    risky_nav = df_nav.drop(columns=["RiskFree"], errors="ignore")
+    if len(risky_nav.columns) < 2 or len(risky_nav) <= min_train_months:
+        return {"status": "insufficient_data", "observations": 0}
+
+    returns = risky_nav.pct_change().dropna()
+    realized_returns = []
+    weight_drifts = []
+    intensities = []
+    previous_weights = None
+    for split in range(min_train_months, len(risky_nav)):
+        train_returns = risky_nav.iloc[:split].pct_change().dropna()
+        if len(train_returns) < 2:
+            continue
+        weights, intensity = _minimum_variance_weights(train_returns, covariance_method)
+        next_return = float((returns.iloc[split - 1] * weights).sum())
+        realized_returns.append(next_return)
+        intensities.append(intensity)
+        if previous_weights is not None:
+            weight_drifts.append(float((weights - previous_weights).abs().sum() / 2))
+        previous_weights = weights
+
+    series = pd.Series(realized_returns, dtype=float)
+    if series.empty:
+        return {"status": "insufficient_data", "observations": 0}
+    annualized_return = (
+        float((1 + series).prod() ** (12 / len(series)) - 1)
+        if (series > -1).all()
+        else -1.0
+    )
+    volatility = float(series.std(ddof=0) * np.sqrt(12))
+    return {
+        "status": "ok",
+        "observations": int(len(series)),
+        "annualized_return": annualized_return,
+        "annualized_volatility": volatility,
+        "sharpe": annualized_return / volatility if volatility > 1e-9 else 0.0,
+        "max_drawdown": float(calculate_drawdown_from_returns(series)),
+        "average_weight_drift": float(np.mean(weight_drifts)) if weight_drifts else 0.0,
+        "weight_stability": float(
+            max(0.0, 1.0 - (np.mean(weight_drifts) if weight_drifts else 0.0))
+        ),
+        "average_shrinkage_intensity": float(np.mean(intensities)),
+    }
+
+
+def evaluate_covariance_shrinkage_ablation(
+    df_nav: pd.DataFrame,
+    *,
+    min_train_months: int = MIN_WALK_FORWARD_TRAIN_MONTHS,
+) -> dict:
+    """Compare covariance estimators without changing the production default."""
+    midpoint = len(df_nav) // 2
+    segments = {
+        "full_sample": df_nav,
+        "first_half": df_nav.iloc[:midpoint],
+        "second_half": df_nav.iloc[midpoint:],
+    }
+    comparisons = {}
+    qualifying_segments = 0
+    strict_improvements = 0
+    for segment_name, segment_nav in segments.items():
+        fixed = _evaluate_covariance_segment(segment_nav, "fixed_20", min_train_months)
+        candidate = _evaluate_covariance_segment(
+            segment_nav, "ledoit_wolf", min_train_months
+        )
+        qualifies = (
+            fixed["status"] == "ok"
+            and candidate["status"] == "ok"
+            and candidate["sharpe"] >= fixed["sharpe"] - 0.05
+            and candidate["weight_stability"] >= fixed["weight_stability"] - 0.01
+            and candidate["max_drawdown"] <= fixed["max_drawdown"] + 0.01
+        )
+        strict = (
+            qualifies
+            and candidate["sharpe"] > fixed["sharpe"] + 0.02
+            and candidate["weight_stability"] > fixed["weight_stability"]
+        )
+        qualifying_segments += int(qualifies)
+        strict_improvements += int(strict)
+        comparisons[segment_name] = {
+            "fixed_20": fixed,
+            "ledoit_wolf": candidate,
+            "candidate_qualifies": qualifies,
+        }
+
+    available_segments = sum(
+        comparison["fixed_20"]["status"] == "ok"
+        and comparison["ledoit_wolf"]["status"] == "ok"
+        for comparison in comparisons.values()
+    )
+    candidate_ready = (
+        available_segments == len(segments)
+        and qualifying_segments == len(segments)
+        and strict_improvements >= 2
+    )
+    return {
+        "default_method": "fixed_20",
+        "candidate_method": "ledoit_wolf",
+        "promotion_status": "candidate" if candidate_ready else "retain_fixed",
+        "auto_switched": False,
+        "selection_rule": (
+            "all_segments_non_inferior_and_at_least_two_strict_improvements"
+        ),
+        "segments": comparisons,
+    }
 
 
 def calculate_frontier_walk_forward_metrics(

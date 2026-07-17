@@ -877,6 +877,50 @@ function PortfolioOptimizer() {
                             <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
                         </div>
                         <AssetDiagnosticsPanel diagnostics={analysisResult.asset_diagnostics} />
+                        {analysisResult.covariance_ablation && (
+                            <div className="dashboard-card mt-4">
+                                <div className="card-header">
+                                    <h3 className="card-title">{t('covariance_ablation_title')}</h3>
+                                </div>
+                                <p className="text-sm text-slate-300">{t('covariance_ablation_note')}</p>
+                                <div className={`mt-3 rounded-lg border p-3 text-sm ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'border-emerald-500/40 bg-emerald-900/10 text-emerald-300' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                    {analysisResult.covariance_ablation.promotion_status === 'candidate'
+                                        ? t('covariance_candidate')
+                                        : t('covariance_retain_fixed')}
+                                </div>
+                                <div className="mt-4 overflow-x-auto">
+                                    <table className="data-table min-w-[760px]">
+                                        <thead>
+                                            <tr>
+                                                <th>{t('ablation_segment')}</th>
+                                                <th>{t('ablation_method')}</th>
+                                                <th>Sharpe</th>
+                                                <th>{t('walk_forward_max_dd')}</th>
+                                                <th>{t('walk_forward_stability')}</th>
+                                                <th>{t('shrinkage_intensity')}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {Object.entries(analysisResult.covariance_ablation.segments).flatMap(([segment, comparison]) =>
+                                                ['fixed_20', 'ledoit_wolf'].map((method) => {
+                                                    const metrics = comparison[method];
+                                                    return (
+                                                        <tr key={`${segment}-${method}`}>
+                                                            <td>{t(`ablation_${segment}`)}</td>
+                                                            <td>{method === 'fixed_20' ? t('fixed_shrinkage') : 'Ledoit–Wolf'}</td>
+                                                            <td>{metrics.status === 'ok' ? metrics.sharpe.toFixed(2) : t('data_insufficient')}</td>
+                                                            <td>{metrics.status === 'ok' ? `${(metrics.max_drawdown * 100).toFixed(1)}%` : '—'}</td>
+                                                            <td>{metrics.status === 'ok' ? `${(metrics.weight_stability * 100).toFixed(1)}%` : '—'}</td>
+                                                            <td>{metrics.status === 'ok' ? `${(metrics.average_shrinkage_intensity * 100).toFixed(1)}%` : '—'}</td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {selectedPoint && (
@@ -1194,6 +1238,27 @@ function PortfolioOptimizer() {
                                                             {item.window_months}{t('month_short')}: {(item.annualized_return * 100).toFixed(1)}% / Sharpe {item.sharpe.toFixed(2)} / DD {(item.max_drawdown * 100).toFixed(1)}%
                                                         </span>
                                                     ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {strategyResult.walk_forward.covariance_ablation && (
+                                            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-900/10 p-3">
+                                                <div className="text-sm font-semibold text-violet-300">{t('complete_covariance_ablation')}</div>
+                                                <p className="mt-1 text-xs text-slate-400">{t('complete_covariance_ablation_note')}</p>
+                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                    {Object.entries(strategyResult.walk_forward.covariance_ablation.segments).map(([segment, comparison]) => (
+                                                        <span key={segment}>
+                                                            {t(`ablation_${segment}`)}:
+                                                            {comparison.fixed_20.status === 'ok' && comparison.ledoit_wolf.status === 'ok'
+                                                                ? ` 20% ${comparison.fixed_20.sharpe.toFixed(2)} / LW ${comparison.ledoit_wolf.sharpe.toFixed(2)} · DD ${(comparison.fixed_20.max_drawdown * 100).toFixed(1)}%/${(comparison.ledoit_wolf.max_drawdown * 100).toFixed(1)}%`
+                                                                : ` ${t('data_insufficient')}`}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <div className="mt-2 text-xs text-violet-200">
+                                                    {strategyResult.walk_forward.covariance_ablation.promotion_status === 'candidate'
+                                                        ? t('covariance_candidate')
+                                                        : t('covariance_retain_fixed')}
                                                 </div>
                                             </div>
                                         )}

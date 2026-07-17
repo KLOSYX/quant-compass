@@ -177,6 +177,42 @@ def test_all_benchmarks_share_fees_limits_and_external_cash_flows():
     )
 
 
+def test_complete_walk_forward_can_ablate_covariance_with_identical_cash_flows():
+    dates = pd.date_range("2020-01-31", periods=10, freq="ME")
+    nav = pd.DataFrame(
+        {
+            "A": [1.00, 1.04, 1.02, 1.08, 1.06, 1.12, 1.10, 1.16, 1.14, 1.20],
+            "B": [1.00, 1.01, 1.03, 1.02, 1.05, 1.04, 1.07, 1.06, 1.09, 1.08],
+            "C": [1.00, 0.99, 1.02, 1.00, 1.04, 1.03, 1.06, 1.05, 1.08, 1.07],
+        },
+        index=dates,
+    )
+
+    result = evaluate_executable_walk_forward(
+        nav,
+        {},
+        monthly_investment=100.0,
+        initial_cash=1000.0,
+        min_train_months=4,
+        enable_cvar_constraint=False,
+        enable_drawdown_constraint=False,
+        include_covariance_ablation=True,
+    )
+
+    ablation = result["covariance_ablation"]
+    assert ablation["evaluation_scope"] == "complete_executable_strategy"
+    assert ablation["auto_switched"] is False
+    assert set(ablation["segments"]) == {
+        "full_sample",
+        "first_half",
+        "second_half",
+    }
+    assert all(
+        segment["fixed_20"]["observations"] == segment["ledoit_wolf"]["observations"]
+        for segment in ablation["segments"].values()
+    )
+
+
 def test_backtest_api_only_runs_executable_walk_forward_when_requested():
     dates = pd.date_range("2024-01-31", periods=3, freq="ME")
     nav = pd.DataFrame({"A": [1.0, 1.1, 1.2]}, index=dates)

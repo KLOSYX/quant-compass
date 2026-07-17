@@ -1,8 +1,11 @@
+import numpy as np
 import pandas as pd
 
 from core.frontier import (
     calculate_efficient_frontier,
     calculate_frontier_walk_forward_metrics,
+    estimate_covariance,
+    evaluate_covariance_shrinkage_ablation,
 )
 
 
@@ -111,3 +114,46 @@ def test_walk_forward_metrics_present_for_long_sample():
     assert all("frontier_walk_forward_sharpe" in item for item in metrics)
     assert all("frontier_walk_forward_cvar_loss" in item for item in metrics)
     assert all("robust_score" not in item for item in metrics)
+
+
+def test_ledoit_wolf_covariance_is_finite_and_preserves_riskfree_zero_risk():
+    returns = pd.DataFrame(
+        {
+            "AssetA": [0.01, -0.02, 0.03, 0.01, -0.01],
+            "AssetB": [0.02, -0.01, 0.01, 0.00, 0.02],
+            "RiskFree": [0.001] * 5,
+        }
+    )
+
+    covariance, intensity = estimate_covariance(returns, "ledoit_wolf")
+
+    assert 0 <= intensity <= 1
+    assert covariance.notna().all().all()
+    assert (covariance.loc["RiskFree"] == 0).all()
+    assert (covariance["RiskFree"] == 0).all()
+    assert (
+        np.linalg.eigvalsh(covariance.loc[["AssetA", "AssetB"], ["AssetA", "AssetB"]])
+        >= -1e-12
+    ).all()
+
+
+def test_covariance_ablation_never_auto_switches_the_default():
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2015-01-31", periods=120, freq="ME")
+    returns = pd.DataFrame(
+        rng.normal([0.008, 0.006, 0.004], [0.04, 0.025, 0.02], size=(120, 3)),
+        index=dates,
+        columns=["Equity", "Bond", "Gold"],
+    )
+    nav = (1 + returns).cumprod()
+
+    result = evaluate_covariance_shrinkage_ablation(nav)
+
+    assert result["default_method"] == "fixed_20"
+    assert result["auto_switched"] is False
+    assert result["promotion_status"] in {"candidate", "retain_fixed"}
+    assert set(result["segments"]) == {"full_sample", "first_half", "second_half"}
+    assert all(
+        segment["fixed_20"]["observations"] == segment["ledoit_wolf"]["observations"]
+        for segment in result["segments"].values()
+    )

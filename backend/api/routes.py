@@ -32,6 +32,7 @@ from core.frontier import (
     append_frontier_stability_warnings,
     calculate_efficient_frontier,
     calculate_frontier_walk_forward_metrics,
+    evaluate_covariance_shrinkage_ablation,
 )
 from core.limits import get_monthly_investment_limits
 from core.portfolio import (
@@ -127,6 +128,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             request.fund_fees,
             cvar_confidence=request.cvar_confidence,
         )
+        covariance_ablation = evaluate_covariance_shrinkage_ablation(nav_adjusted)
         for point, metric in zip(efficient_frontier_points, walk_forward_metrics):
             point["effective_risky_weights"] = normalize_risky_weights(
                 point["weights"], list(fund_df.columns)
@@ -221,6 +223,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             "fund_names": fund_names,
             "asset_categories": asset_categories,
             "asset_diagnostics": asset_diagnostics,
+            "covariance_ablation": covariance_ablation,
             "backtest_period": {
                 "start_date": start_date_str,
                 "end_date": end_date_str,
@@ -834,6 +837,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 max_drawdown_limit=request.max_drawdown_limit,
                 daily_nav=daily_nav,
                 risk_horizon_days=request.risk_horizon_days,
+                include_covariance_ablation=True,
             )
             if request.include_walk_forward
             else None
