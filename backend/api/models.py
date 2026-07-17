@@ -10,6 +10,7 @@ from core.constants import (
     DEFAULT_ESTIMATION_WINDOW,
     DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_DRAWDOWN_LIMIT,
+    DEFAULT_RISK_HORIZON_DAYS,
     DEFAULT_STRATEGY_MODE,
 )
 
@@ -45,6 +46,7 @@ class AnalysisRequest(BaseModel):
     cvar_limit: float = DEFAULT_CVAR_LIMIT
     enable_drawdown_constraint: bool = True
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
@@ -79,6 +81,7 @@ class StrategyBacktestRequest(BaseModel):
     cvar_limit: float = DEFAULT_CVAR_LIMIT
     enable_drawdown_constraint: bool = True
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
@@ -111,6 +114,7 @@ class CurrentRecommendationRequest(BaseModel):
     cvar_limit: float = DEFAULT_CVAR_LIMIT
     enable_drawdown_constraint: bool = True
     max_drawdown_limit: float = DEFAULT_MAX_DRAWDOWN_LIMIT
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS
     buy_fee: Dict[str, float] = {}
     sell_fee: Dict[str, float] = {}
     fund_investment_limits: Dict[str, FundInvestmentLimit] = {}

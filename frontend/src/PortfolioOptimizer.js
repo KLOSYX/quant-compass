@@ -144,6 +144,7 @@ function PortfolioOptimizer() {
     });
     const [cvarConfidence, setCvarConfidence] = useState(() => getStoredPercentWithLegacyRatioSupport('cvarConfidence', 95)); // pct
     const [cvarLimit, setCvarLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('cvarLimit', 8)); // pct
+    const [riskHorizonDays, setRiskHorizonDays] = useState(() => getStoredNumber('riskHorizonDays', 21));
     const [enableDrawdownConstraint, setEnableDrawdownConstraint] = useState(() => {
         const saved = localStorage.getItem('enableDrawdownConstraint');
         return saved === null ? true : JSON.parse(saved);
@@ -353,6 +354,7 @@ function PortfolioOptimizer() {
             const parsedMinimumCashReserve = parseFloat(minimumCashReserve);
             const parsedCvarConfidence = parseFloat(cvarConfidence);
             const parsedCvarLimit = parseFloat(cvarLimit);
+            const parsedRiskHorizonDays = parseInt(riskHorizonDays, 10);
             const parsedMaxDrawdownLimit = parseFloat(maxDrawdownLimit);
             const parsedMinWeight = parseFloat(minWeight);
             const parsedMaxWeight = parseFloat(maxWeight);
@@ -371,6 +373,7 @@ function PortfolioOptimizer() {
                 enable_cvar_constraint: enableCvarConstraint,
                 cvar_confidence: (Number.isNaN(parsedCvarConfidence) ? 95 : parsedCvarConfidence) / 100,
                 cvar_limit: (Number.isNaN(parsedCvarLimit) ? 8 : parsedCvarLimit) / 100,
+                risk_horizon_days: Number.isNaN(parsedRiskHorizonDays) ? 21 : parsedRiskHorizonDays,
                 enable_drawdown_constraint: enableDrawdownConstraint,
                 max_drawdown_limit: (Number.isNaN(parsedMaxDrawdownLimit) ? 20 : parsedMaxDrawdownLimit) / 100,
                 min_weight: (Number.isNaN(parsedMinWeight) ? 30 : parsedMinWeight) / 100,
@@ -465,6 +468,10 @@ function PortfolioOptimizer() {
                     const value = parseFloat(cvarLimit);
                     return (Number.isNaN(value) ? 8 : value) / 100;
                 })(),
+                risk_horizon_days: (() => {
+                    const value = parseInt(riskHorizonDays, 10);
+                    return Number.isNaN(value) ? 21 : value;
+                })(),
                 enable_drawdown_constraint: enableDrawdownConstraint,
                 max_drawdown_limit: (() => {
                     const value = parseFloat(maxDrawdownLimit);
@@ -550,6 +557,10 @@ function PortfolioOptimizer() {
                 cvar_limit: (() => {
                     const value = parseFloat(cvarLimit);
                     return (Number.isNaN(value) ? 8 : value) / 100;
+                })(),
+                risk_horizon_days: (() => {
+                    const value = parseInt(riskHorizonDays, 10);
+                    return Number.isNaN(value) ? 21 : value;
                 })(),
                 enable_drawdown_constraint: enableDrawdownConstraint,
                 max_drawdown_limit: (() => {
@@ -1021,6 +1032,11 @@ function PortfolioOptimizer() {
                                                                     <input className="form-input text-sm" type="number" step="0.5" min="0.1" max="99" value={cvarLimit} onChange={(e) => { setCvarLimit(e.target.value); localStorage.setItem('cvarLimit', e.target.value); }} />
                                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('cvar_limit_help')}</p>
                                                                 </div>
+                                                                <div className="form-group col-span-2">
+                                                                    <label className="form-label text-xs">{t('risk_horizon_days')}</label>
+                                                                    <input className="form-input text-sm" type="number" step="1" min="5" max="63" value={riskHorizonDays} onChange={(e) => { setRiskHorizonDays(e.target.value); localStorage.setItem('riskHorizonDays', e.target.value); }} />
+                                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('risk_horizon_days_help')}</p>
+                                                                </div>
                                                             </>
                                                         )}
                                                         <div className="form-group col-span-2">
@@ -1166,6 +1182,21 @@ function PortfolioOptimizer() {
                                                 ))}
                                             </tbody>
                                         </table>
+                                        {strategyResult.walk_forward.kelly_window_comparison?.status === 'selected' && (
+                                            <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
+                                                <div className="text-sm font-semibold text-sky-300">
+                                                    {t('kelly_window_platform')}: {strategyResult.walk_forward.kelly_window_comparison.selected_window_months} {t('months')}
+                                                </div>
+                                                <p className="mt-1 text-xs text-slate-400">{t('kelly_window_platform_note')}</p>
+                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                    {strategyResult.walk_forward.kelly_window_comparison.windows.map((item) => (
+                                                        <span key={item.window_months}>
+                                                            {item.window_months}{t('month_short')}: {(item.annualized_return * 100).toFixed(1)}% / Sharpe {item.sharpe.toFixed(2)} / DD {(item.max_drawdown * 100).toFixed(1)}%
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 {strategyResult.walk_forward?.status === 'insufficient_data' && (
@@ -1233,6 +1264,21 @@ function PortfolioOptimizer() {
                                                     </span>
                                                 ))}
                                             </div>
+                                        )}
+                                    </div>
+                                )}
+                                {recommendationResult.optimizer_info?.cvar_confidence_status && (
+                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.optimizer_info.cvar_warning_only ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                        <div className="font-semibold">{t('risk_diagnostics')}</div>
+                                        <div className="mt-1">
+                                            {t('risk_data_source')}: {t(`risk_source_${recommendationResult.optimizer_info.cvar_data_source}`)}
+                                            {' · '}{t('risk_horizon')}: {recommendationResult.optimizer_info.risk_horizon_days} {t('trading_days')}
+                                            {' · '}{t('risk_observations')}: {recommendationResult.optimizer_info.cvar_return_observations}
+                                            {' / '}{t('risk_effective_observations')}: {recommendationResult.optimizer_info.cvar_effective_return_observations}
+                                            {' · '}{t('risk_tail_samples')}: {recommendationResult.optimizer_info.cvar_effective_tail_count}
+                                        </div>
+                                        {recommendationResult.optimizer_info.cvar_warning_only && (
+                                            <div className="mt-1">{t('cvar_low_confidence_warning')}</div>
                                         )}
                                     </div>
                                 )}

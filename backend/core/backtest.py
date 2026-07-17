@@ -13,6 +13,7 @@ from core.constants import (
     DEFAULT_ESTIMATION_WINDOW,
     DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_DRAWDOWN_LIMIT,
+    DEFAULT_RISK_HORIZON_DAYS,
     DEFAULT_STRATEGY_MODE,
 )
 from core.execution import execute_monthly_plan
@@ -222,6 +223,8 @@ def backtest_kelly_dca(
     exit_fund_codes=None,
     reuse_settled_sale_proceeds: bool = False,
     asset_categories: Dict[str, str] = None,
+    daily_nav: pd.DataFrame = None,
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
 ):
     """Kelly-guided DCA strategy.
 
@@ -241,6 +244,7 @@ def backtest_kelly_dca(
         cvar_limit=cvar_limit,
         enable_drawdown_constraint=enable_drawdown_constraint,
         max_drawdown_limit=max_drawdown_limit,
+        risk_horizon_days=risk_horizon_days,
     )
 
     # Initialize holdings from initial_holdings if provided
@@ -292,11 +296,17 @@ def backtest_kelly_dca(
 
     if has_risky_assets:
         reference_portfolio_nav = df_nav[risky_columns].dot(risky_weights)
+        daily_reference_portfolio_nav = (
+            daily_nav[risky_columns].dot(risky_weights)
+            if daily_nav is not None and set(risky_columns).issubset(daily_nav.columns)
+            else None
+        )
         ma_series = reference_portfolio_nav.rolling(
             window=ma_window, min_periods=1
         ).mean()
     else:
         reference_portfolio_nav = pd.Series(1.0, index=df_nav.index, dtype=float)
+        daily_reference_portfolio_nav = None
         ma_series = reference_portfolio_nav.copy()
 
     # Unit NAV Accounting
@@ -405,6 +415,8 @@ def backtest_kelly_dca(
                     cvar_limit=cvar_limit,
                     enable_drawdown_constraint=enable_drawdown_constraint,
                     max_drawdown_limit=max_drawdown_limit,
+                    daily_reference_nav=daily_reference_portfolio_nav,
+                    risk_horizon_days=risk_horizon_days,
                 )
 
         # 4. DCA execution: this month's external contribution is the only
@@ -588,6 +600,8 @@ def simulate_strategy_frontier(
     monthly_investment=1000.0,
     fund_investment_limits=None,
     asset_categories=None,
+    daily_nav=None,
+    risk_horizon_days=DEFAULT_RISK_HORIZON_DAYS,
 ):
     """
     Simulate the Kelly-guided DCA strategy for each frontier point.
@@ -650,6 +664,8 @@ def simulate_strategy_frontier(
             max_drawdown_limit=max_drawdown_limit,
             fund_investment_limits=fund_investment_limits,
             asset_categories=asset_categories,
+            daily_nav=daily_nav,
+            risk_horizon_days=risk_horizon_days,
         )
 
         # Strategy Return: Standard CAGR based on Strategy Unit NAV

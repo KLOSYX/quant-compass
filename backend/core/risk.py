@@ -128,11 +128,52 @@ def calculate_cvar_loss(returns: pd.Series, confidence: float) -> float:
     if returns.empty:
         return 0.0
     losses = -returns.astype(float)
-    var_loss = float(losses.quantile(confidence))
-    tail_losses = losses[losses >= var_loss]
-    if tail_losses.empty:
-        return max(0.0, var_loss)
+    tail_count = max(1, int(np.ceil(len(losses) * (1 - confidence))))
+    tail_losses = losses.nlargest(tail_count)
     return max(0.0, float(tail_losses.mean()))
+
+
+def calculate_cvar_diagnostics(
+    returns: pd.Series,
+    confidence: float,
+    *,
+    risk_horizon_days: int,
+    minimum_tail_observations: int,
+    observation_stride: int = 1,
+) -> dict:
+    clean_returns = returns.astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    effective_observations = (
+        int(np.ceil(len(clean_returns) / max(1, observation_stride)))
+        if not clean_returns.empty
+        else 0
+    )
+    if effective_observations == 0:
+        tail_count = 0
+    else:
+        tail_count = max(1, int(np.ceil(effective_observations * (1 - confidence))))
+    return {
+        "return_observations": int(len(clean_returns)),
+        "effective_return_observations": effective_observations,
+        "cvar_effective_tail_count": tail_count,
+        "risk_horizon_days": int(risk_horizon_days),
+        "cvar_confidence": float(confidence),
+        "cvar_loss": float(calculate_cvar_loss(clean_returns, confidence)),
+        "minimum_tail_observations": int(minimum_tail_observations),
+        "confidence_status": (
+            "adequate" if tail_count >= minimum_tail_observations else "low"
+        ),
+    }
+
+
+def calculate_rolling_horizon_returns(
+    daily_nav: pd.Series, risk_horizon_days: int
+) -> pd.Series:
+    if risk_horizon_days < 1:
+        raise ValueError("risk_horizon_days must be at least 1")
+    clean_nav = (
+        daily_nav.astype(float).replace([np.inf, -np.inf], np.nan).dropna().sort_index()
+    )
+    return clean_nav.pct_change(periods=risk_horizon_days).dropna()
 
 
 def calculate_drawdown_from_returns(returns: pd.Series) -> float:

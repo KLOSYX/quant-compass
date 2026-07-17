@@ -92,6 +92,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             enable_drawdown_constraint=request.enable_drawdown_constraint,
             max_drawdown_limit=request.max_drawdown_limit,
             allow_auto_bounds=True,
+            risk_horizon_days=request.risk_horizon_days,
         )
 
         fund_df, fund_names, warnings = get_fund_data(
@@ -100,6 +101,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             request.end_date,
             request.risk_free_rate,
         )
+        daily_nav = fund_df.attrs.get("daily_nav")
         append_fee_warnings(
             warnings,
             request.fund_fees,
@@ -199,6 +201,8 @@ async def analyze_portfolio(request: AnalysisRequest):
                 monthly_investment=request.monthly_investment or 1000.0,
                 fund_investment_limits=request.fund_investment_limits,
                 asset_categories=asset_categories,
+                daily_nav=daily_nav,
+                risk_horizon_days=request.risk_horizon_days,
             )
 
         return {
@@ -253,13 +257,12 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             cvar_limit=request.cvar_limit,
             enable_drawdown_constraint=request.enable_drawdown_constraint,
             max_drawdown_limit=request.max_drawdown_limit,
+            risk_horizon_days=request.risk_horizon_days,
         )
 
-        # Fetch latest fund data (last 12 months for MA calculation)
+        # Fetch enough history for 60-month Kelly and non-overlapping CVaR diagnostics.
         end_date_obj = date.today()
-        start_date_obj = date(
-            end_date_obj.year - 5, end_date_obj.month, end_date_obj.day
-        )
+        start_date_obj = (pd.Timestamp(end_date_obj) - pd.DateOffset(years=10)).date()
 
         fund_df, fund_names, _ = get_fund_data(
             request.fund_codes,
@@ -267,6 +270,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             end_date_obj,
             request.risk_free_rate,
         )
+        daily_nav = fund_df.attrs.get("daily_nav")
         fund_df, fund_names = ensure_risk_free_column(
             fund_df,
             fund_names,
@@ -291,8 +295,15 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             reference_portfolio_nav = adjusted_fund_df[risky_weights.index].dot(
                 risky_weights
             )
+            daily_reference_portfolio_nav = (
+                daily_nav[risky_weights.index].dot(risky_weights)
+                if daily_nav is not None
+                and set(risky_weights.index).issubset(daily_nav.columns)
+                else None
+            )
         else:
             reference_portfolio_nav = pd.Series(1.0, index=fund_df.index, dtype=float)
+            daily_reference_portfolio_nav = None
 
         # Calculate moving average based on ma_window
         ma_window = request.ma_window
@@ -390,6 +401,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 cvar_limit=request.cvar_limit,
                 enable_drawdown_constraint=request.enable_drawdown_constraint,
                 max_drawdown_limit=request.max_drawdown_limit,
+                daily_reference_nav=daily_reference_portfolio_nav,
+                risk_horizon_days=request.risk_horizon_days,
             )
 
         if has_risky_assets and request.strategy_mode != "legacy_linear":
@@ -406,6 +419,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 cvar_limit=request.cvar_limit,
                 enable_drawdown_constraint=request.enable_drawdown_constraint,
                 max_drawdown_limit=request.max_drawdown_limit,
+                daily_reference_nav=daily_reference_portfolio_nav,
+                risk_horizon_days=request.risk_horizon_days,
             )
         else:
             window_robustness = {
@@ -724,6 +739,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             cvar_limit=request.cvar_limit,
             enable_drawdown_constraint=request.enable_drawdown_constraint,
             max_drawdown_limit=request.max_drawdown_limit,
+            risk_horizon_days=request.risk_horizon_days,
         )
 
         fund_df, _, _ = get_fund_data(
@@ -732,6 +748,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             request.end_date,
             request.risk_free_rate,
         )
+        daily_nav = fund_df.attrs.get("daily_nav")
         fund_df, _ = ensure_risk_free_column(
             fund_df,
             {},
@@ -791,6 +808,8 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             exit_fund_codes=request.exit_fund_codes,
             reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
             asset_categories=asset_categories,
+            daily_nav=daily_nav,
+            risk_horizon_days=request.risk_horizon_days,
         )
         walk_forward = (
             evaluate_executable_walk_forward(
@@ -813,6 +832,8 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 cvar_limit=request.cvar_limit,
                 enable_drawdown_constraint=request.enable_drawdown_constraint,
                 max_drawdown_limit=request.max_drawdown_limit,
+                daily_nav=daily_nav,
+                risk_horizon_days=request.risk_horizon_days,
             )
             if request.include_walk_forward
             else None

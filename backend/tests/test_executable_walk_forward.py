@@ -7,12 +7,47 @@ from fastapi.testclient import TestClient
 from core.frontier import calculate_efficient_frontier
 from core.walk_forward import (
     WALK_FORWARD_STRATEGIES,
+    _select_stable_kelly_platform,
     evaluate_executable_walk_forward,
 )
 from main import app
 
 
 client = TestClient(app)
+
+
+def test_stable_kelly_platform_keeps_36_month_default_when_on_platform():
+    metrics = {
+        24: {
+            "observations": 12,
+            "annualized_return": 0.20,
+            "sharpe": 1.8,
+            "max_drawdown": 0.18,
+        },
+        36: {
+            "observations": 12,
+            "annualized_return": 0.10,
+            "sharpe": 0.8,
+            "max_drawdown": 0.12,
+        },
+        48: {
+            "observations": 12,
+            "annualized_return": 0.11,
+            "sharpe": 0.9,
+            "max_drawdown": 0.13,
+        },
+        60: {
+            "observations": 12,
+            "annualized_return": 0.30,
+            "sharpe": 2.0,
+            "max_drawdown": 0.25,
+        },
+    }
+
+    selected = _select_stable_kelly_platform(metrics)
+
+    assert selected["selected_window_months"] == 36
+    assert selected["selection_rule"] == "median_long_window_platform"
 
 
 def test_one_asset_walk_forward_matches_independent_cash_flow_ledger():

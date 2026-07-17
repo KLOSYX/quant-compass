@@ -5,11 +5,18 @@ import pandas as pd
 from fastapi import HTTPException
 
 from core.constants import (
+    DEFAULT_RISK_HORIZON_DAYS,
+    MIN_CVAR_TAIL_OBSERVATIONS,
     OPTIMIZED_SIGNAL_EPSILON,
     RISK_RATIO_GRID_STEP,
     VALID_STRATEGY_MODES,
 )
-from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
+from core.risk import (
+    calculate_cvar_diagnostics,
+    calculate_cvar_loss,
+    calculate_drawdown_from_returns,
+    calculate_rolling_horizon_returns,
+)
 
 
 def calculate_target_ratio(current_price, ma_value, min_weight, max_weight):
@@ -58,6 +65,7 @@ def validate_strategy_params(
     enable_drawdown_constraint: bool,
     max_drawdown_limit: float,
     allow_auto_bounds: bool = False,
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
 ):
     if strategy_mode not in VALID_STRATEGY_MODES:
         raise HTTPException(
@@ -104,6 +112,10 @@ def validate_strategy_params(
         raise HTTPException(
             status_code=400, detail="max_drawdown_limit must be in (0, 1)"
         )
+    if not (5 <= risk_horizon_days <= 63):
+        raise HTTPException(
+            status_code=400, detail="risk_horizon_days must be within [5, 63]"
+        )
 
 
 def _infer_signal_from_bounds(
@@ -133,6 +145,10 @@ def calculate_max_feasible_risk_ratio(
     cvar_limit: float,
     enable_drawdown_constraint: bool,
     max_drawdown_limit: float,
+    cvar_risky_returns: Optional[pd.Series] = None,
+    drawdown_risky_returns: Optional[pd.Series] = None,
+    cvar_rf_return: Optional[float] = None,
+    drawdown_rf_return: Optional[float] = None,
 ):
     if effective_upper <= 0:
         return {
@@ -148,6 +164,19 @@ def calculate_max_feasible_risk_ratio(
             "max_feasible_ratio_by_risk": float(effective_upper),
         }
 
+    cvar_returns = (
+        cvar_risky_returns
+        if cvar_risky_returns is not None and not cvar_risky_returns.empty
+        else hist_risky_returns
+    )
+    drawdown_returns = (
+        drawdown_risky_returns
+        if drawdown_risky_returns is not None and not drawdown_risky_returns.empty
+        else hist_risky_returns
+    )
+    cvar_rf = rf_monthly if cvar_rf_return is None else cvar_rf_return
+    drawdown_rf = rf_monthly if drawdown_rf_return is None else drawdown_rf_return
+
     grid = np.arange(0.0, effective_upper + RISK_RATIO_GRID_STEP, RISK_RATIO_GRID_STEP)
     if len(grid) == 0 or grid[-1] < effective_upper:
         grid = np.append(grid, effective_upper)
@@ -158,9 +187,12 @@ def calculate_max_feasible_risk_ratio(
 
     for ratio in grid:
         ratio = float(min(max(ratio, 0.0), effective_upper))
-        portfolio_returns = ratio * hist_risky_returns + (1 - ratio) * rf_monthly
-        cvar_loss = calculate_cvar_loss(portfolio_returns, cvar_confidence)
-        dd_loss = calculate_drawdown_from_returns(portfolio_returns)
+        cvar_portfolio_returns = ratio * cvar_returns + (1 - ratio) * cvar_rf
+        drawdown_portfolio_returns = (
+            ratio * drawdown_returns + (1 - ratio) * drawdown_rf
+        )
+        cvar_loss = calculate_cvar_loss(cvar_portfolio_returns, cvar_confidence)
+        dd_loss = calculate_drawdown_from_returns(drawdown_portfolio_returns)
 
         cvar_ok = (not enable_cvar_constraint) or (cvar_loss <= cvar_limit)
         dd_ok = (not enable_drawdown_constraint) or (dd_loss <= max_drawdown_limit)
@@ -207,6 +239,9 @@ def calculate_target_ratio_optimized(
     cvar_limit: float,
     enable_drawdown_constraint: bool,
     max_drawdown_limit: float,
+    daily_reference_nav: Optional[pd.Series] = None,
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
+    minimum_cvar_tail_observations: int = MIN_CVAR_TAIL_OBSERVATIONS,
 ):
     if total_wealth > 0:
         cash_cap_ratio = float(
@@ -224,6 +259,51 @@ def calculate_target_ratio_optimized(
         .dropna()
         .tail(estimation_window)
     )
+    rf_monthly = get_monthly_rf_return(risk_free_rate)
+    cvar_risky_returns = hist
+    drawdown_risky_returns = hist
+    cvar_rf_return = rf_monthly
+    drawdown_rf_return = rf_monthly
+    cvar_data_source = "monthly_fallback"
+    drawdown_data_source = "monthly_fallback"
+    daily_return_observations = 0
+
+    if daily_reference_nav is not None:
+        daily_history = (
+            daily_reference_nav.loc[:timestamp]
+            .astype(float)
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+            .sort_index()
+        )
+        daily_returns = daily_history.pct_change().dropna()
+        horizon_returns = calculate_rolling_horizon_returns(
+            daily_history, risk_horizon_days
+        )
+        daily_return_observations = int(len(daily_returns))
+        if not horizon_returns.empty:
+            cvar_risky_returns = horizon_returns
+            cvar_rf_return = (1 + risk_free_rate) ** (risk_horizon_days / 252) - 1
+            cvar_data_source = "daily_rolling_horizon"
+        if not daily_returns.empty:
+            drawdown_risky_returns = daily_returns
+            drawdown_rf_return = (1 + risk_free_rate) ** (1 / 252) - 1
+            drawdown_data_source = "daily_path"
+
+    cvar_diagnostics = calculate_cvar_diagnostics(
+        cvar_risky_returns,
+        cvar_confidence,
+        risk_horizon_days=(
+            risk_horizon_days if cvar_data_source == "daily_rolling_horizon" else 21
+        ),
+        minimum_tail_observations=minimum_cvar_tail_observations,
+        observation_stride=(
+            risk_horizon_days if cvar_data_source == "daily_rolling_horizon" else 1
+        ),
+    )
+    cvar_hard_constraint_effective = (
+        enable_cvar_constraint and cvar_diagnostics["confidence_status"] == "adequate"
+    )
 
     optimizer_info = {
         "mu_excess": None,
@@ -237,6 +317,21 @@ def calculate_target_ratio_optimized(
         "max_feasible_ratio_by_risk": float(effective_upper),
         "cvar_estimate_at_target": None,
         "drawdown_estimate_at_target": None,
+        "risk_horizon_days": cvar_diagnostics["risk_horizon_days"],
+        "cvar_return_observations": cvar_diagnostics["return_observations"],
+        "cvar_effective_return_observations": cvar_diagnostics[
+            "effective_return_observations"
+        ],
+        "cvar_effective_tail_count": cvar_diagnostics["cvar_effective_tail_count"],
+        "cvar_confidence_status": cvar_diagnostics["confidence_status"],
+        "cvar_data_source": cvar_data_source,
+        "cvar_hard_constraint_requested": enable_cvar_constraint,
+        "cvar_hard_constraint_effective": cvar_hard_constraint_effective,
+        "cvar_warning_only": (
+            enable_cvar_constraint and not cvar_hard_constraint_effective
+        ),
+        "drawdown_data_source": drawdown_data_source,
+        "daily_return_observations": daily_return_observations,
         "constraint_applied": False,
         "constraint_binding": "cash" if effective_upper < max_weight else "none",
     }
@@ -248,8 +343,6 @@ def calculate_target_ratio_optimized(
         )
         return target_ratio, allocation_signal, optimizer_info
 
-    rf_monthly = get_monthly_rf_return(risk_free_rate)
-
     mu_excess = float(hist.mean() - rf_monthly)
     sigma2 = float(max(hist.var(ddof=1), 1e-6))
     full_kelly = mu_excess / sigma2
@@ -258,20 +351,29 @@ def calculate_target_ratio_optimized(
         hist_risky_returns=hist,
         rf_monthly=rf_monthly,
         effective_upper=effective_upper,
-        enable_cvar_constraint=enable_cvar_constraint,
+        enable_cvar_constraint=cvar_hard_constraint_effective,
         cvar_confidence=cvar_confidence,
         cvar_limit=cvar_limit,
         enable_drawdown_constraint=enable_drawdown_constraint,
         max_drawdown_limit=max_drawdown_limit,
+        cvar_risky_returns=cvar_risky_returns,
+        drawdown_risky_returns=drawdown_risky_returns,
+        cvar_rf_return=cvar_rf_return,
+        drawdown_rf_return=drawdown_rf_return,
     )
     final_upper = min(effective_upper, risk_caps["max_feasible_ratio_by_risk"])
     lower_bound = min_weight if final_upper >= min_weight else 0.0
     target_ratio = float(np.clip(fractional_kelly, lower_bound, final_upper))
-    target_portfolio_returns = target_ratio * hist + (1 - target_ratio) * rf_monthly
+    target_cvar_returns = (
+        target_ratio * cvar_risky_returns + (1 - target_ratio) * cvar_rf_return
+    )
+    target_drawdown_returns = (
+        target_ratio * drawdown_risky_returns + (1 - target_ratio) * drawdown_rf_return
+    )
 
-    constraint_applied = enable_cvar_constraint or enable_drawdown_constraint
+    constraint_applied = cvar_hard_constraint_effective or enable_drawdown_constraint
     cvar_binding = (
-        enable_cvar_constraint
+        cvar_hard_constraint_effective
         and risk_caps["max_feasible_ratio_by_cvar"] + 1e-9 < effective_upper
     )
     drawdown_binding = (
@@ -301,10 +403,10 @@ def calculate_target_ratio_optimized(
             ],
             "max_feasible_ratio_by_risk": risk_caps["max_feasible_ratio_by_risk"],
             "cvar_estimate_at_target": float(
-                calculate_cvar_loss(target_portfolio_returns, cvar_confidence)
+                calculate_cvar_loss(target_cvar_returns, cvar_confidence)
             ),
             "drawdown_estimate_at_target": float(
-                calculate_drawdown_from_returns(target_portfolio_returns)
+                calculate_drawdown_from_returns(target_drawdown_returns)
             ),
             "constraint_applied": constraint_applied,
             "constraint_binding": binding,
@@ -335,6 +437,8 @@ def assess_kelly_window_robustness(
     cvar_limit: float,
     enable_drawdown_constraint: bool,
     max_drawdown_limit: float,
+    daily_reference_nav: Optional[pd.Series] = None,
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
 ):
     """Diagnose whether the fixed 36-month Kelly estimate is window-stable."""
     clean_nav = reference_portfolio_nav.dropna()
@@ -365,6 +469,8 @@ def assess_kelly_window_robustness(
             cvar_limit=cvar_limit,
             enable_drawdown_constraint=enable_drawdown_constraint,
             max_drawdown_limit=max_drawdown_limit,
+            daily_reference_nav=daily_reference_nav,
+            risk_horizon_days=risk_horizon_days,
         )
         measurements.append(
             {

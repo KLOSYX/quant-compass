@@ -3,6 +3,7 @@ from datetime import date
 from typing import Dict, List, Optional
 
 import akshare as ak
+import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
@@ -110,6 +111,7 @@ def get_fund_data(
     fund_list = _get_fund_list()
 
     fund_data = {}
+    daily_fund_data = {}
     fund_names = {}
     warnings = []
     if fund_codes:
@@ -124,6 +126,7 @@ def get_fund_data(
                     fund_type = ""
 
                 fund_nav = _get_fund_nav(code, fund_type)
+                daily_fund_data[code] = fund_nav
                 fund_data[code] = fund_nav.resample("ME").last()
 
             except Exception as e:
@@ -133,6 +136,7 @@ def get_fund_data(
 
     df = pd.DataFrame(fund_data)
     df = df.sort_index()
+    daily_df = pd.DataFrame(daily_fund_data).sort_index()
 
     if not df.empty:
         latest_start_date = max(
@@ -141,9 +145,9 @@ def get_fund_data(
             if pd.notna(df[c].first_valid_index())
         )
         user_start = pd.to_datetime(start_date) if start_date else latest_start_date
-        user_end = pd.to_datetime(end_date) if end_date else df.index.max()
+        user_end = pd.to_datetime(end_date) if end_date else daily_df.index.max()
         actual_start = max(latest_start_date, user_start)
-        actual_end = min(user_end, df.index.max())
+        actual_end = min(user_end, daily_df.index.max())
     else:
         if not start_date or not end_date:
             raise HTTPException(
@@ -154,6 +158,9 @@ def get_fund_data(
         actual_start, actual_end = user_start, user_end
         df = pd.DataFrame(
             index=pd.date_range(start=actual_start, end=actual_end, freq="ME")
+        )
+        daily_df = pd.DataFrame(
+            index=pd.bdate_range(start=actual_start, end=actual_end)
         )
 
     if risk_free_rate is not None:
@@ -166,6 +173,12 @@ def get_fund_data(
         rf_returns = pd.Series(monthly_rf_return, index=rf_index)
         rf_nav = (1 + rf_returns).cumprod()
         df["RiskFree"] = rf_nav
+        daily_rf_return = (1 + risk_free_rate) ** (1 / 252) - 1
+        daily_rf_index = pd.bdate_range(start=actual_start, end=actual_end)
+        daily_df["RiskFree"] = pd.Series(
+            (1 + daily_rf_return) ** np.arange(1, len(daily_rf_index) + 1),
+            index=daily_rf_index,
+        )
         fund_names["RiskFree"] = "无风险资产"
 
     if actual_start > user_start and fund_codes:
@@ -180,10 +193,12 @@ def get_fund_data(
 
     df_filtered = df.loc[actual_start:actual_end]
     df_processed = df_filtered.ffill().dropna()
+    daily_processed = daily_df.loc[actual_start:actual_end].ffill().dropna()
 
     if df_processed.empty:
         raise HTTPException(status_code=400, detail="数据处理后为空，无法进行分析。")
 
+    df_processed.attrs["daily_nav"] = daily_processed
     return df_processed, fund_names, warnings
 
 

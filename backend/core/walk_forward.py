@@ -4,7 +4,10 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from core.constants import MIN_WALK_FORWARD_TRAIN_MONTHS
+from core.constants import (
+    DEFAULT_RISK_HORIZON_DAYS,
+    MIN_WALK_FORWARD_TRAIN_MONTHS,
+)
 from core.execution import execute_monthly_plan
 from core.frontier import calculate_efficient_frontier
 from core.portfolio import decompose_selected_weights
@@ -18,6 +21,57 @@ WALK_FORWARD_STRATEGIES = (
     "no_kelly",
     "full_strategy",
 )
+KELLY_WINDOW_MONTHS = (24, 36, 48, 60)
+
+
+def _select_stable_kelly_platform(window_metrics: dict[int, dict]) -> dict:
+    """Choose the central long-window result, rather than the highest score."""
+    eligible = {
+        window: metrics
+        for window, metrics in window_metrics.items()
+        if metrics["observations"] > 0 and window >= 36
+    }
+    if len(eligible) < 2:
+        return {
+            "status": "insufficient_data",
+            "selected_window_months": None,
+            "selection_rule": "median_long_window_platform",
+        }
+
+    fields = ("annualized_return", "sharpe", "max_drawdown")
+    medians = {
+        field: float(np.median([metrics[field] for metrics in eligible.values()]))
+        for field in fields
+    }
+    scales = {
+        field: max(
+            max(metrics[field] for metrics in eligible.values())
+            - min(metrics[field] for metrics in eligible.values()),
+            1e-9,
+        )
+        for field in fields
+    }
+    distances = {
+        window: sum(
+            abs(metrics[field] - medians[field]) / scales[field] for field in fields
+        )
+        for window, metrics in eligible.items()
+    }
+    best_distance = min(distances.values())
+    selected = (
+        36
+        if 36 in distances and distances[36] <= best_distance + 0.25
+        else min(distances, key=lambda window: (distances[window], window))
+    )
+    return {
+        "status": "selected",
+        "selected_window_months": selected,
+        "selection_rule": "median_long_window_platform",
+        "selection_note": (
+            "选择长期窗口中最接近收益、Sharpe 与回撤中位平台的窗口；"
+            "36 个月处于同一平台时保留默认值，不追逐单次最高分。"
+        ),
+    }
 
 
 @dataclass
@@ -190,6 +244,8 @@ def evaluate_executable_walk_forward(
     cvar_limit: float = 0.08,
     enable_drawdown_constraint: bool = True,
     max_drawdown_limit: float = 0.2,
+    daily_nav: pd.DataFrame | None = None,
+    risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
 ) -> dict:
     """Evaluate executable strategies using only information available at each split."""
     if monthly_investment < 0:
@@ -232,7 +288,7 @@ def evaluate_executable_walk_forward(
             "strategies": {},
         }
     first_signal_position = min_train_months - 1
-    states = {
+    strategy_states = {
         name: _initialize_state(
             df_nav,
             first_signal_position,
@@ -242,12 +298,29 @@ def evaluate_executable_walk_forward(
         )
         for name in WALK_FORWARD_STRATEGIES
     }
+    comparison_signal_position = max(first_signal_position, max(KELLY_WINDOW_MONTHS))
+    window_state_names = (
+        {f"full_strategy_{window}m": window for window in KELLY_WINDOW_MONTHS}
+        if comparison_signal_position < len(df_nav) - 1
+        else {}
+    )
+    states = {
+        **strategy_states,
+        **{
+            name: _initialize_state(
+                df_nav,
+                comparison_signal_position,
+                risky_codes,
+                initial_holdings,
+                initial_cash,
+            )
+            for name in window_state_names
+        },
+    }
     equal_weights = {code: 1.0 / len(risky_codes) for code in risky_codes}
     fixed_weights = None
 
-    for evaluation_month, realized_position in enumerate(
-        range(min_train_months, len(df_nav)), start=1
-    ):
+    for realized_position in range(min_train_months, len(df_nav)):
         signal_position = realized_position - 1
         train_df = df_nav.iloc[: signal_position + 1]
         signal_date = df_nav.index[signal_position]
@@ -264,6 +337,11 @@ def evaluate_executable_walk_forward(
             "fixed_weight_dca": fixed_weights,
             "no_kelly": dynamic_weights,
             "full_strategy": dynamic_weights,
+            **(
+                {name: dynamic_weights for name in window_state_names}
+                if signal_position >= comparison_signal_position
+                else {}
+            ),
         }
 
         for strategy_name, weights in strategy_weights.items():
@@ -302,15 +380,23 @@ def evaluate_executable_walk_forward(
                 if total_wealth > 0
                 else 0.0
             )
-            if strategy_name == "full_strategy":
+            if strategy_name == "full_strategy" or strategy_name in window_state_names:
                 reference_nav = train_df[risky_weights.index].dot(risky_weights)
+                daily_reference_nav = (
+                    daily_nav.loc[:signal_date, risky_weights.index].dot(risky_weights)
+                    if daily_nav is not None
+                    and set(risky_weights.index).issubset(daily_nav.columns)
+                    else None
+                )
                 tactical_ratio, _, _ = calculate_target_ratio_optimized(
                     reference_portfolio_nav=reference_nav,
                     timestamp=signal_date,
                     min_weight=min_weight,
                     max_weight=max_weight,
                     kelly_fraction=kelly_fraction,
-                    estimation_window=estimation_window,
+                    estimation_window=window_state_names.get(
+                        strategy_name, estimation_window
+                    ),
                     risk_free_rate=risk_free_rate,
                     total_wealth=total_wealth,
                     minimum_cash_reserve=minimum_cash_reserve,
@@ -319,6 +405,8 @@ def evaluate_executable_walk_forward(
                     cvar_limit=cvar_limit,
                     enable_drawdown_constraint=enable_drawdown_constraint,
                     max_drawdown_limit=max_drawdown_limit,
+                    daily_reference_nav=daily_reference_nav,
+                    risk_horizon_days=risk_horizon_days,
                 )
             elif strategy_name == "no_kelly":
                 tactical_ratio = min(max_weight, cash_cap)
@@ -387,7 +475,7 @@ def evaluate_executable_walk_forward(
             )
             if acquired_value + risk_free_purchase > 0:
                 state.purchase_lots.append(
-                    (evaluation_month, acquired_value + risk_free_purchase)
+                    (len(state.returns) + 1, acquired_value + risk_free_purchase)
                 )
             period_trade = execution.total_gross_buy + execution.total_gross_sell
             state.total_trade_value += period_trade
@@ -468,7 +556,12 @@ def evaluate_executable_walk_forward(
             )
 
     strategies = {
-        name: _summarize_state(state, risk_free_rate) for name, state in states.items()
+        name: _summarize_state(strategy_states[name], risk_free_rate)
+        for name in WALK_FORWARD_STRATEGIES
+    }
+    window_metrics = {
+        window: _summarize_state(states[name], risk_free_rate)
+        for name, window in window_state_names.items()
     }
     return {
         "status": "ok",
@@ -478,4 +571,12 @@ def evaluate_executable_walk_forward(
         "limit_history_assumption": "fixed_user_scenario",
         "cash_flow_policy": "identical_initial_capital_and_monthly_contributions",
         "strategies": strategies,
+        "kelly_window_comparison": {
+            "windows": [
+                {"window_months": window, **window_metrics[window]}
+                for window in KELLY_WINDOW_MONTHS
+                if window in window_metrics
+            ],
+            **_select_stable_kelly_platform(window_metrics),
+        },
     }
