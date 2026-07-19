@@ -1,12 +1,23 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
     buildAssetCategoriesPayload,
     buildSubstituteForPayload,
+    getRecommendedFrontierPoint,
     sanitizeLegacyHoldings
 } from './PortfolioOptimizer';
 import PortfolioOptimizer from './PortfolioOptimizer';
 import { LanguageProvider } from './LanguageContext';
 import { translations } from './i18n/translations';
+
+jest.mock('echarts-for-react', () => ({ onEvents }) => (
+    <button
+        type="button"
+        data-testid="mock-frontier-chart"
+        onClick={() => onEvents?.click?.({ dataIndex: 0 })}
+    >
+        mock chart
+    </button>
+));
 
 beforeEach(() => {
     localStorage.clear();
@@ -37,6 +48,54 @@ test('builds only valid substitute relationships in the current fund universe', 
     )).toEqual({
         B: 'A'
     });
+});
+
+test('resolves the backend recommended frontier point for explicit reset', () => {
+    const frontier = [{ risk: 0.1 }, { risk: 0.2 }];
+    expect(getRecommendedFrontierPoint({
+        efficient_frontier: frontier,
+        recommended_point_index: 1
+    })).toBe(frontier[1]);
+    expect(getRecommendedFrontierPoint({
+        efficient_frontier: frontier,
+        recommended_point_index: null
+    })).toBeNull();
+    expect(translations.zh.reset_to_recommended_point).toContain('推荐点');
+    expect(translations.en.reset_to_recommended_point).toContain('Recommended Point');
+});
+
+test('shows an explicit reset button after the backend recommends a frontier point', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['A']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            efficient_frontier: [
+                { risk: 0.1, return: 0.05, weights: { A: 1 } },
+                { risk: 0.2, return: 0.08, weights: { A: 1 } }
+            ],
+            recommended_point_index: 1,
+            fund_names: { A: 'Fund A' },
+            asset_categories: { A: 'equity' },
+            backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' },
+            warnings: []
+        })
+    });
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+
+    const resetButton = await screen.findByRole('button', {
+        name: translations.zh.reset_to_recommended_point
+    });
+    expect(resetButton).toBeInTheDocument();
+    expect(resetButton).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('mock-frontier-chart'));
+    expect(resetButton).toBeEnabled();
+
+    fireEvent.click(resetButton);
+    expect(resetButton).toBeDisabled();
 });
 
 test('distinguishes fund portfolio ratio from equity exposure in copy', () => {

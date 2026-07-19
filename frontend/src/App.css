@@ -561,6 +561,13 @@ header.app-header {
     color: var(--accent-secondary);
 }
 
+.text-link-btn:disabled {
+    cursor: default;
+    opacity: 0.5;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+
 /* Risk Free Asset Row */
 .risk-free-row {
     display: flex;

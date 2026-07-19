@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
-import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download } from 'lucide-react';
+import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download, RotateCcw } from 'lucide-react';
 import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
 import { downloadPortfolioReport } from './exportPortfolioReport';
 
@@ -101,6 +101,11 @@ export const buildSubstituteForPayload = (fundCodes, relationships = {}) => {
             .map(code => [code, String(relationships[code] || '').trim()])
             .filter(([code, primary]) => primary && primary !== code && currentCodes.has(primary))
     );
+};
+export const getRecommendedFrontierPoint = (analysis) => {
+    const index = analysis?.recommended_point_index;
+    if (!Number.isInteger(index) || index < 0) return null;
+    return analysis?.efficient_frontier?.[index] || null;
 };
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
@@ -665,6 +670,7 @@ function PortfolioOptimizer() {
         const { risk: chartRisk } = selected;
         setSelectedPoint(selected);
         setStrategyResult(null);
+        setRecommendationResult(null);
 
         // Auto-tune parameters based on risk/return profile
         // Find relative position in the frontier
@@ -692,6 +698,15 @@ function PortfolioOptimizer() {
             localStorage.setItem('minWeight', newMinWeight);
             localStorage.setItem('maxWeight', newMaxWeight);
         }
+    };
+
+    const handleResetToRecommendedPoint = () => {
+        const recommended = getRecommendedFrontierPoint(analysisResult);
+        if (!recommended) return;
+        setSelectedPoint(recommended);
+        setStrategyResult(null);
+        setRecommendationResult(null);
+        setBudgetError('');
     };
 
     const getFrontierOptions = () => {
@@ -731,7 +746,27 @@ function PortfolioOptimizer() {
                 splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
                 min: 'dataMin'
             },
-            series: [{ type: 'scatter', data: frontierData, symbolSize: 10, itemStyle: { color: '#3B82F6' } }]
+            series: [
+                {
+                    type: 'scatter',
+                    data: frontierData,
+                    symbolSize: 10,
+                    itemStyle: { color: '#3B82F6' }
+                },
+                {
+                    name: t('selected_point'),
+                    type: 'scatter',
+                    silent: true,
+                    data: selectedPoint ? [[selectedPoint.risk, selectedPoint.return]] : [],
+                    symbolSize: 18,
+                    itemStyle: {
+                        color: '#F59E0B',
+                        borderColor: '#FFFFFF',
+                        borderWidth: 2
+                    },
+                    z: 10
+                }
+            ]
         };
     };
 
@@ -806,6 +841,9 @@ function PortfolioOptimizer() {
     };
 
 
+
+    const recommendedPoint = getRecommendedFrontierPoint(analysisResult);
+    const isRecommendedPointSelected = recommendedPoint === selectedPoint;
 
     return (
         <div className="portfolio-optimizer">
@@ -1008,10 +1046,23 @@ function PortfolioOptimizer() {
                                             <div className="text-sm text-sky-400 font-medium mb-2">{t('auto_selected_plan')}</div>
                                         )}
                                         <p className="text-sm text-slate-300">{t('manual_override_hint')}</p>
-                                        <button className="text-link-btn mt-3" onClick={() => setShowPortfolioDetails(prev => !prev)}>
-                                            <Settings size={14} />
-                                            {showPortfolioDetails ? t('hide_base_portfolio') : t('view_base_portfolio')}
-                                        </button>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {recommendedPoint && (
+                                                <button
+                                                    type="button"
+                                                    className="text-link-btn"
+                                                    onClick={handleResetToRecommendedPoint}
+                                                    disabled={isRecommendedPointSelected}
+                                                >
+                                                    <RotateCcw size={14} />
+                                                    {t('reset_to_recommended_point')}
+                                                </button>
+                                            )}
+                                            <button type="button" className="text-link-btn" onClick={() => setShowPortfolioDetails(prev => !prev)}>
+                                                <Settings size={14} />
+                                                {showPortfolioDetails ? t('hide_base_portfolio') : t('view_base_portfolio')}
+                                            </button>
+                                        </div>
                                         {showPortfolioDetails && (
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
                                                 <div className="p-4 bg-slate-950/40 rounded-lg">
