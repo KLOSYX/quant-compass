@@ -368,19 +368,19 @@ header.app-header {
 
 .asset-list-header {
     display: grid;
-    grid-template-columns: minmax(180px, 3fr) minmax(110px, 2fr) repeat(5, minmax(72px, 1.5fr)) 36px;
+    grid-template-columns: minmax(180px, 3fr) minmax(110px, 2fr) minmax(100px, 1.5fr) minmax(130px, 2fr) minmax(90px, 1.5fr) repeat(5, minmax(72px, 1.5fr)) 36px;
     gap: 0.5rem;
     padding: 0 0.5rem;
     margin-bottom: 0.5rem;
     font-size: 0.75rem;
     font-weight: 700;
     color: var(--text-muted);
-    min-width: 840px;
+    min-width: 1250px;
 }
 
 .asset-item-row {
     display: grid;
-    grid-template-columns: minmax(180px, 3fr) minmax(110px, 2fr) repeat(5, minmax(72px, 1.5fr)) 36px;
+    grid-template-columns: minmax(180px, 3fr) minmax(110px, 2fr) minmax(100px, 1.5fr) minmax(130px, 2fr) minmax(90px, 1.5fr) repeat(5, minmax(72px, 1.5fr)) 36px;
     gap: 0.5rem;
     align-items: center;
     padding: 0.5rem;
@@ -388,7 +388,7 @@ header.app-header {
     border-radius: var(--radius-sm);
     transition: background 0.2s ease;
     margin-bottom: 0.5rem;
-    min-width: 840px;
+    min-width: 1250px;
 }
 
 .asset-item-row:hover {

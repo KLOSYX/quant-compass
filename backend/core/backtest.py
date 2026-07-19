@@ -17,6 +17,7 @@ from core.constants import (
     DEFAULT_STRATEGY_MODE,
 )
 from core.execution import execute_monthly_plan
+from core.execution_optimizer import build_execution_covariance
 from core.portfolio import (
     decompose_selected_weights,
     normalize_weights,
@@ -225,6 +226,11 @@ def backtest_kelly_dca(
     asset_categories: Dict[str, str] = None,
     daily_nav: pd.DataFrame = None,
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
+    fund_roles: Dict[str, str] = None,
+    substitution_groups: Dict[str, str] = None,
+    proxy_penalties: Dict[str, float] = None,
+    execution_allocation_method: str = "proportional_gap",
+    planned_purchase_days: int = None,
 ):
     """Kelly-guided DCA strategy.
 
@@ -457,6 +463,16 @@ def backtest_kelly_dca(
             target_cash=target_cash_balance,
             can_manage_risk_free=can_use_risk_free_asset,
             target_has_risk_free=target_has_risk_free_asset,
+            allocation_method=execution_allocation_method,
+            execution_covariance=build_execution_covariance(
+                df_nav.iloc[:idx],
+                risky_columns,
+                estimation_window=estimation_window,
+            ),
+            fund_roles=fund_roles,
+            substitution_groups=substitution_groups,
+            proxy_penalties=proxy_penalties,
+            planned_purchase_days=planned_purchase_days,
         )
 
         for code, fund_execution in execution.funds.items():
@@ -472,6 +488,7 @@ def backtest_kelly_dca(
             "cash_after": execution.cash_after,
             "risk_free_after": execution.risk_free_after,
             "accounting_error": execution.accounting_error,
+            "allocation_diagnostics": dict(execution.allocation_diagnostics),
             "funds": {
                 code: {
                     "action": item.action,
@@ -482,6 +499,8 @@ def backtest_kelly_dca(
                     "gross_buy": item.gross_buy,
                     "gross_sell": item.gross_sell,
                     "net_sell_proceeds": item.net_sell_proceeds,
+                    "execution_role": item.execution_role,
+                    "buy_source": item.buy_source,
                 }
                 for code, item in execution.funds.items()
             },
@@ -602,6 +621,11 @@ def simulate_strategy_frontier(
     asset_categories=None,
     daily_nav=None,
     risk_horizon_days=DEFAULT_RISK_HORIZON_DAYS,
+    fund_roles=None,
+    substitution_groups=None,
+    proxy_penalties=None,
+    execution_allocation_method="proportional_gap",
+    planned_purchase_days=None,
 ):
     """
     Simulate the Kelly-guided DCA strategy for each frontier point.
@@ -666,6 +690,11 @@ def simulate_strategy_frontier(
             asset_categories=asset_categories,
             daily_nav=daily_nav,
             risk_horizon_days=risk_horizon_days,
+            fund_roles=fund_roles,
+            substitution_groups=substitution_groups,
+            proxy_penalties=proxy_penalties,
+            execution_allocation_method=execution_allocation_method,
+            planned_purchase_days=planned_purchase_days,
         )
 
         # Strategy Return: Standard CAGR based on Strategy Unit NAV

@@ -318,6 +318,43 @@ def test_complete_walk_forward_can_ablate_covariance_with_identical_cash_flows()
     assert ablation["promotion_status"] == "retain_fixed"
 
 
+def test_walk_forward_compares_tracking_allocator_with_proportional_baseline():
+    dates = pd.date_range("2024-01-31", periods=10, freq="ME")
+    returns = [0.02, -0.01, 0.015, -0.005, 0.018, -0.012, 0.01, -0.004, 0.012]
+    nav = pd.DataFrame(
+        {
+            "A": [1.0, *pd.Series([1 + value for value in returns]).cumprod()],
+            "B": [
+                1.0,
+                *pd.Series([1 + 0.95 * value for value in returns]).cumprod(),
+            ],
+        },
+        index=dates,
+    )
+
+    result = evaluate_executable_walk_forward(
+        nav,
+        {},
+        monthly_investment=100.0,
+        min_train_months=4,
+        min_weight=1.0,
+        max_weight=1.0,
+        enable_cvar_constraint=False,
+        enable_drawdown_constraint=False,
+        fund_investment_limits={"A": {"monthly_limit": 20.0}},
+        fund_roles={"A": "strategic", "B": "substitute"},
+        substitution_groups={"A": "em_equity", "B": "em_equity"},
+        execution_allocation_method="constrained_tracking",
+    )
+
+    ablation = result["allocation_ablation"]
+    assert ablation["baseline_method"] == "proportional_gap"
+    assert ablation["candidate_method"] == "constrained_tracking"
+    assert ablation["auto_switched"] is False
+    assert ablation["candidate"]["total_substitute_purchases"] > 0.0
+    assert ablation["baseline"]["total_substitute_purchases"] == 0.0
+
+
 def test_backtest_api_only_runs_executable_walk_forward_when_requested():
     dates = pd.date_range("2024-01-31", periods=3, freq="ME")
     nav = pd.DataFrame({"A": [1.0, 1.1, 1.2]}, index=dates)

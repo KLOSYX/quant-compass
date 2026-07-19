@@ -1,5 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { buildAssetCategoriesPayload, sanitizeLegacyHoldings } from './PortfolioOptimizer';
+import {
+    buildAssetCategoriesPayload,
+    buildFundRolesPayload,
+    buildProxyPenaltiesPayload,
+    buildSubstitutionGroupsPayload,
+    sanitizeLegacyHoldings
+} from './PortfolioOptimizer';
 import PortfolioOptimizer from './PortfolioOptimizer';
 import { LanguageProvider } from './LanguageContext';
 import { translations } from './i18n/translations';
@@ -23,6 +29,22 @@ test('builds explicit categories only for the current analysis universe', () => 
         '000001': 'equity',
         '000002': 'bond',
         '000003': 'other'
+    });
+});
+
+test('builds explicit execution metadata only for current funds', () => {
+    const codes = ['A', 'B'];
+    expect(buildFundRolesPayload(codes, { A: 'strategic', B: 'substitute', old: 'substitute' })).toEqual({
+        A: 'strategic',
+        B: 'substitute'
+    });
+    expect(buildSubstitutionGroupsPayload(codes, { A: 'em_equity', B: ' em_equity ', old: 'gold' })).toEqual({
+        A: 'em_equity',
+        B: 'em_equity'
+    });
+    expect(buildProxyPenaltiesPayload(codes, { A: '', B: '0.02', old: '1' })).toEqual({
+        A: 0,
+        B: 0.02
     });
 });
 

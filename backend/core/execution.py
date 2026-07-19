@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from core.limits import allocate_capped_buy_amounts
+import pandas as pd
+
+from core.execution_optimizer import allocate_buy_amounts
 
 
 EXECUTION_EPSILON = 1e-9
@@ -19,6 +21,8 @@ class FundExecution:
     net_sell_proceeds: float
     buy_fee_rate: float
     sell_fee_rate: float
+    execution_role: str
+    buy_source: str
 
     @property
     def gap(self) -> float:
@@ -46,6 +50,7 @@ class ExecutionResult:
     risk_free_after: float
     target_cash: float
     accounting_error: float
+    allocation_diagnostics: Mapping[str, object]
 
 
 def _non_negative(value, name: str) -> float:
@@ -82,6 +87,12 @@ def execute_monthly_plan(
     target_cash: float = 0.0,
     can_manage_risk_free: bool = False,
     target_has_risk_free: bool = False,
+    allocation_method: str = "proportional_gap",
+    execution_covariance: pd.DataFrame | None = None,
+    fund_roles: Mapping[str, str] | None = None,
+    substitution_groups: Mapping[str, str] | None = None,
+    proxy_penalties: Mapping[str, float] | None = None,
+    planned_purchase_days: int | None = None,
 ) -> ExecutionResult:
     """Execute one fixed-budget contribution against theoretical target values."""
     codes = list(dict.fromkeys(fund_codes))
@@ -170,28 +181,43 @@ def execute_monthly_plan(
     max_cash_to_spend = min(requested_buy_budget, spendable_liquidity)
 
     post_sell_holdings = {code: current[code] - sell_amounts[code] for code in codes}
-    fund_gaps = {code: targets[code] - post_sell_holdings[code] for code in codes}
     buy_fee_rates = {
         code: _fee_rate(buy_fees.get(code, 0.0), f"buy fee {code}") for code in codes
     }
-    buy_allocations = allocate_capped_buy_amounts(
-        codes,
-        fund_gaps,
-        weights,
-        buy_fee_rates,
-        max_cash_to_spend,
-        investment_limits,
-        timestamp,
+    allocation = allocate_buy_amounts(
+        fund_codes=codes,
+        post_sell_holdings=post_sell_holdings,
+        target_holdings=targets,
+        target_weights=weights,
+        buy_fees=buy_fee_rates,
+        max_cash_to_spend=max_cash_to_spend,
+        investment_limits=investment_limits,
+        timestamp=timestamp,
+        allocation_method=allocation_method,
+        covariance=execution_covariance,
+        fund_roles=fund_roles,
+        substitution_groups=substitution_groups,
+        proxy_penalties=proxy_penalties,
+        planned_purchase_days=planned_purchase_days,
     )
+    buy_allocations = allocation.gross_allocations
+    normalized_roles = {
+        code: str((fund_roles or {}).get(code, "strategic")) for code in codes
+    }
 
     fund_results = {}
     for code in codes:
         gross_buy = float(buy_allocations.get(code, 0.0))
         net_buy_holding = gross_buy / (1.0 + buy_fee_rates[code])
         executable_holding = post_sell_holdings[code] + net_buy_holding
+        is_substitute_buy = (
+            normalized_roles[code] == "substitute" and gross_buy > EXECUTION_EPSILON
+        )
         allocation_state = (
             "EXIT"
             if code in exits
+            else "ACTIVE_SUBSTITUTE"
+            if is_substitute_buy
             else "ACTIVE"
             if weights[code] > EXECUTION_EPSILON
             else "NO_NEW_BUY"
@@ -207,6 +233,14 @@ def execute_monthly_plan(
             net_sell_proceeds=net_sell_proceeds[code],
             buy_fee_rate=buy_fee_rates[code],
             sell_fee_rate=sell_fee_rates[code],
+            execution_role=normalized_roles[code],
+            buy_source=(
+                "limit_substitute"
+                if is_substitute_buy
+                else "target_gap"
+                if gross_buy > EXECUTION_EPSILON
+                else "none"
+            ),
         )
 
     total_gross_buy = sum(item.gross_buy for item in fund_results.values())
@@ -253,4 +287,5 @@ def execute_monthly_plan(
         risk_free_after=risk_free_after,
         target_cash=cash_target,
         accounting_error=accounting_error,
+        allocation_diagnostics=allocation.diagnostics.to_dict(),
     )

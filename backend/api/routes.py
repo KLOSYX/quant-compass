@@ -28,6 +28,11 @@ from core.data import (
     prepare_nav_for_analysis,
 )
 from core.execution import execute_monthly_plan
+from core.execution_optimizer import (
+    build_execution_covariance,
+    normalize_fund_roles,
+    strategic_fund_codes,
+)
 from core.frontier import (
     append_frontier_stability_warnings,
     calculate_efficient_frontier,
@@ -113,22 +118,29 @@ async def analyze_portfolio(request: AnalysisRequest):
             request.fund_fees,
             apply_fund_fees_to_history=request.apply_fund_fees_to_history,
         )
-        append_frontier_stability_warnings(warnings, nav_adjusted, request.fund_fees)
         asset_categories = normalize_asset_categories(
             list(fund_df.columns), request.asset_categories
         )
+        normalized_roles = normalize_fund_roles(
+            list(fund_df.columns), request.fund_roles
+        )
+        strategic_codes = strategic_fund_codes(list(fund_df.columns), normalized_roles)
+        if not strategic_codes:
+            raise ValueError("at least one strategic fund is required")
+        strategic_nav = nav_adjusted[strategic_codes]
+        append_frontier_stability_warnings(warnings, strategic_nav, request.fund_fees)
         efficient_frontier_points = calculate_efficient_frontier(
-            nav_adjusted, request.fund_fees
+            strategic_nav, request.fund_fees
         )
         asset_diagnostics = calculate_asset_diagnostics(
-            nav_adjusted, fund_names, efficient_frontier_points
+            strategic_nav, fund_names, efficient_frontier_points
         )
         walk_forward_metrics = calculate_frontier_walk_forward_metrics(
-            nav_adjusted,
+            strategic_nav,
             request.fund_fees,
             cvar_confidence=request.cvar_confidence,
         )
-        covariance_ablation = evaluate_covariance_shrinkage_ablation(nav_adjusted)
+        covariance_ablation = evaluate_covariance_shrinkage_ablation(strategic_nav)
         for point, metric in zip(efficient_frontier_points, walk_forward_metrics):
             point["effective_risky_weights"] = normalize_risky_weights(
                 point["weights"], list(fund_df.columns)
@@ -205,6 +217,11 @@ async def analyze_portfolio(request: AnalysisRequest):
                 asset_categories=asset_categories,
                 daily_nav=daily_nav,
                 risk_horizon_days=request.risk_horizon_days,
+                fund_roles=request.fund_roles,
+                substitution_groups=request.substitution_groups,
+                proxy_penalties=request.proxy_penalties,
+                execution_allocation_method=request.execution_allocation_method,
+                planned_purchase_days=request.planned_purchase_days,
             )
 
         return {
@@ -222,6 +239,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             },
             "fund_names": fund_names,
             "asset_categories": asset_categories,
+            "fund_roles": normalized_roles,
             "asset_diagnostics": asset_diagnostics,
             "covariance_ablation": covariance_ablation,
             "backtest_period": {
@@ -479,6 +497,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             unique_fund_codes,
             request.fund_investment_limits,
             end_date_obj,
+            planned_purchase_days=request.planned_purchase_days,
         )
         execution = execute_monthly_plan(
             fund_codes=unique_fund_codes,
@@ -499,6 +518,16 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             target_cash=target_cash_value,
             can_manage_risk_free=can_use_risk_free_asset,
             target_has_risk_free=target_has_risk_free_asset,
+            allocation_method=request.execution_allocation_method,
+            execution_covariance=build_execution_covariance(
+                adjusted_fund_df,
+                unique_fund_codes,
+                estimation_window=request.estimation_window,
+            ),
+            fund_roles=request.fund_roles,
+            substitution_groups=request.substitution_groups,
+            proxy_penalties=request.proxy_penalties,
+            planned_purchase_days=request.planned_purchase_days,
         )
         recommended_monthly_investment = execution.total_gross_buy
 
@@ -528,6 +557,10 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     reason = "资产已被显式标记为退出，建议卖出"
                 else:
                     reason = "资产已标记退出，但当前没有可卖持仓"
+            elif allocation_state == "ACTIVE_SUBSTITUTE":
+                reason = (
+                    "首选基金申购额度成为约束，作为同组替代基金买入以降低目标跟踪误差"
+                )
             elif gap_val < 0:
                 if allocation_state == "NO_NEW_BUY":
                     reason = "目标权重为数值零，暂停新增买入但不自动卖出"
@@ -575,6 +608,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     ),
                     "limit_applied": limit_applied,
                     "allocation_state": allocation_state,
+                    "execution_role": fund_execution.execution_role,
+                    "buy_source": fund_execution.buy_source,
                     "reason": reason,
                 }
             )
@@ -690,6 +725,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "target_cash_value": target_cash_value,
             "gap": gap,
             "recommended_monthly_investment": recommended_monthly_investment,
+            "execution_allocation": dict(execution.allocation_diagnostics),
             "total_sell_net_proceeds": total_sell_net_proceeds,
             "reused_sale_proceeds": reusable_sale_proceeds,
             "monthly_budget": request.monthly_budget,
@@ -813,6 +849,11 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             asset_categories=asset_categories,
             daily_nav=daily_nav,
             risk_horizon_days=request.risk_horizon_days,
+            fund_roles=request.fund_roles,
+            substitution_groups=request.substitution_groups,
+            proxy_penalties=request.proxy_penalties,
+            execution_allocation_method=request.execution_allocation_method,
+            planned_purchase_days=request.planned_purchase_days,
         )
         walk_forward = (
             evaluate_executable_walk_forward(
@@ -839,6 +880,11 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 risk_horizon_days=request.risk_horizon_days,
                 include_covariance_ablation=True,
                 asset_categories=asset_categories,
+                fund_roles=request.fund_roles,
+                substitution_groups=request.substitution_groups,
+                proxy_penalties=request.proxy_penalties,
+                execution_allocation_method=request.execution_allocation_method,
+                planned_purchase_days=request.planned_purchase_days,
             )
             if request.include_walk_forward
             else None

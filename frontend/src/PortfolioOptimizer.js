@@ -91,8 +91,22 @@ export const sanitizeLegacyHoldings = (holdings = {}) => Object.fromEntries(
     Object.entries(holdings).filter(([code]) => code !== 'RiskFree')
 );
 export const ASSET_CATEGORY_OPTIONS = ['equity', 'bond', 'commodity', 'gold', 'money_market', 'cash_equivalent', 'other'];
+export const FUND_ROLE_OPTIONS = ['strategic', 'substitute'];
 export const buildAssetCategoriesPayload = (fundCodes, categories = {}) => Object.fromEntries(
     fundCodes.map(code => [code, ASSET_CATEGORY_OPTIONS.includes(categories[code]) ? categories[code] : 'other'])
+);
+export const buildFundRolesPayload = (fundCodes, roles = {}) => Object.fromEntries(
+    fundCodes.map(code => [code, FUND_ROLE_OPTIONS.includes(roles[code]) ? roles[code] : 'strategic'])
+);
+export const buildSubstitutionGroupsPayload = (fundCodes, groups = {}) => Object.fromEntries(
+    fundCodes
+        .filter(code => String(groups[code] || '').trim())
+        .map(code => [code, String(groups[code]).trim()])
+);
+export const buildProxyPenaltiesPayload = (fundCodes, penalties = {}) => Object.fromEntries(
+    fundCodes
+        .map(code => [code, Number(penalties[code])])
+        .filter(([, value]) => Number.isFinite(value) && value >= 0)
 );
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
@@ -101,6 +115,27 @@ function PortfolioOptimizer() {
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
+    const [fundRoles, setFundRoles] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundRoles') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
+    const [fundSubstitutionGroups, setFundSubstitutionGroups] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundSubstitutionGroups') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
+    const [fundProxyPenalties, setFundProxyPenalties] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundProxyPenalties') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
     const [fundNames, setFundNames] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem('fundNames') || '{}');
@@ -163,6 +198,12 @@ function PortfolioOptimizer() {
     const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
     const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
     const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
+    const [executionAllocationMethod, setExecutionAllocationMethod] = useState(
+        () => localStorage.getItem('executionAllocationMethod') || 'proportional_gap'
+    );
+    const [plannedPurchaseDays, setPlannedPurchaseDays] = useState(
+        () => getStoredNumber('plannedPurchaseDays', 1)
+    );
     const [strategyResult, setStrategyResult] = useState(null);
     const [recommendationResult, setRecommendationResult] = useState(null);
     const [error, setError] = useState(null);
@@ -245,15 +286,18 @@ function PortfolioOptimizer() {
             const newFundFees = { ...fundFees, [currentInput.trim()]: '' };
             const newFundInvestmentLimits = { ...fundInvestmentLimits, [currentInput.trim()]: { daily_limit: '', monthly_limit: '' } };
             const newFundAssetCategories = { ...fundAssetCategories, [currentInput.trim()]: 'other' };
+            const newFundRoles = { ...fundRoles, [currentInput.trim()]: 'strategic' };
             clearAnalysisOutputs();
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
             setFundInvestmentLimits(newFundInvestmentLimits);
             setFundAssetCategories(newFundAssetCategories);
+            setFundRoles(newFundRoles);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
             localStorage.setItem('fundFees', JSON.stringify(newFundFees));
             localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
             localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
+            localStorage.setItem('fundRoles', JSON.stringify(newFundRoles));
             setCurrentInput('');
         }
     };
@@ -264,17 +308,29 @@ function PortfolioOptimizer() {
         const newFundFees = { ...fundFees };
         const newFundInvestmentLimits = { ...fundInvestmentLimits };
         const newFundAssetCategories = { ...fundAssetCategories };
+        const newFundRoles = { ...fundRoles };
+        const newSubstitutionGroups = { ...fundSubstitutionGroups };
+        const newProxyPenalties = { ...fundProxyPenalties };
         delete newFundFees[codeToRemove];
         delete newFundInvestmentLimits[codeToRemove];
         delete newFundAssetCategories[codeToRemove];
+        delete newFundRoles[codeToRemove];
+        delete newSubstitutionGroups[codeToRemove];
+        delete newProxyPenalties[codeToRemove];
         setFundCodes(newFundCodes);
         setFundFees(newFundFees);
         setFundInvestmentLimits(newFundInvestmentLimits);
         setFundAssetCategories(newFundAssetCategories);
+        setFundRoles(newFundRoles);
+        setFundSubstitutionGroups(newSubstitutionGroups);
+        setFundProxyPenalties(newProxyPenalties);
         localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
         localStorage.setItem('fundFees', JSON.stringify(newFundFees));
         localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
         localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
+        localStorage.setItem('fundRoles', JSON.stringify(newFundRoles));
+        localStorage.setItem('fundSubstitutionGroups', JSON.stringify(newSubstitutionGroups));
+        localStorage.setItem('fundProxyPenalties', JSON.stringify(newProxyPenalties));
     };
 
     const handleFeeChange = (code, fee) => {
@@ -312,6 +368,26 @@ function PortfolioOptimizer() {
         clearAnalysisOutputs();
         setFundAssetCategories(newCategories);
         localStorage.setItem('fundAssetCategories', JSON.stringify(newCategories));
+    };
+
+    const handleFundRoleChange = (code, role) => {
+        const newRoles = { ...fundRoles, [code]: role };
+        clearAnalysisOutputs();
+        setFundRoles(newRoles);
+        localStorage.setItem('fundRoles', JSON.stringify(newRoles));
+    };
+
+    const handleSubstitutionGroupChange = (code, group) => {
+        const newGroups = { ...fundSubstitutionGroups, [code]: group };
+        clearAnalysisOutputs();
+        setFundSubstitutionGroups(newGroups);
+        localStorage.setItem('fundSubstitutionGroups', JSON.stringify(newGroups));
+    };
+
+    const handleProxyPenaltyChange = (code, value) => {
+        const newPenalties = { ...fundProxyPenalties, [code]: value };
+        setFundProxyPenalties(newPenalties);
+        localStorage.setItem('fundProxyPenalties', JSON.stringify(newPenalties));
     };
 
     const buildFundInvestmentLimitsPayload = () => {
@@ -374,6 +450,11 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
+                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
+                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
+                execution_allocation_method: executionAllocationMethod,
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: startDate,
                 end_date: endDate,
                 strategy_mode: strategyMode,
@@ -451,6 +532,11 @@ function PortfolioOptimizer() {
                 weights,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
+                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
+                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
+                execution_allocation_method: executionAllocationMethod,
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
@@ -540,6 +626,11 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
+                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
+                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
+                execution_allocation_method: executionAllocationMethod,
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
@@ -802,6 +893,9 @@ function PortfolioOptimizer() {
                                             <div className="asset-list-header">
                                                 <div>{t('header_fund')}</div>
                                                 <div>{t('header_asset_category')}</div>
+                                                <div>{t('header_fund_role')}</div>
+                                                <div>{t('header_substitution_group')}</div>
+                                                <div>{t('header_proxy_penalty')}</div>
                                                 <div>{t('header_buy')}</div>
                                                 <div>{t('header_sell')}</div>
                                                 <div>{t('header_manage')}</div>
@@ -823,6 +917,22 @@ function PortfolioOptimizer() {
                                                                 <option key={category} value={category}>{t(`asset_category_${category}`)}</option>
                                                             ))}
                                                         </select>
+                                                    </label>
+                                                    <label className="asset-field">
+                                                        <span className="asset-mobile-label">{t('header_fund_role')}</span>
+                                                        <select className="asset-input-small" value={FUND_ROLE_OPTIONS.includes(fundRoles[code]) ? fundRoles[code] : 'strategic'} onChange={(e) => handleFundRoleChange(code, e.target.value)}>
+                                                            {FUND_ROLE_OPTIONS.map(role => (
+                                                                <option key={role} value={role}>{t(`fund_role_${role}`)}</option>
+                                                            ))}
+                                                        </select>
+                                                    </label>
+                                                    <label className="asset-field">
+                                                        <span className="asset-mobile-label">{t('header_substitution_group')}</span>
+                                                        <input type="text" className="asset-input-small" value={fundSubstitutionGroups[code] || ''} onChange={(e) => handleSubstitutionGroupChange(code, e.target.value)} placeholder={t('substitution_group_placeholder')} />
+                                                    </label>
+                                                    <label className="asset-field">
+                                                        <span className="asset-mobile-label">{t('header_proxy_penalty')}</span>
+                                                        <input type="number" step="0.001" min="0" className="asset-input-small" value={fundProxyPenalties[code] || ''} onChange={(e) => handleProxyPenaltyChange(code, e.target.value)} placeholder="0" />
                                                     </label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_buy')}</span><input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" /></label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_sell')}</span><input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" /></label>
@@ -1029,6 +1139,26 @@ function PortfolioOptimizer() {
                                                         <option value="legacy_linear">{t('mode_legacy_linear')}</option>
                                                     </select>
                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label className="form-label text-xs">{t('execution_allocation_method')}</label>
+                                                    <select
+                                                        className="form-input text-sm"
+                                                        value={executionAllocationMethod}
+                                                        onChange={(e) => {
+                                                            setExecutionAllocationMethod(e.target.value);
+                                                            localStorage.setItem('executionAllocationMethod', e.target.value);
+                                                        }}
+                                                    >
+                                                        <option value="proportional_gap">{t('allocation_method_proportional')}</option>
+                                                        <option value="constrained_tracking">{t('allocation_method_tracking')}</option>
+                                                    </select>
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('execution_allocation_method_help')}</p>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label className="form-label text-xs">{t('planned_purchase_days')}</label>
+                                                    <input className="form-input text-sm" type="number" step="1" min="1" value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('plannedPurchaseDays', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('planned_purchase_days_help')}</p>
                                                 </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('min_equity_ratio')}</label>
@@ -1435,6 +1565,24 @@ function PortfolioOptimizer() {
                                         </div>
                                         {recommendationResult.optimizer_info.cvar_warning_only && (
                                             <div className="mt-1">{t('cvar_low_confidence_warning')}</div>
+                                        )}
+                                    </div>
+                                )}
+                                {recommendationResult.execution_allocation && (
+                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.execution_allocation.fallback_used ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                        <div className="font-semibold">{t('execution_allocation_diagnostics')}</div>
+                                        <div className="mt-1">
+                                            {t('execution_status')}: {recommendationResult.execution_allocation.status}
+                                            {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}
+                                        </div>
+                                        {recommendationResult.execution_allocation.tracking_error_before !== null && recommendationResult.execution_allocation.tracking_error_before !== undefined && (
+                                            <div className="mt-1">
+                                                {t('tracking_error')}: {formatPercentValue(recommendationResult.execution_allocation.tracking_error_before)}
+                                                {' → '}{formatPercentValue(recommendationResult.execution_allocation.tracking_error_after)}
+                                            </div>
+                                        )}
+                                        {Object.keys(recommendationResult.execution_allocation.substitute_purchases || {}).length > 0 && (
+                                            <div className="mt-1">{t('substitute_purchase_note')}</div>
                                         )}
                                     </div>
                                 )}

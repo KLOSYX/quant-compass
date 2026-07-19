@@ -523,6 +523,34 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
     assert advice["Cash"]["executable_holding"] == pytest.approx(5500.0)
 
 
+def test_daily_limit_uses_explicit_planned_purchase_days():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Daily Capped Fund"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "monthly_budget": 10000.0,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+                "fund_investment_limits": {"000001": {"daily_limit": 2000.0}},
+                "planned_purchase_days": 1,
+            },
+        )
+
+    assert response.status_code == 200
+    advice = next(
+        item for item in response.json()["fund_advice"] if item["code"] == "000001"
+    )
+    assert advice["monthly_buy_limit"] == pytest.approx(2000.0)
+    assert advice["amount"] == pytest.approx(2000.0)
+
+
 def test_recommendation_does_not_blame_limit_when_only_dca_budget_is_partial():
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
