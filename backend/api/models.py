@@ -28,10 +28,7 @@ class AnalysisRequest(BaseModel):
     fund_codes: List[str]
     fund_fees: Dict[str, float]
     asset_categories: Dict[str, str] = {}
-    fund_roles: Dict[str, str] = {}
-    substitution_groups: Dict[str, str] = {}
-    proxy_penalties: Dict[str, float] = {}
-    execution_allocation_method: str = "proportional_gap"
+    substitute_for: Dict[str, str] = {}
     planned_purchase_days: Optional[int] = Field(default=None, ge=1)
     apply_fund_fees_to_history: bool = DEFAULT_APPLY_FUND_FEES_TO_HISTORY
     start_date: Optional[date] = None
@@ -66,10 +63,7 @@ class StrategyBacktestRequest(BaseModel):
     weights: Dict[str, float]
     fund_fees: Dict[str, float]
     asset_categories: Dict[str, str] = {}
-    fund_roles: Dict[str, str] = {}
-    substitution_groups: Dict[str, str] = {}
-    proxy_penalties: Dict[str, float] = {}
-    execution_allocation_method: str = "proportional_gap"
+    substitute_for: Dict[str, str] = {}
     planned_purchase_days: Optional[int] = Field(default=None, ge=1)
     apply_fund_fees_to_history: bool = DEFAULT_APPLY_FUND_FEES_TO_HISTORY
     start_date: date
@@ -105,10 +99,7 @@ class CurrentRecommendationRequest(BaseModel):
     fund_codes: List[str]
     fund_fees: Dict[str, float] = {}
     asset_categories: Dict[str, str] = {}
-    fund_roles: Dict[str, str] = {}
-    substitution_groups: Dict[str, str] = {}
-    proxy_penalties: Dict[str, float] = {}
-    execution_allocation_method: str = "proportional_gap"
+    substitute_for: Dict[str, str] = {}
     planned_purchase_days: Optional[int] = Field(default=None, ge=1)
     apply_fund_fees_to_history: bool = DEFAULT_APPLY_FUND_FEES_TO_HISTORY
     weights: Dict[str, float]

@@ -342,8 +342,7 @@ def test_walk_forward_compares_tracking_allocator_with_proportional_baseline():
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
         fund_investment_limits={"A": {"monthly_limit": 20.0}},
-        fund_roles={"A": "strategic", "B": "substitute"},
-        substitution_groups={"A": "em_equity", "B": "em_equity"},
+        substitute_for={"B": "A"},
         execution_allocation_method="constrained_tracking",
     )
 

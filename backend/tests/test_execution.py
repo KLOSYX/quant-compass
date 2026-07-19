@@ -103,8 +103,7 @@ def test_constrained_tracking_uses_same_group_substitute_after_limit_binds():
         timestamp=date(2026, 7, 16),
         allocation_method="constrained_tracking",
         execution_covariance=covariance,
-        fund_roles={"A": "strategic", "B": "substitute"},
-        substitution_groups={"A": "em_equity", "B": "em_equity"},
+        substitute_for={"B": "A"},
     )
 
     assert result.funds["A"].gross_buy == pytest.approx(100.0)
@@ -143,27 +142,16 @@ def test_constrained_tracking_does_not_use_unrelated_substitute_group():
         timestamp=date(2026, 7, 16),
         allocation_method="constrained_tracking",
         execution_covariance=covariance,
-        fund_roles={
-            "A": "strategic",
-            "B": "substitute",
-            "C": "substitute",
-            "D": "strategic",
-        },
-        substitution_groups={
-            "A": "em_equity",
-            "B": "em_equity",
-            "C": "gold",
-            "D": "gold",
-        },
+        substitute_for={"B": "A", "C": "D"},
     )
 
     assert result.funds["B"].gross_buy > 0.0
     assert result.funds["C"].gross_buy == 0.0
 
 
-def test_proxy_penalty_can_prefer_cash_over_expensive_substitute():
+def test_tracking_error_can_prefer_cash_over_unrelated_substitute():
     covariance = pd.DataFrame(
-        [[0.0100, 0.0095], [0.0095, 0.0100]],
+        [[0.0100, 0.0000], [0.0000, 0.0100]],
         index=["A", "B"],
         columns=["A", "B"],
     )
@@ -181,14 +169,45 @@ def test_proxy_penalty_can_prefer_cash_over_expensive_substitute():
         timestamp=date(2026, 7, 16),
         allocation_method="constrained_tracking",
         execution_covariance=covariance,
-        fund_roles={"A": "strategic", "B": "substitute"},
-        substitution_groups={"A": "em_equity", "B": "em_equity"},
-        proxy_penalties={"B": 10.0},
+        substitute_for={"B": "A"},
     )
 
     assert result.funds["A"].gross_buy == pytest.approx(100.0)
     assert result.funds["B"].gross_buy == pytest.approx(0.0, abs=1e-5)
     assert result.cash_after == pytest.approx(400.0, abs=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("substitute_for", "message"),
+    [
+        ({"B": "B"}, "cannot reference itself"),
+        ({"B": "A", "C": "B"}, "not other substitutes"),
+        ({"B": "missing"}, "primary funds outside"),
+    ],
+)
+def test_substitute_relationships_reject_ambiguous_or_unknown_links(
+    substitute_for, message
+):
+    with pytest.raises(ValueError, match=message):
+        execute_monthly_plan(
+            fund_codes=["A", "B", "C"],
+            current_holdings={},
+            target_holdings={"A": 1000.0, "B": 0.0, "C": 0.0},
+            target_weights={"A": 1.0, "B": 0.0, "C": 0.0},
+            current_cash=0.0,
+            monthly_budget=500.0,
+            buy_fees={},
+            sell_fees={},
+            investment_limits={"A": {"monthly_limit": 100.0}},
+            timestamp=date(2026, 7, 16),
+            allocation_method="constrained_tracking",
+            execution_covariance=pd.DataFrame(
+                0.01,
+                index=["A", "B", "C"],
+                columns=["A", "B", "C"],
+            ),
+            substitute_for=substitute_for,
+        )
 
 
 def test_current_recommendation_reports_limit_substitute_purchase():
@@ -213,9 +232,7 @@ def test_current_recommendation_reports_limit_substitute_purchase():
         min_weight=1.0,
         max_weight=1.0,
         fund_investment_limits={"A": {"monthly_limit": 100.0}},
-        fund_roles={"A": "strategic", "B": "substitute"},
-        substitution_groups={"A": "em_equity", "B": "em_equity"},
-        execution_allocation_method="constrained_tracking",
+        substitute_for={"B": "A"},
     )
 
     with patch(
@@ -254,8 +271,7 @@ def test_backtest_only_uses_substitute_after_lagged_covariance_is_available():
         max_weight=1.0,
         strategy_mode="legacy_linear",
         fund_investment_limits={"A": {"monthly_limit": 100.0}},
-        fund_roles={"A": "strategic", "B": "substitute"},
-        substitution_groups={"A": "em_equity", "B": "em_equity"},
+        substitute_for={"B": "A"},
         execution_allocation_method="constrained_tracking",
         estimation_window=6,
     )

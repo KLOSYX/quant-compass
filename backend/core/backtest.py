@@ -226,9 +226,7 @@ def backtest_kelly_dca(
     asset_categories: Dict[str, str] = None,
     daily_nav: pd.DataFrame = None,
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
-    fund_roles: Dict[str, str] = None,
-    substitution_groups: Dict[str, str] = None,
-    proxy_penalties: Dict[str, float] = None,
+    substitute_for: Dict[str, str] = None,
     execution_allocation_method: str = "proportional_gap",
     planned_purchase_days: int = None,
 ):
@@ -469,9 +467,7 @@ def backtest_kelly_dca(
                 risky_columns,
                 estimation_window=estimation_window,
             ),
-            fund_roles=fund_roles,
-            substitution_groups=substitution_groups,
-            proxy_penalties=proxy_penalties,
+            substitute_for=substitute_for,
             planned_purchase_days=planned_purchase_days,
         )
 
@@ -621,9 +617,7 @@ def simulate_strategy_frontier(
     asset_categories=None,
     daily_nav=None,
     risk_horizon_days=DEFAULT_RISK_HORIZON_DAYS,
-    fund_roles=None,
-    substitution_groups=None,
-    proxy_penalties=None,
+    substitute_for=None,
     execution_allocation_method="proportional_gap",
     planned_purchase_days=None,
 ):
@@ -690,9 +684,7 @@ def simulate_strategy_frontier(
             asset_categories=asset_categories,
             daily_nav=daily_nav,
             risk_horizon_days=risk_horizon_days,
-            fund_roles=fund_roles,
-            substitution_groups=substitution_groups,
-            proxy_penalties=proxy_penalties,
+            substitute_for=substitute_for,
             execution_allocation_method=execution_allocation_method,
             planned_purchase_days=planned_purchase_days,
         )

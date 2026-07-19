@@ -58,17 +58,13 @@ def test_substitute_fund_is_excluded_from_strategic_frontier():
             json={
                 "fund_codes": ["A", "B"],
                 "fund_fees": {},
-                "fund_roles": {"A": "strategic", "B": "substitute"},
-                "substitution_groups": {
-                    "A": "em_equity",
-                    "B": "em_equity",
-                },
+                "substitute_for": {"B": "A"},
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["fund_roles"]["B"] == "substitute"
+    assert payload["substitute_for"] == {"B": "A"}
     assert all(
         point["weights"].get("B", 0.0) == 0.0 for point in payload["efficient_frontier"]
     )

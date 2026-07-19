@@ -89,9 +89,7 @@ def execute_monthly_plan(
     target_has_risk_free: bool = False,
     allocation_method: str = "proportional_gap",
     execution_covariance: pd.DataFrame | None = None,
-    fund_roles: Mapping[str, str] | None = None,
-    substitution_groups: Mapping[str, str] | None = None,
-    proxy_penalties: Mapping[str, float] | None = None,
+    substitute_for: Mapping[str, str] | None = None,
     planned_purchase_days: int | None = None,
 ) -> ExecutionResult:
     """Execute one fixed-budget contribution against theoretical target values."""
@@ -195,24 +193,18 @@ def execute_monthly_plan(
         timestamp=timestamp,
         allocation_method=allocation_method,
         covariance=execution_covariance,
-        fund_roles=fund_roles,
-        substitution_groups=substitution_groups,
-        proxy_penalties=proxy_penalties,
+        substitute_for=substitute_for,
         planned_purchase_days=planned_purchase_days,
     )
     buy_allocations = allocation.gross_allocations
-    normalized_roles = {
-        code: str((fund_roles or {}).get(code, "strategic")) for code in codes
-    }
+    substitute_codes = set(substitute_for or {})
 
     fund_results = {}
     for code in codes:
         gross_buy = float(buy_allocations.get(code, 0.0))
         net_buy_holding = gross_buy / (1.0 + buy_fee_rates[code])
         executable_holding = post_sell_holdings[code] + net_buy_holding
-        is_substitute_buy = (
-            normalized_roles[code] == "substitute" and gross_buy > EXECUTION_EPSILON
-        )
+        is_substitute_buy = code in substitute_codes and gross_buy > EXECUTION_EPSILON
         allocation_state = (
             "EXIT"
             if code in exits
@@ -233,7 +225,7 @@ def execute_monthly_plan(
             net_sell_proceeds=net_sell_proceeds[code],
             buy_fee_rate=buy_fee_rates[code],
             sell_fee_rate=sell_fee_rates[code],
-            execution_role=normalized_roles[code],
+            execution_role="substitute" if code in substitute_codes else "strategic",
             buy_source=(
                 "limit_substitute"
                 if is_substitute_buy

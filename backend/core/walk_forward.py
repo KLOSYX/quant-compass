@@ -466,9 +466,7 @@ def evaluate_executable_walk_forward(
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
     include_covariance_ablation: bool = False,
     asset_categories: Mapping[str, str] | None = None,
-    fund_roles: Mapping[str, str] | None = None,
-    substitution_groups: Mapping[str, str] | None = None,
-    proxy_penalties: Mapping[str, float] | None = None,
+    substitute_for: Mapping[str, str] | None = None,
     execution_allocation_method: str = "proportional_gap",
     planned_purchase_days: int | None = None,
 ) -> dict:
@@ -505,7 +503,7 @@ def evaluate_executable_walk_forward(
     buy_fees = buy_fees or {}
     sell_fees = sell_fees or {}
     risky_codes = [code for code in df_nav.columns if code != "RiskFree"]
-    strategic_codes = strategic_fund_codes(risky_codes, fund_roles)
+    strategic_codes = strategic_fund_codes(risky_codes, substitute_for)
     if not risky_codes:
         return {
             "status": "not_applicable",
@@ -752,9 +750,7 @@ def evaluate_executable_walk_forward(
                         else "fixed_20"
                     ),
                 ),
-                fund_roles=fund_roles,
-                substitution_groups=substitution_groups,
-                proxy_penalties=proxy_penalties,
+                substitute_for=substitute_for,
                 planned_purchase_days=planned_purchase_days,
             )
             for code, item in execution.funds.items():

@@ -30,7 +30,7 @@ from core.data import (
 from core.execution import execute_monthly_plan
 from core.execution_optimizer import (
     build_execution_covariance,
-    normalize_fund_roles,
+    normalize_substitute_for,
     strategic_fund_codes,
 )
 from core.frontier import (
@@ -56,6 +56,13 @@ from core.strategy import (
 from core.walk_forward import evaluate_executable_walk_forward
 
 router = APIRouter()
+
+
+def _execution_allocation_method(substitute_for: dict[str, str]) -> str:
+    has_relationship = any(
+        str(primary or "").strip() for primary in substitute_for.values()
+    )
+    return "constrained_tracking" if has_relationship else "proportional_gap"
 
 
 @router.post("/fund_names")
@@ -121,10 +128,12 @@ async def analyze_portfolio(request: AnalysisRequest):
         asset_categories = normalize_asset_categories(
             list(fund_df.columns), request.asset_categories
         )
-        normalized_roles = normalize_fund_roles(
-            list(fund_df.columns), request.fund_roles
+        normalized_substitute_for = normalize_substitute_for(
+            list(fund_df.columns), request.substitute_for
         )
-        strategic_codes = strategic_fund_codes(list(fund_df.columns), normalized_roles)
+        strategic_codes = strategic_fund_codes(
+            list(fund_df.columns), normalized_substitute_for
+        )
         if not strategic_codes:
             raise ValueError("at least one strategic fund is required")
         strategic_nav = nav_adjusted[strategic_codes]
@@ -217,10 +226,10 @@ async def analyze_portfolio(request: AnalysisRequest):
                 asset_categories=asset_categories,
                 daily_nav=daily_nav,
                 risk_horizon_days=request.risk_horizon_days,
-                fund_roles=request.fund_roles,
-                substitution_groups=request.substitution_groups,
-                proxy_penalties=request.proxy_penalties,
-                execution_allocation_method=request.execution_allocation_method,
+                substitute_for=request.substitute_for,
+                execution_allocation_method=_execution_allocation_method(
+                    request.substitute_for
+                ),
                 planned_purchase_days=request.planned_purchase_days,
             )
 
@@ -239,7 +248,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             },
             "fund_names": fund_names,
             "asset_categories": asset_categories,
-            "fund_roles": normalized_roles,
+            "substitute_for": normalized_substitute_for,
             "asset_diagnostics": asset_diagnostics,
             "covariance_ablation": covariance_ablation,
             "backtest_period": {
@@ -518,15 +527,13 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             target_cash=target_cash_value,
             can_manage_risk_free=can_use_risk_free_asset,
             target_has_risk_free=target_has_risk_free_asset,
-            allocation_method=request.execution_allocation_method,
+            allocation_method=_execution_allocation_method(request.substitute_for),
             execution_covariance=build_execution_covariance(
                 adjusted_fund_df,
                 unique_fund_codes,
                 estimation_window=request.estimation_window,
             ),
-            fund_roles=request.fund_roles,
-            substitution_groups=request.substitution_groups,
-            proxy_penalties=request.proxy_penalties,
+            substitute_for=request.substitute_for,
             planned_purchase_days=request.planned_purchase_days,
         )
         recommended_monthly_investment = execution.total_gross_buy
@@ -558,9 +565,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 else:
                     reason = "资产已标记退出，但当前没有可卖持仓"
             elif allocation_state == "ACTIVE_SUBSTITUTE":
-                reason = (
-                    "首选基金申购额度成为约束，作为同组替代基金买入以降低目标跟踪误差"
-                )
+                reason = "主基金申购额度成为约束，作为其明确指定的替代基金买入以降低目标跟踪误差"
             elif gap_val < 0:
                 if allocation_state == "NO_NEW_BUY":
                     reason = "目标权重为数值零，暂停新增买入但不自动卖出"
@@ -849,10 +854,10 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             asset_categories=asset_categories,
             daily_nav=daily_nav,
             risk_horizon_days=request.risk_horizon_days,
-            fund_roles=request.fund_roles,
-            substitution_groups=request.substitution_groups,
-            proxy_penalties=request.proxy_penalties,
-            execution_allocation_method=request.execution_allocation_method,
+            substitute_for=request.substitute_for,
+            execution_allocation_method=_execution_allocation_method(
+                request.substitute_for
+            ),
             planned_purchase_days=request.planned_purchase_days,
         )
         walk_forward = (
@@ -880,10 +885,10 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 risk_horizon_days=request.risk_horizon_days,
                 include_covariance_ablation=True,
                 asset_categories=asset_categories,
-                fund_roles=request.fund_roles,
-                substitution_groups=request.substitution_groups,
-                proxy_penalties=request.proxy_penalties,
-                execution_allocation_method=request.execution_allocation_method,
+                substitute_for=request.substitute_for,
+                execution_allocation_method=_execution_allocation_method(
+                    request.substitute_for
+                ),
                 planned_purchase_days=request.planned_purchase_days,
             )
             if request.include_walk_forward

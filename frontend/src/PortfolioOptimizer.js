@@ -91,23 +91,17 @@ export const sanitizeLegacyHoldings = (holdings = {}) => Object.fromEntries(
     Object.entries(holdings).filter(([code]) => code !== 'RiskFree')
 );
 export const ASSET_CATEGORY_OPTIONS = ['equity', 'bond', 'commodity', 'gold', 'money_market', 'cash_equivalent', 'other'];
-export const FUND_ROLE_OPTIONS = ['strategic', 'substitute'];
 export const buildAssetCategoriesPayload = (fundCodes, categories = {}) => Object.fromEntries(
     fundCodes.map(code => [code, ASSET_CATEGORY_OPTIONS.includes(categories[code]) ? categories[code] : 'other'])
 );
-export const buildFundRolesPayload = (fundCodes, roles = {}) => Object.fromEntries(
-    fundCodes.map(code => [code, FUND_ROLE_OPTIONS.includes(roles[code]) ? roles[code] : 'strategic'])
-);
-export const buildSubstitutionGroupsPayload = (fundCodes, groups = {}) => Object.fromEntries(
-    fundCodes
-        .filter(code => String(groups[code] || '').trim())
-        .map(code => [code, String(groups[code]).trim()])
-);
-export const buildProxyPenaltiesPayload = (fundCodes, penalties = {}) => Object.fromEntries(
-    fundCodes
-        .map(code => [code, Number(penalties[code])])
-        .filter(([, value]) => Number.isFinite(value) && value >= 0)
-);
+export const buildSubstituteForPayload = (fundCodes, relationships = {}) => {
+    const currentCodes = new Set(fundCodes);
+    return Object.fromEntries(
+        fundCodes
+            .map(code => [code, String(relationships[code] || '').trim()])
+            .filter(([code, primary]) => primary && primary !== code && currentCodes.has(primary))
+    );
+};
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -115,23 +109,9 @@ function PortfolioOptimizer() {
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
-    const [fundRoles, setFundRoles] = useState(() => {
+    const [fundSubstituteFor, setFundSubstituteFor] = useState(() => {
         try {
-            return JSON.parse(localStorage.getItem('fundRoles') || '{}');
-        } catch (_) {
-            return {};
-        }
-    });
-    const [fundSubstitutionGroups, setFundSubstitutionGroups] = useState(() => {
-        try {
-            return JSON.parse(localStorage.getItem('fundSubstitutionGroups') || '{}');
-        } catch (_) {
-            return {};
-        }
-    });
-    const [fundProxyPenalties, setFundProxyPenalties] = useState(() => {
-        try {
-            return JSON.parse(localStorage.getItem('fundProxyPenalties') || '{}');
+            return JSON.parse(localStorage.getItem('fundSubstituteFor') || '{}');
         } catch (_) {
             return {};
         }
@@ -198,9 +178,6 @@ function PortfolioOptimizer() {
     const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
     const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
     const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
-    const [executionAllocationMethod, setExecutionAllocationMethod] = useState(
-        () => localStorage.getItem('executionAllocationMethod') || 'proportional_gap'
-    );
     const [plannedPurchaseDays, setPlannedPurchaseDays] = useState(
         () => getStoredNumber('plannedPurchaseDays', 1)
     );
@@ -286,18 +263,15 @@ function PortfolioOptimizer() {
             const newFundFees = { ...fundFees, [currentInput.trim()]: '' };
             const newFundInvestmentLimits = { ...fundInvestmentLimits, [currentInput.trim()]: { daily_limit: '', monthly_limit: '' } };
             const newFundAssetCategories = { ...fundAssetCategories, [currentInput.trim()]: 'other' };
-            const newFundRoles = { ...fundRoles, [currentInput.trim()]: 'strategic' };
             clearAnalysisOutputs();
             setFundCodes(newFundCodes);
             setFundFees(newFundFees);
             setFundInvestmentLimits(newFundInvestmentLimits);
             setFundAssetCategories(newFundAssetCategories);
-            setFundRoles(newFundRoles);
             localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
             localStorage.setItem('fundFees', JSON.stringify(newFundFees));
             localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
             localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
-            localStorage.setItem('fundRoles', JSON.stringify(newFundRoles));
             setCurrentInput('');
         }
     };
@@ -308,29 +282,24 @@ function PortfolioOptimizer() {
         const newFundFees = { ...fundFees };
         const newFundInvestmentLimits = { ...fundInvestmentLimits };
         const newFundAssetCategories = { ...fundAssetCategories };
-        const newFundRoles = { ...fundRoles };
-        const newSubstitutionGroups = { ...fundSubstitutionGroups };
-        const newProxyPenalties = { ...fundProxyPenalties };
+        const newSubstituteFor = Object.fromEntries(
+            Object.entries(fundSubstituteFor).filter(
+                ([substitute, primary]) => substitute !== codeToRemove && primary !== codeToRemove
+            )
+        );
         delete newFundFees[codeToRemove];
         delete newFundInvestmentLimits[codeToRemove];
         delete newFundAssetCategories[codeToRemove];
-        delete newFundRoles[codeToRemove];
-        delete newSubstitutionGroups[codeToRemove];
-        delete newProxyPenalties[codeToRemove];
         setFundCodes(newFundCodes);
         setFundFees(newFundFees);
         setFundInvestmentLimits(newFundInvestmentLimits);
         setFundAssetCategories(newFundAssetCategories);
-        setFundRoles(newFundRoles);
-        setFundSubstitutionGroups(newSubstitutionGroups);
-        setFundProxyPenalties(newProxyPenalties);
+        setFundSubstituteFor(newSubstituteFor);
         localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
         localStorage.setItem('fundFees', JSON.stringify(newFundFees));
         localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
         localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
-        localStorage.setItem('fundRoles', JSON.stringify(newFundRoles));
-        localStorage.setItem('fundSubstitutionGroups', JSON.stringify(newSubstitutionGroups));
-        localStorage.setItem('fundProxyPenalties', JSON.stringify(newProxyPenalties));
+        localStorage.setItem('fundSubstituteFor', JSON.stringify(newSubstituteFor));
     };
 
     const handleFeeChange = (code, fee) => {
@@ -370,24 +339,16 @@ function PortfolioOptimizer() {
         localStorage.setItem('fundAssetCategories', JSON.stringify(newCategories));
     };
 
-    const handleFundRoleChange = (code, role) => {
-        const newRoles = { ...fundRoles, [code]: role };
+    const handleSubstituteForChange = (code, primary) => {
+        const newRelationships = { ...fundSubstituteFor };
+        if (primary) {
+            newRelationships[code] = primary;
+        } else {
+            delete newRelationships[code];
+        }
         clearAnalysisOutputs();
-        setFundRoles(newRoles);
-        localStorage.setItem('fundRoles', JSON.stringify(newRoles));
-    };
-
-    const handleSubstitutionGroupChange = (code, group) => {
-        const newGroups = { ...fundSubstitutionGroups, [code]: group };
-        clearAnalysisOutputs();
-        setFundSubstitutionGroups(newGroups);
-        localStorage.setItem('fundSubstitutionGroups', JSON.stringify(newGroups));
-    };
-
-    const handleProxyPenaltyChange = (code, value) => {
-        const newPenalties = { ...fundProxyPenalties, [code]: value };
-        setFundProxyPenalties(newPenalties);
-        localStorage.setItem('fundProxyPenalties', JSON.stringify(newPenalties));
+        setFundSubstituteFor(newRelationships);
+        localStorage.setItem('fundSubstituteFor', JSON.stringify(newRelationships));
     };
 
     const buildFundInvestmentLimitsPayload = () => {
@@ -450,10 +411,7 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
-                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
-                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
-                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
-                execution_allocation_method: executionAllocationMethod,
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
                 planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: startDate,
                 end_date: endDate,
@@ -532,10 +490,7 @@ function PortfolioOptimizer() {
                 weights,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
-                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
-                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
-                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
-                execution_allocation_method: executionAllocationMethod,
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
                 planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
@@ -626,10 +581,7 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
-                fund_roles: buildFundRolesPayload(fundCodes, fundRoles),
-                substitution_groups: buildSubstitutionGroupsPayload(fundCodes, fundSubstitutionGroups),
-                proxy_penalties: buildProxyPenaltiesPayload(fundCodes, fundProxyPenalties),
-                execution_allocation_method: executionAllocationMethod,
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
                 planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
@@ -893,9 +845,7 @@ function PortfolioOptimizer() {
                                             <div className="asset-list-header">
                                                 <div>{t('header_fund')}</div>
                                                 <div>{t('header_asset_category')}</div>
-                                                <div>{t('header_fund_role')}</div>
-                                                <div>{t('header_substitution_group')}</div>
-                                                <div>{t('header_proxy_penalty')}</div>
+                                                <div>{t('header_substitute_for')}</div>
                                                 <div>{t('header_buy')}</div>
                                                 <div>{t('header_sell')}</div>
                                                 <div>{t('header_manage')}</div>
@@ -919,20 +869,23 @@ function PortfolioOptimizer() {
                                                         </select>
                                                     </label>
                                                     <label className="asset-field">
-                                                        <span className="asset-mobile-label">{t('header_fund_role')}</span>
-                                                        <select className="asset-input-small" value={FUND_ROLE_OPTIONS.includes(fundRoles[code]) ? fundRoles[code] : 'strategic'} onChange={(e) => handleFundRoleChange(code, e.target.value)}>
-                                                            {FUND_ROLE_OPTIONS.map(role => (
-                                                                <option key={role} value={role}>{t(`fund_role_${role}`)}</option>
-                                                            ))}
+                                                        <span className="asset-mobile-label">{t('header_substitute_for')}</span>
+                                                        <select
+                                                            className="asset-input-small"
+                                                            value={fundSubstituteFor[code] || ''}
+                                                            onChange={(e) => handleSubstituteForChange(code, e.target.value)}
+                                                            disabled={Object.values(fundSubstituteFor).includes(code)}
+                                                            title={Object.values(fundSubstituteFor).includes(code) ? t('substitute_primary_locked') : t('substitute_for_help')}
+                                                        >
+                                                            <option value="">{t('substitute_none')}</option>
+                                                            {fundCodes
+                                                                .filter(primary => primary !== code && !fundSubstituteFor[primary])
+                                                                .map(primary => (
+                                                                    <option key={primary} value={primary}>
+                                                                        {fundNames[primary] || primary}
+                                                                    </option>
+                                                                ))}
                                                         </select>
-                                                    </label>
-                                                    <label className="asset-field">
-                                                        <span className="asset-mobile-label">{t('header_substitution_group')}</span>
-                                                        <input type="text" className="asset-input-small" value={fundSubstitutionGroups[code] || ''} onChange={(e) => handleSubstitutionGroupChange(code, e.target.value)} placeholder={t('substitution_group_placeholder')} />
-                                                    </label>
-                                                    <label className="asset-field">
-                                                        <span className="asset-mobile-label">{t('header_proxy_penalty')}</span>
-                                                        <input type="number" step="0.001" min="0" className="asset-input-small" value={fundProxyPenalties[code] || ''} onChange={(e) => handleProxyPenaltyChange(code, e.target.value)} placeholder="0" />
                                                     </label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_buy')}</span><input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" /></label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_sell')}</span><input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" /></label>
@@ -1139,21 +1092,6 @@ function PortfolioOptimizer() {
                                                         <option value="legacy_linear">{t('mode_legacy_linear')}</option>
                                                     </select>
                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('execution_allocation_method')}</label>
-                                                    <select
-                                                        className="form-input text-sm"
-                                                        value={executionAllocationMethod}
-                                                        onChange={(e) => {
-                                                            setExecutionAllocationMethod(e.target.value);
-                                                            localStorage.setItem('executionAllocationMethod', e.target.value);
-                                                        }}
-                                                    >
-                                                        <option value="proportional_gap">{t('allocation_method_proportional')}</option>
-                                                        <option value="constrained_tracking">{t('allocation_method_tracking')}</option>
-                                                    </select>
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('execution_allocation_method_help')}</p>
                                                 </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('planned_purchase_days')}</label>

@@ -10,10 +10,8 @@ from core.limits import allocate_capped_buy_amounts, get_monthly_investment_limi
 
 
 AllocationMethod = Literal["proportional_gap", "constrained_tracking"]
-FundRole = Literal["strategic", "substitute"]
 
 ALLOCATION_METHODS = frozenset({"proportional_gap", "constrained_tracking"})
-FUND_ROLES = frozenset({"strategic", "substitute"})
 OPTIMIZER_EPSILON = 1e-9
 
 
@@ -41,125 +39,76 @@ class BuyAllocationResult:
     diagnostics: BuyAllocationDiagnostics
 
 
-def normalize_fund_roles(
+def normalize_substitute_for(
     fund_codes: Sequence[str],
-    fund_roles: Mapping[str, str] | None,
-) -> dict[str, FundRole]:
-    codes = list(dict.fromkeys(fund_codes))
-    code_set = set(codes)
-    supplied = fund_roles or {}
-    unknown = sorted(set(supplied) - code_set)
-    if unknown:
-        raise ValueError(
-            "fund_roles contain assets outside the current analysis universe: "
-            + ", ".join(unknown)
-        )
-
-    normalized: dict[str, FundRole] = {}
-    for code in codes:
-        role = str(supplied.get(code, "strategic")).strip()
-        if role not in FUND_ROLES:
-            raise ValueError(f"invalid fund role for {code}: {role!r}")
-        normalized[code] = role  # type: ignore[assignment]
-    return normalized
-
-
-def normalize_substitution_groups(
-    fund_codes: Sequence[str],
-    substitution_groups: Mapping[str, str] | None,
+    substitute_for: Mapping[str, str] | None,
 ) -> dict[str, str]:
     codes = list(dict.fromkeys(fund_codes))
     code_set = set(codes)
-    supplied = substitution_groups or {}
-    unknown = sorted(set(supplied) - code_set)
-    if unknown:
-        raise ValueError(
-            "substitution_groups contain assets outside the current analysis universe: "
-            + ", ".join(unknown)
-        )
-    return {
-        code: str(supplied.get(code, "") or "").strip()
-        for code in codes
+    supplied = {
+        str(substitute).strip(): str(primary).strip()
+        for substitute, primary in (substitute_for or {}).items()
+        if str(primary or "").strip()
     }
-
-
-def normalize_proxy_penalties(
-    fund_codes: Sequence[str],
-    proxy_penalties: Mapping[str, float] | None,
-) -> dict[str, float]:
-    codes = list(dict.fromkeys(fund_codes))
-    code_set = set(codes)
-    supplied = proxy_penalties or {}
-    unknown = sorted(set(supplied) - code_set)
-    if unknown:
+    unknown_substitutes = sorted(set(supplied) - code_set)
+    if unknown_substitutes:
         raise ValueError(
-            "proxy_penalties contain assets outside the current analysis universe: "
-            + ", ".join(unknown)
+            "substitute_for contains substitutes outside the current analysis universe: "
+            + ", ".join(unknown_substitutes)
         )
-    normalized = {}
-    for code in codes:
-        value = float(supplied.get(code, 0.0) or 0.0)
-        if value < 0:
-            raise ValueError(f"proxy penalty for {code} must be non-negative")
-        normalized[code] = value
-    return normalized
+    unknown_primaries = sorted(set(supplied.values()) - code_set)
+    if unknown_primaries:
+        raise ValueError(
+            "substitute_for references primary funds outside the current analysis universe: "
+            + ", ".join(unknown_primaries)
+        )
+    self_references = sorted(
+        substitute for substitute, primary in supplied.items() if substitute == primary
+    )
+    if self_references:
+        raise ValueError(
+            "a substitute fund cannot reference itself as primary: "
+            + ", ".join(self_references)
+        )
+    chained_primaries = sorted(set(supplied.values()) & set(supplied))
+    if chained_primaries:
+        raise ValueError(
+            "substitute relationships must reference strategic primary funds, not other "
+            "substitutes: " + ", ".join(chained_primaries)
+        )
+    return supplied
 
 
 def validate_execution_metadata(
     *,
     fund_codes: Sequence[str],
     target_weights: Mapping[str, float],
-    fund_roles: Mapping[str, str] | None,
-    substitution_groups: Mapping[str, str] | None,
+    substitute_for: Mapping[str, str] | None,
     allocation_method: str,
-) -> tuple[dict[str, FundRole], dict[str, str]]:
+) -> dict[str, str]:
     if allocation_method not in ALLOCATION_METHODS:
         raise ValueError(
             f"execution_allocation_method must be one of {sorted(ALLOCATION_METHODS)}"
         )
-    roles = normalize_fund_roles(fund_codes, fund_roles)
-    groups = normalize_substitution_groups(fund_codes, substitution_groups)
+    relationships = normalize_substitute_for(fund_codes, substitute_for)
     invalid_substitute_targets = sorted(
         code
-        for code, role in roles.items()
-        if role == "substitute" and float(target_weights.get(code, 0.0) or 0.0) > 1e-12
+        for code in relationships
+        if float(target_weights.get(code, 0.0) or 0.0) > 1e-12
     )
     if invalid_substitute_targets:
         raise ValueError(
             "substitute funds must have zero strategic target weight: "
             + ", ".join(invalid_substitute_targets)
         )
-    missing_groups = sorted(
-        code for code, role in roles.items() if role == "substitute" and not groups[code]
-    )
-    if missing_groups:
-        raise ValueError(
-            "substitute funds require a substitution_group: "
-            + ", ".join(missing_groups)
-        )
-    strategic_groups = {
-        groups[code]
-        for code, role in roles.items()
-        if role == "strategic" and groups[code]
-    }
-    orphan_substitutes = sorted(
-        code
-        for code, role in roles.items()
-        if role == "substitute" and groups[code] not in strategic_groups
-    )
-    if orphan_substitutes:
-        raise ValueError(
-            "substitute funds require a strategic fund in the same substitution_group: "
-            + ", ".join(orphan_substitutes)
-        )
-    return roles, groups
+    return relationships
 
 
 def strategic_fund_codes(
-    fund_codes: Sequence[str], fund_roles: Mapping[str, str] | None
+    fund_codes: Sequence[str], substitute_for: Mapping[str, str] | None
 ) -> list[str]:
-    roles = normalize_fund_roles(fund_codes, fund_roles)
-    return [code for code in fund_codes if roles[code] == "strategic"]
+    relationships = normalize_substitute_for(fund_codes, substitute_for)
+    return [code for code in fund_codes if code not in relationships]
 
 
 def build_execution_covariance(
@@ -253,20 +202,16 @@ def allocate_buy_amounts(
     timestamp,
     allocation_method: AllocationMethod = "proportional_gap",
     covariance: pd.DataFrame | None = None,
-    fund_roles: Mapping[str, str] | None = None,
-    substitution_groups: Mapping[str, str] | None = None,
-    proxy_penalties: Mapping[str, float] | None = None,
+    substitute_for: Mapping[str, str] | None = None,
     planned_purchase_days: int | None = None,
 ) -> BuyAllocationResult:
     codes = list(dict.fromkeys(fund_codes))
-    roles, groups = validate_execution_metadata(
+    relationships = validate_execution_metadata(
         fund_codes=codes,
         target_weights=target_weights,
-        fund_roles=fund_roles,
-        substitution_groups=substitution_groups,
+        substitute_for=substitute_for,
         allocation_method=allocation_method,
     )
-    penalties = normalize_proxy_penalties(codes, proxy_penalties)
     gaps = {
         code: float(target_holdings.get(code, 0.0))
         - float(post_sell_holdings.get(code, 0.0))
@@ -326,35 +271,23 @@ def allocate_buy_amounts(
         timestamp,
         planned_purchase_days=planned_purchase_days,
     )
-    binding_groups: set[str] = set()
-    for group in {value for value in groups.values() if value}:
-        strategic = [
-            code
-            for code in codes
-            if roles[code] == "strategic"
-            and groups[code] == group
-            and gaps[code] > OPTIMIZER_EPSILON
-        ]
-        if not strategic:
+    binding_primaries: set[str] = set()
+    for primary in set(relationships.values()):
+        if gaps[primary] <= OPTIMIZER_EPSILON:
             continue
-        gross_gap = sum(gaps[code] * (1.0 + fees[code]) for code in strategic)
-        capacity = sum(
-            min(gaps[code] * (1.0 + fees[code]), limits[code])
-            for code in strategic
-        )
+        gross_gap = gaps[primary] * (1.0 + fees[primary])
+        capacity = min(gross_gap, limits[primary])
         if capacity + OPTIMIZER_EPSILON < min(gross_gap, max_cash_to_spend):
-            binding_groups.add(group)
+            binding_primaries.add(primary)
 
     eligible_substitutes = tuple(
-        code
-        for code in codes
-        if roles[code] == "substitute" and groups[code] in binding_groups
+        code for code in codes if relationships.get(code) in binding_primaries
     )
     eligible = {
         code
         for code in codes
         if (
-            roles[code] == "strategic"
+            code not in relationships
             and gaps[code] > OPTIMIZER_EPSILON
             and float(target_weights.get(code, 0.0)) > OPTIMIZER_EPSILON
         )
@@ -380,7 +313,9 @@ def allocate_buy_amounts(
     covariance_values = covariance.to_numpy(dtype=float)
     covariance_values = (covariance_values + covariance_values.T) / 2.0
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_values)
-    covariance_values = eigenvectors @ np.diag(np.maximum(eigenvalues, 0.0)) @ eigenvectors.T
+    covariance_values = (
+        eigenvectors @ np.diag(np.maximum(eigenvalues, 0.0)) @ eigenvectors.T
+    )
     covariance_scale = max(float(np.max(np.diag(covariance_values))), 1e-12)
     optimization_covariance = covariance_values / covariance_scale
     wealth_scale = max(float(targets.sum()), float(current.sum()), 1.0)
@@ -391,7 +326,7 @@ def allocate_buy_amounts(
             bounds.append((0.0, 0.0))
             continue
         upper = min(float(limits[code]), float(max_cash_to_spend))
-        if roles[code] == "strategic":
+        if code not in relationships:
             upper = min(upper, max(0.0, gaps[code]) * (1.0 + fees[code]))
         bounds.append((0.0, upper))
 
@@ -414,13 +349,7 @@ def allocate_buy_amounts(
     def objective(gross_buys: np.ndarray) -> float:
         holdings = post_trade(gross_buys)
         deviation = (holdings - targets) / wealth_scale
-        tracking_variance = float(deviation @ optimization_covariance @ deviation)
-        proxy_cost = sum(
-            penalties[code] * gross_buys[idx] / wealth_scale
-            for idx, code in enumerate(codes)
-            if roles[code] == "substitute"
-        )
-        return tracking_variance + proxy_cost
+        return float(deviation @ optimization_covariance @ deviation)
 
     constraints = [
         {
@@ -457,9 +386,7 @@ def allocate_buy_amounts(
             message=str(result.message),
         )
 
-    optimized = {
-        code: max(0.0, float(result.x[idx])) for idx, code in enumerate(codes)
-    }
+    optimized = {code: max(0.0, float(result.x[idx])) for idx, code in enumerate(codes)}
     post = post_trade(result.x)
     binding_limits = tuple(
         code
@@ -476,7 +403,7 @@ def allocate_buy_amounts(
     unspent = max(0.0, float(max_cash_to_spend) - sum(optimized.values()))
     if unspent <= OPTIMIZER_EPSILON:
         unspent_reason = None
-    elif not eligible_substitutes and binding_groups:
+    elif not eligible_substitutes and binding_primaries:
         unspent_reason = "no_eligible_substitute"
     elif aggregate_target_gap <= OPTIMIZER_EPSILON:
         unspent_reason = "aggregate_target_reached"
