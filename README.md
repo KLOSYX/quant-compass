@@ -61,6 +61,17 @@ You can use the provided script to start both backend and frontend:
 bash start.sh
 ```
 
+On Windows, double-click `start.cmd`, or run the following command from
+PowerShell:
+```powershell
+.\start.ps1
+```
+
+The Windows launcher installs missing frontend and backend dependencies, builds
+the frontend, updates AkShare, and starts the application at
+`http://localhost:8666`. To skip the AkShare update on a later startup, use
+`.\start.ps1 -SkipAkshareUpdate`.
+
 ### 📈 Investment Strategy & Logic
 
 #### 1. Core Logic Comparison
@@ -158,6 +169,15 @@ Quant Compass 是一个全面的量化投资分析和回测工具。它通过 **
 ```bash
 bash start.sh
 ```
+
+Windows 系统可直接双击根目录下的 `start.cmd`，或在 PowerShell 中运行：
+```powershell
+.\start.ps1
+```
+
+Windows 启动脚本会安装缺失的前后端依赖、构建前端、更新 AkShare，并在
+`http://localhost:8666` 启动应用。后续启动如需跳过 AkShare 更新，可运行
+`.\start.ps1 -SkipAkshareUpdate`。
 
 ### 📈 投资策略与逻辑详解
 
