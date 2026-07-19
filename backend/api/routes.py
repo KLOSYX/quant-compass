@@ -65,6 +65,93 @@ def _execution_allocation_method(substitute_for: dict[str, str]) -> str:
     return "constrained_tracking" if has_relationship else "proportional_gap"
 
 
+def _select_recommended_frontier_point(
+    frontier_points: list[dict],
+    *,
+    maximum_drawdown: float,
+    cvar_enabled: bool,
+    maximum_cvar_loss: float,
+    minimum_observations: int = 12,
+    minimum_weight_stability: float = 0.5,
+) -> tuple[int | None, dict]:
+    eligible_candidates = []
+    candidate_diagnostics = []
+    for index, point in enumerate(frontier_points):
+        rejection_reasons = []
+        observations = int(point.get("frontier_walk_forward_observations") or 0)
+        max_drawdown = point.get("frontier_walk_forward_max_drawdown")
+        cvar_loss = point.get("frontier_walk_forward_cvar_loss")
+        stability = point.get("frontier_walk_forward_weight_stability")
+        sharpe = point.get("frontier_walk_forward_sharpe")
+
+        if observations < minimum_observations:
+            rejection_reasons.append("insufficient_observations")
+        if max_drawdown is None or max_drawdown > maximum_drawdown:
+            rejection_reasons.append("max_drawdown_exceeded")
+        if cvar_enabled and (cvar_loss is None or cvar_loss > maximum_cvar_loss):
+            rejection_reasons.append("cvar_exceeded")
+        if stability is None or stability < minimum_weight_stability:
+            rejection_reasons.append("weight_stability_too_low")
+        if sharpe is None or not np.isfinite(sharpe):
+            rejection_reasons.append("invalid_oos_excess_sharpe")
+
+        eligible = not rejection_reasons
+        point["frontier_recommendation_eligible"] = eligible
+        point["frontier_recommendation_rejection_reasons"] = rejection_reasons
+        candidate_diagnostics.append(
+            {
+                "index": index,
+                "eligible": eligible,
+                "rejection_reasons": rejection_reasons,
+            }
+        )
+        if eligible:
+            eligible_candidates.append((index, point))
+
+    recommended_index = None
+    if eligible_candidates:
+        recommended_index = max(
+            eligible_candidates,
+            key=lambda item: (
+                item[1]["frontier_walk_forward_sharpe"],
+                item[1]["frontier_walk_forward_weight_stability"],
+                -item[1]["risk"],
+            ),
+        )[0]
+
+    selected_point = (
+        frontier_points[recommended_index] if recommended_index is not None else None
+    )
+    selected_observations = (
+        int(selected_point.get("frontier_walk_forward_observations") or 0)
+        if selected_point
+        else 0
+    )
+    return recommended_index, {
+        "minimum_observations": minimum_observations,
+        "maximum_drawdown": maximum_drawdown,
+        "cvar_enabled": cvar_enabled,
+        "maximum_cvar_loss": maximum_cvar_loss,
+        "minimum_weight_stability": minimum_weight_stability,
+        "ranking": [
+            "oos_excess_sharpe",
+            "weight_stability",
+            "lower_theoretical_risk",
+        ],
+        "eligible_count": len(eligible_candidates),
+        "total_count": len(frontier_points),
+        "selected_index": recommended_index,
+        "confidence": (
+            "none"
+            if selected_point is None
+            else "limited"
+            if selected_observations < 24
+            else "normal"
+        ),
+        "candidate_diagnostics": candidate_diagnostics,
+    }
+
+
 @router.post("/fund_names")
 async def resolve_fund_names(request: FundNamesRequest):
     return {"fund_names": get_fund_names(request.fund_codes)}
@@ -148,6 +235,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             strategic_nav,
             request.fund_fees,
             cvar_confidence=request.cvar_confidence,
+            annual_risk_free_rate=request.risk_free_rate,
         )
         covariance_ablation = evaluate_covariance_shrinkage_ablation(strategic_nav)
         for point, metric in zip(efficient_frontier_points, walk_forward_metrics):
@@ -161,36 +249,23 @@ async def analyze_portfolio(request: AnalysisRequest):
             )["category_values"]
             point.update(metric)
 
-        recommended_point_index = None
-        recommendation_candidates = [
-            (idx, point)
-            for idx, point in enumerate(efficient_frontier_points)
-            if (point.get("frontier_walk_forward_observations") or 0) >= 12
-            and (point.get("frontier_walk_forward_max_drawdown") or 0.0)
-            <= request.max_drawdown_limit
-            and (
-                not request.enable_cvar_constraint
-                or (point.get("frontier_walk_forward_cvar_loss") or 0.0)
-                <= request.cvar_limit
+        recommended_point_index, recommended_point_selection = (
+            _select_recommended_frontier_point(
+                efficient_frontier_points,
+                maximum_drawdown=request.max_drawdown_limit,
+                cvar_enabled=request.enable_cvar_constraint,
+                maximum_cvar_loss=request.cvar_limit,
             )
-            and (point.get("frontier_walk_forward_weight_stability") or 0.0) >= 0.5
-        ]
-        if recommendation_candidates:
-            recommended_point_index = max(
-                recommendation_candidates,
-                key=lambda item: (
-                    (
-                        item[1]["frontier_walk_forward_sharpe"]
-                        if item[1].get("frontier_walk_forward_sharpe") is not None
-                        else float("-inf")
-                    ),
-                    item[1].get("frontier_walk_forward_weight_stability") or 0.0,
-                    -item[1]["risk"],
-                ),
-            )[0]
-        else:
+        )
+        recommended_point_selection.update(
+            {
+                "cvar_confidence": request.cvar_confidence,
+                "annual_risk_free_rate": request.risk_free_rate or 0.0,
+            }
+        )
+        if recommended_point_index is None:
             warnings.append(
-                "没有基础前沿点同时满足样本外观察数、最大回撤和权重稳定性要求；本次不自动选择推荐点。"
+                "没有基础前沿点同时满足样本外观察数、最大回撤、CVaR 和权重稳定性要求；本次不自动选择推荐点。"
             )
 
         # --- Simulate Strategy Frontier ---
@@ -237,15 +312,7 @@ async def analyze_portfolio(request: AnalysisRequest):
             "efficient_frontier": efficient_frontier_points,
             "strategy_frontier": strategy_frontier_points,
             "recommended_point_index": recommended_point_index,
-            "recommended_point_selection": {
-                "minimum_observations": 12,
-                "maximum_drawdown": request.max_drawdown_limit,
-                "cvar_enabled": request.enable_cvar_constraint,
-                "cvar_confidence": request.cvar_confidence,
-                "maximum_cvar_loss": request.cvar_limit,
-                "minimum_weight_stability": 0.5,
-                "ranking": ["oos_sharpe", "weight_stability", "lower_risk"],
-            },
+            "recommended_point_selection": recommended_point_selection,
             "fund_names": fund_names,
             "asset_categories": asset_categories,
             "substitute_for": normalized_substitute_for,

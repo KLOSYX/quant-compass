@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
     buildAssetCategoriesPayload,
     buildSubstituteForPayload,
+    getRecommendationEvidence,
     getRecommendedFrontierPoint,
     sanitizeLegacyHoldings
 } from './PortfolioOptimizer';
@@ -64,6 +65,24 @@ test('resolves the backend recommended frontier point for explicit reset', () =>
     expect(translations.en.reset_to_recommended_point).toContain('Recommended Point');
 });
 
+test('exposes the evidence attached to the backend recommendation', () => {
+    const frontier = [{ risk: 0.1 }, { risk: 0.2, frontier_walk_forward_sharpe: 0.8 }];
+    expect(getRecommendationEvidence({
+        efficient_frontier: frontier,
+        recommended_point_index: 1,
+        recommended_point_selection: {
+            eligible_count: 3,
+            total_count: 20,
+            confidence: 'limited'
+        }
+    })).toEqual({
+        point: frontier[1],
+        eligibleCount: 3,
+        totalCount: 20,
+        confidence: 'limited'
+    });
+});
+
 test('shows an explicit reset button after the backend recommends a frontier point', async () => {
     localStorage.setItem('fundCodes', JSON.stringify(['A']));
     localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
@@ -72,9 +91,22 @@ test('shows an explicit reset button after the backend recommends a frontier poi
         json: async () => ({
             efficient_frontier: [
                 { risk: 0.1, return: 0.05, weights: { A: 1 } },
-                { risk: 0.2, return: 0.08, weights: { A: 1 } }
+                {
+                    risk: 0.2,
+                    return: 0.08,
+                    weights: { A: 1 },
+                    frontier_walk_forward_sharpe: 0.75,
+                    frontier_walk_forward_annualized_return: 0.07,
+                    frontier_walk_forward_max_drawdown: 0.12,
+                    frontier_walk_forward_weight_stability: 0.82
+                }
             ],
             recommended_point_index: 1,
+            recommended_point_selection: {
+                eligible_count: 4,
+                total_count: 20,
+                confidence: 'limited'
+            },
             fund_names: { A: 'Fund A' },
             asset_categories: { A: 'equity' },
             backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' },
@@ -90,6 +122,11 @@ test('shows an explicit reset button after the backend recommends a frontier poi
     });
     expect(resetButton).toBeInTheDocument();
     expect(resetButton).toBeDisabled();
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent('4/20');
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent('0.75');
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent(
+        translations.zh.recommendation_limited_confidence
+    );
 
     fireEvent.click(screen.getByTestId('mock-frontier-chart'));
     expect(resetButton).toBeEnabled();

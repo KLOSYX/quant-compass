@@ -107,6 +107,17 @@ export const getRecommendedFrontierPoint = (analysis) => {
     if (!Number.isInteger(index) || index < 0) return null;
     return analysis?.efficient_frontier?.[index] || null;
 };
+export const getRecommendationEvidence = (analysis) => {
+    const point = getRecommendedFrontierPoint(analysis);
+    const selection = analysis?.recommended_point_selection;
+    if (!point || !selection) return null;
+    return {
+        point,
+        eligibleCount: selection.eligible_count ?? 0,
+        totalCount: selection.total_count ?? analysis?.efficient_frontier?.length ?? 0,
+        confidence: selection.confidence || 'none'
+    };
+};
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -715,7 +726,12 @@ function PortfolioOptimizer() {
         const frontierData = analysisResult.efficient_frontier.map(p => [
             p.risk,
             p.return,
-            p.weights
+            p.weights,
+            p.frontier_walk_forward_sharpe,
+            p.frontier_walk_forward_annualized_return,
+            p.frontier_walk_forward_max_drawdown,
+            p.frontier_walk_forward_weight_stability,
+            p.frontier_recommendation_eligible
         ]);
         const xName = t('theoretical_vol');
         const yName = t('expected_return');
@@ -729,7 +745,12 @@ function PortfolioOptimizer() {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
                     const ret = (p.data[1] * 100).toFixed(2);
-                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%`;
+                    const oosSharpe = Number.isFinite(Number(p.data[3])) ? Number(p.data[3]).toFixed(2) : '--';
+                    const oosReturn = Number.isFinite(Number(p.data[4])) ? `${(Number(p.data[4]) * 100).toFixed(2)}%` : '--';
+                    const oosDrawdown = Number.isFinite(Number(p.data[5])) ? `${(Number(p.data[5]) * 100).toFixed(2)}%` : '--';
+                    const stability = Number.isFinite(Number(p.data[6])) ? `${(Number(p.data[6]) * 100).toFixed(1)}%` : '--';
+                    const eligible = p.data[7] ? t('recommendation_eligible') : t('recommendation_not_eligible');
+                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%<br/><br/><b>${t('recommendation_oos_evidence')}</b><br/>${t('walk_forward_return')}: ${oosReturn}<br/>${t('oos_excess_sharpe')}: ${oosSharpe}<br/>${t('walk_forward_max_dd')}: ${oosDrawdown}<br/>${t('walk_forward_stability')}: ${stability}<br/>${eligible}`;
                 }
             },
             xAxis: {
@@ -843,6 +864,7 @@ function PortfolioOptimizer() {
 
 
     const recommendedPoint = getRecommendedFrontierPoint(analysisResult);
+    const recommendationEvidence = getRecommendationEvidence(analysisResult);
     const isRecommendedPointSelected = recommendedPoint === selectedPoint;
 
     return (
@@ -986,6 +1008,40 @@ function PortfolioOptimizer() {
 
                             <ReactECharts option={getFrontierOptions()} style={{ height: 400 }} onEvents={{ 'click': onChartClick }} />
                             <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
+                            {recommendationEvidence && (
+                                <div data-testid="recommendation-evidence" className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <h4 className="font-semibold text-sky-300">{t('recommendation_basis_title')}</h4>
+                                        <span className="text-xs text-slate-400">
+                                            {t('recommendation_candidates')
+                                                .replace('{eligible}', recommendationEvidence.eligibleCount)
+                                                .replace('{total}', recommendationEvidence.totalCount)}
+                                        </span>
+                                    </div>
+                                    <p className="mt-2 text-sm text-slate-300">{t('recommendation_basis_explanation')}</p>
+                                    <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                                        <div>
+                                            <div className="text-xs text-slate-500">{t('oos_excess_sharpe')}</div>
+                                            <div className="font-mono text-sky-300">{formatRatio(recommendationEvidence.point.frontier_walk_forward_sharpe)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500">{t('walk_forward_return')}</div>
+                                            <div className="font-mono text-emerald-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_annualized_return)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500">{t('walk_forward_max_dd')}</div>
+                                            <div className="font-mono text-amber-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_max_drawdown)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500">{t('walk_forward_stability')}</div>
+                                            <div className="font-mono text-violet-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_weight_stability, 1)}</div>
+                                        </div>
+                                    </div>
+                                    {recommendationEvidence.confidence === 'limited' && (
+                                        <p className="mt-3 text-xs text-amber-300">{t('recommendation_limited_confidence')}</p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <AssetDiagnosticsPanel diagnostics={analysisResult.asset_diagnostics} />
                         {analysisResult.covariance_ablation && (

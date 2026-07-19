@@ -15,7 +15,6 @@ from core.portfolio import (
     get_frontier_initial_guess,
     get_frontier_weight_bounds,
     get_max_return_weights,
-    normalize_risky_weights,
     normalize_weights,
     shrink_frontier_expected_returns,
 )
@@ -397,6 +396,7 @@ def calculate_frontier_walk_forward_metrics(
     *,
     min_train_months: int = MIN_WALK_FORWARD_TRAIN_MONTHS,
     cvar_confidence: float = DEFAULT_CVAR_CONFIDENCE,
+    annual_risk_free_rate: float | None = None,
 ):
     full_frontier = calculate_efficient_frontier(df_nav, fund_fees)
     if not full_frontier:
@@ -404,12 +404,18 @@ def calculate_frontier_walk_forward_metrics(
 
     returns = df_nav.pct_change().fillna(0)
     metrics = [
-        {"oos_returns": [], "weight_drifts": []} for _ in range(len(full_frontier))
+        {"oos_returns": [], "oos_excess_returns": [], "weight_drifts": []}
+        for _ in range(len(full_frontier))
     ]
-    full_risky_weights = [
-        normalize_risky_weights(point["weights"], list(df_nav.columns))
+    full_weights = [
+        normalize_weights(point["weights"], list(df_nav.columns))
         for point in full_frontier
     ]
+    monthly_risk_free_return = (
+        (1 + annual_risk_free_rate) ** (1 / 12) - 1
+        if annual_risk_free_rate is not None
+        else 0.0
+    )
 
     for split_end in range(min_train_months, len(df_nav)):
         train_df = df_nav.iloc[:split_end]
@@ -426,23 +432,25 @@ def calculate_frontier_walk_forward_metrics(
                 train_index = int(round(quantile * (len(train_frontier) - 1)))
 
             train_point = train_frontier[train_index]
-            train_risky_weights = normalize_risky_weights(
+            train_weights = normalize_weights(
                 train_point["weights"], list(df_nav.columns)
             )
-            target_risky_weights = full_risky_weights[point_index]
+            target_weights = full_weights[point_index]
 
-            drift = float((train_risky_weights - target_risky_weights).abs().sum() / 2)
+            drift = float((train_weights - target_weights).abs().sum() / 2)
             metrics[point_index]["weight_drifts"].append(drift)
 
-            if float(train_risky_weights.sum()) > 0:
-                oos_return = float(
-                    (
-                        next_returns[train_risky_weights.index] * train_risky_weights
-                    ).sum()
-                )
+            oos_return = float(
+                (next_returns[train_weights.index] * train_weights).sum()
+            )
+            if annual_risk_free_rate is None and "RiskFree" in next_returns.index:
+                period_risk_free_return = float(next_returns["RiskFree"])
             else:
-                oos_return = 0.0
+                period_risk_free_return = monthly_risk_free_return
             metrics[point_index]["oos_returns"].append(oos_return)
+            metrics[point_index]["oos_excess_returns"].append(
+                oos_return - period_risk_free_return
+            )
 
     summarized_metrics = []
     for point_index, point_metrics in enumerate(metrics):
@@ -453,6 +461,7 @@ def calculate_frontier_walk_forward_metrics(
                 {
                     "frontier_walk_forward_observations": 0,
                     "frontier_walk_forward_annualized_return": None,
+                    "frontier_walk_forward_annualized_excess_return": None,
                     "frontier_walk_forward_volatility": None,
                     "frontier_walk_forward_sharpe": None,
                     "frontier_walk_forward_max_drawdown": None,
@@ -468,7 +477,12 @@ def calculate_frontier_walk_forward_metrics(
             else -1.0
         )
         volatility = float(oos_returns.std(ddof=0) * np.sqrt(12))
-        sharpe = float(ann_return / volatility) if volatility > 1e-9 else 0.0
+        annualized_excess_return = float(
+            pd.Series(point_metrics["oos_excess_returns"], dtype=float).mean() * 12
+        )
+        sharpe = (
+            float(annualized_excess_return / volatility) if volatility > 1e-9 else 0.0
+        )
         max_drawdown = float(calculate_drawdown_from_returns(oos_returns))
         cvar_loss = float(calculate_cvar_loss(oos_returns, cvar_confidence))
         avg_drift = (
@@ -481,6 +495,9 @@ def calculate_frontier_walk_forward_metrics(
             {
                 "frontier_walk_forward_observations": observations,
                 "frontier_walk_forward_annualized_return": ann_return,
+                "frontier_walk_forward_annualized_excess_return": (
+                    annualized_excess_return
+                ),
                 "frontier_walk_forward_volatility": volatility,
                 "frontier_walk_forward_sharpe": sharpe,
                 "frontier_walk_forward_max_drawdown": max_drawdown,

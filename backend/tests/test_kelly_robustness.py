@@ -161,6 +161,12 @@ def test_analyze_returns_recommended_point_for_long_sample():
     assert payload["recommended_point_index"] is not None
     recommended = payload["efficient_frontier"][payload["recommended_point_index"]]
     assert "frontier_walk_forward_sharpe" in recommended
+    assert recommended["frontier_recommendation_eligible"] is True
+    selection = payload["recommended_point_selection"]
+    assert selection["selected_index"] == payload["recommended_point_index"]
+    assert selection["ranking"][0] == "oos_excess_sharpe"
+    assert selection["eligible_count"] > 0
+    assert len(selection["candidate_diagnostics"]) == len(payload["efficient_frontier"])
 
 
 def test_frontier_cleaning_does_not_break_single_asset_caps():
