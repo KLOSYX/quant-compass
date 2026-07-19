@@ -838,6 +838,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 daily_nav=daily_nav,
                 risk_horizon_days=request.risk_horizon_days,
                 include_covariance_ablation=True,
+                asset_categories=asset_categories,
             )
             if request.include_walk_forward
             else None

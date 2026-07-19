@@ -11,6 +11,16 @@ const formatDD = (obj, key, fallbackKey) => {
     if (val === undefined || val === null) return '--';
     return `${(val * 100).toFixed(2)}%`;
 };
+const formatPercentValue = (value, digits = 2) => (
+    value === undefined || value === null || !Number.isFinite(Number(value))
+        ? '--'
+        : `${(Number(value) * 100).toFixed(digits)}%`
+);
+const formatRatio = (value, digits = 2) => (
+    value === undefined || value === null || !Number.isFinite(Number(value))
+        ? '--'
+        : Number(value).toFixed(digits)
+);
 
 // Format money values for better readability (e.g., 1234567 -> "123.46万")
 const formatMoney = (value) => {
@@ -1199,13 +1209,27 @@ function PortfolioOptimizer() {
                                 {strategyResult.walk_forward?.status === 'ok' && (
                                     <div className="mt-8 overflow-x-auto">
                                         <h4 className="text-lg font-semibold text-sky-400 mb-2">{t('executable_walk_forward_title')}</h4>
-                                        <p className="text-xs text-slate-400 mb-4">{t('executable_walk_forward_note')}</p>
-                                        <table className="data-table min-w-[900px]">
+                                        <p className="text-xs text-slate-400 mb-2">{t('executable_walk_forward_note')}</p>
+                                        <p className="text-xs text-emerald-300 mb-4">{t('wf_unit_nav_basis')}</p>
+                                        {strategyResult.walk_forward.strategies.full_strategy?.evidence_quality?.status === 'low' && (
+                                            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-900/10 p-3 text-xs text-amber-200">
+                                                {t('wf_low_evidence')
+                                                    .replace('{months}', strategyResult.walk_forward.strategies.full_strategy.evidence_quality.evaluation_months)
+                                                    .replace('{tail}', strategyResult.walk_forward.strategies.full_strategy.cvar_tail_observations)
+                                                    .replace('{downside}', strategyResult.walk_forward.strategies.full_strategy.sortino_downside_observations)}
+                                            </div>
+                                        )}
+                                        <table className="data-table min-w-[1500px]">
                                             <thead>
                                                 <tr>
                                                     <th>{t('wf_strategy')}</th>
                                                     <th>{t('walk_forward_return')}</th>
+                                                    <th>{t('walk_forward_vol')}</th>
+                                                    <th>{t('walk_forward_sharpe')}</th>
+                                                    <th>{t('wf_sortino')}</th>
                                                     <th>{t('walk_forward_max_dd')}</th>
+                                                    <th>{t('wf_worst_month')}</th>
+                                                    <th>{t('wf_cvar')}</th>
                                                     <th>{t('wf_final_wealth')}</th>
                                                     <th>{t('wf_fees')}</th>
                                                     <th>{t('wf_avg_cash')}</th>
@@ -1216,16 +1240,83 @@ function PortfolioOptimizer() {
                                                 {Object.entries(strategyResult.walk_forward.strategies).map(([name, metrics]) => (
                                                     <tr key={name} className={name === 'full_strategy' ? 'bg-sky-500/5' : ''}>
                                                         <td>{t(`wf_${name}`)}</td>
-                                                        <td>{(metrics.annualized_return * 100).toFixed(2)}%</td>
-                                                        <td>{(metrics.max_drawdown * 100).toFixed(2)}%</td>
+                                                        <td>{formatPercentValue(metrics.annualized_return)}</td>
+                                                        <td>{formatPercentValue(metrics.annualized_volatility)}</td>
+                                                        <td>{formatRatio(metrics.sharpe)}</td>
+                                                        <td>{formatRatio(metrics.sortino)}</td>
+                                                        <td>{formatPercentValue(metrics.max_drawdown)}</td>
+                                                        <td>{formatPercentValue(metrics.worst_month)}</td>
+                                                        <td>{formatPercentValue(metrics.cvar_loss)}</td>
                                                         <td>¥{metrics.final_wealth.toFixed(2)}</td>
                                                         <td>¥{metrics.total_transaction_fees.toFixed(2)}</td>
-                                                        <td>{(metrics.average_cash_exposure * 100).toFixed(2)}%</td>
-                                                        <td>{(metrics.average_execution_deviation * 100).toFixed(2)}%</td>
+                                                        <td>{formatPercentValue(metrics.average_cash_exposure)}</td>
+                                                        <td>{formatPercentValue(metrics.average_execution_deviation)}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
+                                        {strategyResult.walk_forward.strategies.full_strategy && (() => {
+                                            const full = strategyResult.walk_forward.strategies.full_strategy;
+                                            const categoryEntries = Object.entries(full.average_asset_category_exposures || {})
+                                                .filter(([, exposure]) => exposure > 0.00005);
+                                            return (
+                                                <>
+                                                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                                        <div className="rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
+                                                            <div className="text-sm font-semibold text-sky-300">{t('wf_frontier_transmission_title')}</div>
+                                                            <div className="mt-2 text-xs text-slate-300">
+                                                                {t('wf_avg_target_change')}: {formatPercentValue(full.average_frontier_target_weight_change)}
+                                                                {' · '}{t('wf_avg_actual_change')}: {formatPercentValue(full.average_actual_basket_weight_change)}
+                                                                {' · '}{t('wf_avg_transmission')}: {formatPercentValue(full.average_frontier_change_transmission)}
+                                                            </div>
+                                                        </div>
+                                                        <div className="rounded-lg border border-emerald-500/30 bg-emerald-900/10 p-3">
+                                                            <div className="text-sm font-semibold text-emerald-300">{t('wf_avg_category_exposure')}</div>
+                                                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                                {categoryEntries.map(([category, exposure]) => (
+                                                                    <span key={category}>{t(`asset_category_${category}`)} {formatPercentValue(exposure)}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <details className="mt-4 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                                                        <summary className="cursor-pointer text-sm font-semibold text-sky-300">{t('wf_monthly_audit')}</summary>
+                                                        <div className="mt-3 max-h-[420px] overflow-auto">
+                                                            <table className="data-table min-w-[1200px]">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>{t('wf_month')}</th>
+                                                                        <th>{t('wf_full_kelly_raw')}</th>
+                                                                        <th>{t('wf_fractional_kelly_raw')}</th>
+                                                                        <th>{t('wf_kelly_clipped')}</th>
+                                                                        <th>{t('wf_actual_position')}</th>
+                                                                        <th>{t('wf_kelly_changed_trade')}</th>
+                                                                        <th>{t('wf_target_weight_change')}</th>
+                                                                        <th>{t('wf_actual_weight_change')}</th>
+                                                                        <th>{t('wf_transmission')}</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {(full.data_access_audit || []).map((month) => (
+                                                                        <tr key={month.realized_date}>
+                                                                            <td>{month.realized_date?.slice(0, 7)}</td>
+                                                                            <td>{formatPercentValue(month.full_kelly_raw)}</td>
+                                                                            <td>{formatPercentValue(month.fractional_kelly_raw)}</td>
+                                                                            <td>{formatPercentValue(month.kelly_clipped_target)}</td>
+                                                                            <td>{formatPercentValue(month.actual_fund_position)}</td>
+                                                                            <td>{month.kelly_changed_trade ? t('wf_yes') : t('wf_no')}</td>
+                                                                            <td>{formatPercentValue(month.frontier_target_weight_change)}</td>
+                                                                            <td>{formatPercentValue(month.actual_basket_weight_change)}</td>
+                                                                            <td>{formatPercentValue(month.frontier_change_transmission)}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </details>
+                                                </>
+                                            );
+                                        })()}
                                         {strategyResult.walk_forward.kelly_window_comparison?.status === 'selected' && (
                                             <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
                                                 <div className="text-sm font-semibold text-sky-300">

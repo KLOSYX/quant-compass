@@ -36,6 +36,7 @@ test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
 test('explains the executable walk-forward comparison separately from the frontier', () => {
     expect(translations.zh.executable_walk_forward_title).toContain('可执行策略');
     expect(translations.zh.executable_walk_forward_note).toContain('只使用当时可见数据');
+    expect(translations.zh.wf_low_evidence).toContain('不足以支持策略切换');
     expect(translations.en.wf_full_strategy).toContain('Kelly');
 });
 

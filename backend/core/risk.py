@@ -179,5 +179,13 @@ def calculate_rolling_horizon_returns(
 def calculate_drawdown_from_returns(returns: pd.Series) -> float:
     if returns.empty:
         return 0.0
-    nav = (1 + returns.astype(float)).cumprod()
+    # Include the initial unit NAV so a loss in the first observed period is
+    # measured against the actual starting peak of 1.0.
+    nav = pd.concat(
+        [
+            pd.Series([1.0], dtype=float),
+            (1 + returns.astype(float)).cumprod().reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
     return abs(float(calculate_max_drawdown(nav)))
