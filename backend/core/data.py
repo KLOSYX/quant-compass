@@ -1,15 +1,31 @@
+import math
 import time
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import akshare as ak
 import numpy as np
 import pandas as pd
+import requests
 from fastapi import HTTPException
 
 FUND_LIST_CACHE = None
 MONEY_FUND_NAV_CACHE = {}
 MONEY_FUND_NAV_CACHE_TTL_SECONDS = 6 * 60 * 60
+MONEY_FUND_HISTORY_URL = "https://api.fund.eastmoney.com/f10/lsjz"
+MONEY_FUND_PAGE_SIZE = 20
+MONEY_FUND_REQUEST_TIMEOUT_SECONDS = 30
+MONEY_FUND_HISTORY_COLUMNS = [
+    "净值日期",
+    "每万份收益",
+    "7日年化收益率",
+    "申购状态",
+    "赎回状态",
+]
+
+
+class _FundDataSchemaError(ValueError):
+    """Raised when a provider response cannot be interpreted safely."""
 
 
 def _get_fund_list() -> pd.DataFrame:
@@ -43,6 +59,8 @@ def _fetch_with_retry(fetcher, code: str, max_retries: int = 5) -> pd.DataFrame:
     for attempt in range(max_retries):
         try:
             return fetcher()
+        except _FundDataSchemaError:
+            raise
         except Exception as e:
             if attempt == max_retries - 1:
                 raise
@@ -52,6 +70,119 @@ def _fetch_with_retry(fetcher, code: str, max_retries: int = 5) -> pd.DataFrame:
             )
             time.sleep(retry_delay)
             retry_delay *= 2
+
+
+def _normalize_money_fund_history(rows: List[Any]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=MONEY_FUND_HISTORY_COLUMNS)
+
+    if all(isinstance(row, dict) for row in rows):
+        frame = pd.DataFrame.from_records(rows)
+        required_raw_columns = {"FSRQ", "DWJZ", "LJJZ", "SGZT", "SHZT"}
+        missing = sorted(required_raw_columns - set(frame.columns))
+        if missing:
+            raise _FundDataSchemaError(
+                "货币基金接口返回缺少字段: " + ", ".join(missing)
+            )
+        normalized = frame.rename(
+            columns={
+                "FSRQ": "净值日期",
+                "DWJZ": "每万份收益",
+                "LJJZ": "7日年化收益率",
+                "SGZT": "申购状态",
+                "SHZT": "赎回状态",
+            }
+        )[MONEY_FUND_HISTORY_COLUMNS].copy()
+    else:
+        if not all(isinstance(row, (list, tuple)) for row in rows):
+            raise _FundDataSchemaError("货币基金接口返回记录格式无法识别")
+        frame = pd.DataFrame(rows)
+        if frame.shape[1] < 9:
+            raise _FundDataSchemaError(
+                f"货币基金接口返回列数不足: {frame.shape[1]}"
+            )
+        # Older AKShare versions consumed positional rows.  The provider has
+        # added fields over time, but these five positions remain stable.
+        normalized = frame.iloc[:, [0, 1, 2, 7, 8]].copy()
+        normalized.columns = MONEY_FUND_HISTORY_COLUMNS
+
+    normalized.sort_values("净值日期", inplace=True, ignore_index=True)
+    normalized["净值日期"] = pd.to_datetime(
+        normalized["净值日期"], errors="coerce"
+    ).dt.date
+    normalized["每万份收益"] = pd.to_numeric(
+        normalized["每万份收益"], errors="coerce"
+    )
+    normalized["7日年化收益率"] = pd.to_numeric(
+        normalized["7日年化收益率"], errors="coerce"
+    )
+    return normalized
+
+
+def _fetch_money_fund_history(code: str) -> pd.DataFrame:
+    """Fetch money-fund history without AKShare's fixed-width row mapping."""
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/80.0.3987.149 Safari/537.36"
+        ),
+        "Referer": f"https://fundf10.eastmoney.com/jjjz_{code}.html",
+        "Host": "api.fund.eastmoney.com",
+    }
+
+    def fetch_page(page: int) -> dict:
+        response = requests.get(
+            MONEY_FUND_HISTORY_URL,
+            params={
+                "fundCode": code,
+                "pageIndex": str(page),
+                "pageSize": str(MONEY_FUND_PAGE_SIZE),
+                "startDate": "",
+                "endDate": "",
+                "_": round(time.time() * 1000),
+            },
+            headers=headers,
+            timeout=MONEY_FUND_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise _FundDataSchemaError("货币基金接口返回不是 JSON 对象")
+        return payload
+
+    def extract_rows(payload: dict) -> List[Any]:
+        data = payload.get("Data")
+        if data is None:
+            return []
+        if not isinstance(data, dict):
+            raise _FundDataSchemaError("货币基金接口 Data 字段格式无法识别")
+        rows = data.get("LSJZList")
+        if rows is None:
+            return []
+        if not isinstance(rows, list):
+            raise _FundDataSchemaError("货币基金接口 LSJZList 字段格式无法识别")
+        return rows
+
+    first_payload = fetch_page(1)
+    first_rows = extract_rows(first_payload)
+    try:
+        total_count = int(first_payload.get("TotalCount") or 0)
+    except (TypeError, ValueError) as exc:
+        raise _FundDataSchemaError("货币基金接口 TotalCount 字段格式无法识别") from exc
+
+    if not first_rows:
+        if total_count > 0:
+            raise _FundDataSchemaError("货币基金接口返回总数但第一页为空")
+        return _normalize_money_fund_history([])
+
+    rows = list(first_rows)
+    total_pages = max(1, math.ceil(total_count / MONEY_FUND_PAGE_SIZE))
+    for page in range(2, total_pages + 1):
+        rows.extend(extract_rows(fetch_page(page)))
+
+    return _normalize_money_fund_history(rows)
 
 
 def _build_money_fund_nav(fund_history: pd.DataFrame) -> pd.Series:
@@ -82,7 +213,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                 return cached_nav.copy()
 
         fund_history = _fetch_with_retry(
-            lambda: ak.fund_money_fund_info_em(symbol=code), code
+            lambda: _fetch_money_fund_history(code), code
         )
         nav = _build_money_fund_nav(fund_history)
         MONEY_FUND_NAV_CACHE[code] = (time.time(), nav.copy())

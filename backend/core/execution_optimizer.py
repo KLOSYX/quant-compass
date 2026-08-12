@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Literal, Mapping, Sequence
 
 import numpy as np
@@ -28,6 +28,9 @@ class BuyAllocationDiagnostics:
     eligible_substitutes: tuple[str, ...]
     unspent_budget: float
     unspent_reason: str | None
+    # Per-fund diagnostics let callers explain partial/zero purchases without
+    # collapsing every case into the optimizer-level reason.
+    unspent_reasons: Mapping[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -172,6 +175,35 @@ def _fallback_result(
         planned_purchase_days=planned_purchase_days,
     )
     unspent = max(0.0, float(max_cash_to_spend) - sum(allocations.values()))
+    limits = get_monthly_investment_limits(
+        fund_codes,
+        investment_limits,
+        timestamp,
+        planned_purchase_days=planned_purchase_days,
+    )
+    unspent_reasons: dict[str, str] = {}
+    for code in fund_codes:
+        gap = max(0.0, float(fund_gaps.get(code, 0.0)))
+        gross_gap = gap * (1.0 + max(0.0, float(buy_fees.get(code, 0.0))))
+        allocated = float(allocations.get(code, 0.0))
+        if gross_gap <= OPTIMIZER_EPSILON or allocated + OPTIMIZER_EPSILON >= gross_gap:
+            continue
+        limit = float(limits.get(code, np.inf))
+        if limit <= OPTIMIZER_EPSILON:
+            unspent_reasons[code] = "monthly_limit_zero"
+        elif np.isfinite(limit) and allocated + OPTIMIZER_EPSILON >= limit:
+            unspent_reasons[code] = "monthly_limit_reached"
+        elif unspent <= OPTIMIZER_EPSILON:
+            unspent_reasons[code] = "monthly_budget_exhausted"
+        else:
+            unspent_reasons[code] = "allocation_fallback"
+    limited_reasons = {"monthly_limit_zero", "monthly_limit_reached"}
+    if unspent <= OPTIMIZER_EPSILON:
+        fallback_unspent_reason = None
+    elif unspent_reasons and set(unspent_reasons.values()) <= limited_reasons:
+        fallback_unspent_reason = "investment_limits_blocked"
+    else:
+        fallback_unspent_reason = "no_positive_target_capacity"
     return BuyAllocationResult(
         gross_allocations=allocations,
         diagnostics=BuyAllocationDiagnostics(
@@ -185,7 +217,8 @@ def _fallback_result(
             substitute_purchases={},
             eligible_substitutes=(),
             unspent_budget=unspent,
-            unspent_reason="no_positive_target_capacity" if unspent > 1e-9 else None,
+            unspent_reason=fallback_unspent_reason,
+            unspent_reasons=unspent_reasons,
         ),
     )
 
@@ -342,6 +375,16 @@ def allocate_buy_amounts(
     )
     initial = np.array([legacy.get(code, 0.0) for code in codes], dtype=float)
     fee_factors = np.array([1.0 + fees[code] for code in codes], dtype=float)
+    # Positive per-fund gaps can coexist with an overweight sleeve.  In that
+    # case the raw proportional baseline may exceed the aggregate target gap;
+    # scale it down before using it as a lower bound so the solver remains
+    # feasible and never crosses the total target.
+    legacy_net_total = float(np.sum(initial / fee_factors))
+    if (
+        aggregate_target_gap > OPTIMIZER_EPSILON
+        and legacy_net_total > aggregate_target_gap + OPTIMIZER_EPSILON
+    ):
+        initial *= aggregate_target_gap / legacy_net_total
 
     def post_trade(gross_buys: np.ndarray) -> np.ndarray:
         return current + gross_buys / fee_factors
@@ -351,6 +394,13 @@ def allocate_buy_amounts(
         deviation = (holdings - targets) / wealth_scale
         return float(deviation @ optimization_covariance @ deviation)
 
+    # The proportional allocator is a safe, cap-aware lower-bound plan.  A
+    # tracking-error optimizer may prefer holding cash when a purchase has a
+    # small marginal effect on the objective; that is not an acceptable reason
+    # to undo an otherwise feasible DCA contribution.  Keep at least the
+    # baseline amount while retaining the budget, aggregate-gap, per-fund gap,
+    # and investment-limit upper bounds below.
+    legacy_total = float(np.sum(initial))
     constraints = [
         {
             "type": "ineq",
@@ -363,6 +413,13 @@ def allocate_buy_amounts(
             ),
         },
     ]
+    if legacy_total > OPTIMIZER_EPSILON:
+        constraints.append(
+            {
+                "type": "ineq",
+                "fun": lambda buys: float(np.sum(buys) - legacy_total),
+            }
+        )
     result = minimize(
         objective,
         initial,
@@ -410,6 +467,29 @@ def allocate_buy_amounts(
     else:
         unspent_reason = "optimizer_preferred_cash"
 
+    unspent_reasons: dict[str, str] = {}
+    for code in codes:
+        gap = max(0.0, gaps[code])
+        gross_gap = gap * (1.0 + fees[code])
+        allocated = optimized[code]
+        if gross_gap <= OPTIMIZER_EPSILON or allocated + OPTIMIZER_EPSILON >= gross_gap:
+            continue
+        limit = float(limits[code])
+        if limit <= OPTIMIZER_EPSILON:
+            unspent_reasons[code] = "monthly_limit_zero"
+        elif np.isfinite(limit) and allocated + OPTIMIZER_EPSILON >= limit:
+            unspent_reasons[code] = "monthly_limit_reached"
+        elif unspent <= OPTIMIZER_EPSILON:
+            unspent_reasons[code] = "monthly_budget_exhausted"
+        elif unspent_reason == "no_eligible_substitute":
+            unspent_reasons[code] = "no_eligible_substitute"
+        elif unspent_reason == "aggregate_target_reached":
+            unspent_reasons[code] = "aggregate_target_reached"
+        elif unspent_reason == "optimizer_preferred_cash":
+            unspent_reasons[code] = "optimizer_preferred_cash"
+        else:
+            unspent_reasons[code] = "allocation_priority"
+
     return BuyAllocationResult(
         gross_allocations=optimized,
         diagnostics=BuyAllocationDiagnostics(
@@ -428,5 +508,6 @@ def allocate_buy_amounts(
             eligible_substitutes=eligible_substitutes,
             unspent_budget=unspent,
             unspent_reason=unspent_reason,
+            unspent_reasons=unspent_reasons,
         ),
     )

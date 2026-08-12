@@ -9,6 +9,7 @@ export const translations = {
         execution_allocation_diagnostics: '限购执行诊断',
         execution_status: '状态',
         execution_unspent: '未使用预算',
+        execution_unspent_reason: '未投资原因',
         tracking_error: '预计跟踪误差',
         substitute_purchase_note: '本月包含因首选基金限购而产生的替代基金买入。',
         // App
@@ -330,6 +331,7 @@ export const translations = {
         execution_allocation_diagnostics: 'Execution Diagnostics',
         execution_status: 'Status',
         execution_unspent: 'Unspent Budget',
+        execution_unspent_reason: 'Unspent Reason',
         tracking_error: 'Estimated Tracking Error',
         substitute_purchase_note: 'This plan includes substitute purchases caused by a binding cap.',
         // App

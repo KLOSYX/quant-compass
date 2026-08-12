@@ -1620,6 +1620,11 @@ function PortfolioOptimizer() {
                                             {t('execution_status')}: {recommendationResult.execution_allocation.status}
                                             {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}
                                         </div>
+                                        {recommendationResult.execution_allocation.unspent_reason_label && (
+                                            <div className="mt-1">
+                                                {t('execution_unspent_reason')}: {recommendationResult.execution_allocation.unspent_reason_label}
+                                            </div>
+                                        )}
                                         {recommendationResult.execution_allocation.tracking_error_before !== null && recommendationResult.execution_allocation.tracking_error_before !== undefined && (
                                             <div className="mt-1">
                                                 {t('tracking_error')}: {formatPercentValue(recommendationResult.execution_allocation.tracking_error_before)}

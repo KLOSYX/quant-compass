@@ -65,6 +65,26 @@ def _execution_allocation_method(substitute_for: dict[str, str]) -> str:
     return "constrained_tracking" if has_relationship else "proportional_gap"
 
 
+_UNSPENT_REASON_LABELS = {
+    "monthly_limit_zero": "申购限额为0，本月无法买入",
+    "monthly_limit_reached": "已达到本月申购限额",
+    "monthly_budget_exhausted": "月度 DCA 预算已分配完",
+    "investment_limits_blocked": "所有正向目标缺口均受申购限额约束",
+    "no_eligible_substitute": "主基金限购且没有可用替代基金",
+    "aggregate_target_reached": "组合目标缺口已填满",
+    "optimizer_preferred_cash": "跟踪优化器选择保留现金",
+    "allocation_fallback": "执行优化器不可用，已按比例和限额分配",
+    "allocation_priority": "预算已优先分配给其他低配基金",
+    "no_positive_target_capacity": "没有可继续买入的正向目标缺口",
+}
+
+
+def _unspent_reason_label(reason: str | None) -> str | None:
+    if not reason:
+        return None
+    return _UNSPENT_REASON_LABELS.get(reason, reason)
+
+
 def _select_recommended_frontier_point(
     frontier_points: list[dict],
     *,
@@ -604,6 +624,24 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             planned_purchase_days=request.planned_purchase_days,
         )
         recommended_monthly_investment = execution.total_gross_buy
+        allocation_diagnostics = dict(execution.allocation_diagnostics)
+        # The optimizer reports a portfolio-level reason as well as precise
+        # per-fund reasons.  Keep both machine-readable fields in the API and
+        # provide labels for the existing diagnostic panel.
+        allocation_unspent_reasons = {
+            str(code): str(reason)
+            for code, reason in (
+                allocation_diagnostics.get("unspent_reasons", {}) or {}
+            ).items()
+            if reason
+        }
+        allocation_diagnostics["unspent_reason_labels"] = {
+            code: _unspent_reason_label(reason)
+            for code, reason in allocation_unspent_reasons.items()
+        }
+        allocation_diagnostics["unspent_reason_label"] = _unspent_reason_label(
+            allocation_diagnostics.get("unspent_reason")
+        )
 
         # 2. Determine Actions
         for code in unique_fund_codes:
@@ -625,6 +663,23 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 else fund_execution.gross_buy
             )
             reason = "持有"
+            unspent_reason = allocation_unspent_reasons.get(code)
+            gross_gap_remaining = max(0.0, gross_gap - fund_execution.gross_buy)
+            if gap_val > 1e-9 and gross_gap_remaining > 1e-7 and not unspent_reason:
+                if monthly_buy_limit <= 1e-9:
+                    unspent_reason = "monthly_limit_zero"
+                elif (
+                    np.isfinite(monthly_buy_limit)
+                    and fund_execution.gross_buy + 1e-7 >= monthly_buy_limit
+                ):
+                    unspent_reason = "monthly_limit_reached"
+                elif allocation_diagnostics.get("unspent_budget", 0.0) <= 1e-7:
+                    unspent_reason = "monthly_budget_exhausted"
+                elif allocation_diagnostics.get("unspent_reason"):
+                    unspent_reason = str(allocation_diagnostics.get("unspent_reason"))
+                else:
+                    unspent_reason = "allocation_priority"
+            unspent_reason_label = _unspent_reason_label(unspent_reason)
 
             if allocation_state == "EXIT":
                 if amount > 1e-9:
@@ -651,10 +706,13 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                         reason = f"按 DCA 预算向低配资产投入 (Gap: {gap_val:.1f})"
                 else:
                     action = "Hold"
-                    if fund_monthly_limits.get(code, float("inf")) <= 1e-9:
-                        reason = "申购限额为0，本月无法买入"
-                    else:
-                        reason = "低位观察不额外定投"
+                    reason = unspent_reason_label or "当前没有可执行买入额度"
+
+                # Preserve the useful action text while making a partial buy's
+                # remaining gap explicit instead of silently implying that it
+                # was merely being observed.
+                if fund_execution.gross_buy > 0 and unspent_reason_label:
+                    reason = f"{reason}；未完全执行：{unspent_reason_label}"
             else:
                 action = "Hold"
                 reason = "仓位已达标"
@@ -682,6 +740,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                     "allocation_state": allocation_state,
                     "execution_role": fund_execution.execution_role,
                     "buy_source": fund_execution.buy_source,
+                    "unspent_reason": unspent_reason,
+                    "unspent_reason_label": unspent_reason_label,
                     "reason": reason,
                 }
             )
@@ -797,7 +857,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "target_cash_value": target_cash_value,
             "gap": gap,
             "recommended_monthly_investment": recommended_monthly_investment,
-            "execution_allocation": dict(execution.allocation_diagnostics),
+            "execution_allocation": allocation_diagnostics,
             "total_sell_net_proceeds": total_sell_net_proceeds,
             "reused_sale_proceeds": reusable_sale_proceeds,
             "monthly_budget": request.monthly_budget,
