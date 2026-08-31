@@ -98,9 +98,7 @@ def _normalize_money_fund_history(rows: List[Any]) -> pd.DataFrame:
             raise _FundDataSchemaError("货币基金接口返回记录格式无法识别")
         frame = pd.DataFrame(rows)
         if frame.shape[1] < 9:
-            raise _FundDataSchemaError(
-                f"货币基金接口返回列数不足: {frame.shape[1]}"
-            )
+            raise _FundDataSchemaError(f"货币基金接口返回列数不足: {frame.shape[1]}")
         # Older AKShare versions consumed positional rows.  The provider has
         # added fields over time, but these five positions remain stable.
         normalized = frame.iloc[:, [0, 1, 2, 7, 8]].copy()
@@ -110,9 +108,7 @@ def _normalize_money_fund_history(rows: List[Any]) -> pd.DataFrame:
     normalized["净值日期"] = pd.to_datetime(
         normalized["净值日期"], errors="coerce"
     ).dt.date
-    normalized["每万份收益"] = pd.to_numeric(
-        normalized["每万份收益"], errors="coerce"
-    )
+    normalized["每万份收益"] = pd.to_numeric(normalized["每万份收益"], errors="coerce")
     normalized["7日年化收益率"] = pd.to_numeric(
         normalized["7日年化收益率"], errors="coerce"
     )
@@ -212,9 +208,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
             if time.time() - cached_at < MONEY_FUND_NAV_CACHE_TTL_SECONDS:
                 return cached_nav.copy()
 
-        fund_history = _fetch_with_retry(
-            lambda: _fetch_money_fund_history(code), code
-        )
+        fund_history = _fetch_with_retry(lambda: _fetch_money_fund_history(code), code)
         nav = _build_money_fund_nav(fund_history)
         MONEY_FUND_NAV_CACHE[code] = (time.time(), nav.copy())
         return nav

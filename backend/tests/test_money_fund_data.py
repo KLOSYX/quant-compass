@@ -101,9 +101,7 @@ def test_money_fund_uses_income_per_10k_to_build_nav():
             "FHSP": "",
         },
     ]
-    history_response = FakeResponse(
-        {"TotalCount": "4", "Data": {"LSJZList": history}}
-    )
+    history_response = FakeResponse({"TotalCount": "4", "Data": {"LSJZList": history}})
 
     with (
         patch("core.data.ak.fund_name_em", return_value=fund_list),
