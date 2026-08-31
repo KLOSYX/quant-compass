@@ -135,6 +135,33 @@ test('shows an explicit reset button after the backend recommends a frontier poi
     expect(resetButton).toBeDisabled();
 });
 
+test('keeps analysis warnings in a compact expandable methodology section', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['A']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            efficient_frontier: [{ risk: 0.1, return: 0.05, weights: { A: 1 } }],
+            recommended_point_index: 0,
+            recommended_point_selection: { eligible_count: 1, total_count: 1, confidence: 'standard' },
+            fund_names: { A: 'Fund A' },
+            asset_categories: { A: 'equity' },
+            backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' },
+            warnings: ['First methodology note', 'Second methodology note']
+        })
+    });
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+
+    const summary = await screen.findByText(translations.zh.methodology_notes_title);
+    const details = summary.closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('2 条说明');
+    expect(details).toHaveTextContent('First methodology note');
+    expect(details).toHaveTextContent('Second methodology note');
+});
+
 test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
     expect(translations.zh.min_equity_ratio).toContain('基金组合');
     expect(translations.en.min_equity_ratio).toContain('Fund Portfolio');

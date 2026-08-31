@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
-import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download, RotateCcw } from 'lucide-react';
+import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download, RotateCcw, ChevronDown } from 'lucide-react';
 import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
 import { downloadPortfolioReport } from './exportPortfolioReport';
 
@@ -739,8 +739,13 @@ function PortfolioOptimizer() {
 
         return {
             backgroundColor: 'transparent',
-            textStyle: { color: '#F8FAFC' },
-            title: { text: `${t('efficient_frontier')} ${titleSuffix}`, left: 'center', textStyle: { fontSize: 16, color: '#F8FAFC' } },
+            textStyle: { color: '#b1b5ab', fontFamily: 'Outfit, Microsoft YaHei, sans-serif' },
+            title: {
+                text: `${t('efficient_frontier')} ${titleSuffix}`,
+                left: 'center',
+                top: 8,
+                textStyle: { fontSize: 15, fontWeight: 600, color: '#f3f0e8' }
+            },
             tooltip: {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
@@ -756,23 +761,28 @@ function PortfolioOptimizer() {
             xAxis: {
                 type: 'value',
                 name: xName,
-                axisLabel: { formatter: (v) => `${(v * 100).toFixed(2)}%`, color: '#94A3B8' },
-                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+                nameGap: 18,
+                axisLabel: { formatter: (v) => `${(v * 100).toFixed(2)}%`, color: '#7d8478' },
+                axisLine: { lineStyle: { color: 'rgba(218,224,210,0.22)' } },
+                splitLine: { lineStyle: { color: 'rgba(218,224,210,0.07)' } },
                 min: 'dataMin'
             },
             yAxis: {
                 type: 'value',
                 name: yName,
-                axisLabel: { formatter: (v) => `${(v * 100).toFixed(1)}%`, color: '#94A3B8' },
-                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+                nameGap: 22,
+                axisLabel: { formatter: (v) => `${(v * 100).toFixed(1)}%`, color: '#7d8478' },
+                axisLine: { lineStyle: { color: 'rgba(218,224,210,0.22)' } },
+                splitLine: { lineStyle: { color: 'rgba(218,224,210,0.07)' } },
                 min: 'dataMin'
             },
+            grid: { top: 72, right: 64, bottom: 52, left: 64, containLabel: true },
             series: [
                 {
                     type: 'scatter',
                     data: frontierData,
                     symbolSize: 10,
-                    itemStyle: { color: '#3B82F6' }
+                    itemStyle: { color: '#8da7a4', opacity: 0.88 }
                 },
                 {
                     name: t('selected_point'),
@@ -781,8 +791,8 @@ function PortfolioOptimizer() {
                     data: selectedPoint ? [[selectedPoint.risk, selectedPoint.return]] : [],
                     symbolSize: 18,
                     itemStyle: {
-                        color: '#F59E0B',
-                        borderColor: '#FFFFFF',
+                        color: '#d9a441',
+                        borderColor: '#f3f0e8',
                         borderWidth: 2
                     },
                     z: 10
@@ -870,16 +880,16 @@ function PortfolioOptimizer() {
     return (
         <div className="portfolio-optimizer">
             <form onSubmit={handleAnalysisSubmit} className="main-form">
-                <div className="app-main">
-                    <div className="half-width p-0">
-                        <div className="dashboard-card h-full">
+                <div className="workspace-grid">
+                    <section className="workspace-pane assets-pane">
+                        <div className="dashboard-card card-fill">
                             <div className="card-header">
                                 <h3 className="card-title"><Wallet size={20} className="card-icon" /> {t('asset_config_title')}</h3>
                             </div>
 
                             <div className="form-group">
                                 <label className="form-label" htmlFor="fundCodeInput">{t('add_fund_label')}</label>
-                                <div className="flex gap-2">
+                                <div className="inline-actions">
                                     <input
                                         type="text"
                                         id="fundCodeInput"
@@ -896,9 +906,9 @@ function PortfolioOptimizer() {
                                 </div>
                             </div>
 
-                            {fundCodes.length > 0 && <div className="border-t border-glass my-4"></div>}
+                            {fundCodes.length > 0 && <div className="section-divider" />}
 
-                            <div className="asset-list-scroll space-y-3 max-h-[400px] pr-2">
+                            <div className="asset-list-scroll asset-list-stack">
                                 {fundCodes.length > 0 && (
                                     <>
                                         <>
@@ -960,14 +970,14 @@ function PortfolioOptimizer() {
                                 )}
                             </div>
                         </div>
-                    </div>
+                    </section>
 
-                    <div className="half-width p-0">
-                        <div className="dashboard-card mb-6">
+                    <section className="workspace-pane backtest-pane">
+                        <div className="dashboard-card">
                             <div className="card-header">
                                 <h3 className="card-title"><Calendar size={20} className="card-icon" /> {t('backtest_title')}</h3>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="form-grid two-col">
                                 <div className="form-group">
                                     <label className="form-label">{t('start_date')}</label>
                                     <input type="date" className="form-input" value={startDate} onChange={(e) => { clearAnalysisOutputs(); setStartDate(e.target.value); localStorage.setItem('startDate', e.target.value); }} />
@@ -977,80 +987,95 @@ function PortfolioOptimizer() {
                                     <input type="date" className="form-input" value={endDate} onChange={(e) => { clearAnalysisOutputs(); setEndDate(e.target.value); localStorage.setItem('endDate', e.target.value); }} />
                                 </div>
                             </div>
-                            <div className="flex gap-2 mt-4">
+                            <div className="inline-actions date-presets">
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(1)}>{t('last_1_year')}</button>
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(3)}>{t('last_3_years')}</button>
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(5)}>{t('last_5_years')}</button>
                             </div>
                         </div>
-                        <button type="submit" className="btn btn-primary w-full py-4 text-lg shadow-lg-glow" disabled={loading.analysis || fundCodes.length === 0}>
+                        <button type="submit" className="btn btn-primary analyze-button" disabled={loading.analysis || fundCodes.length === 0}>
                             {loading.analysis ? t('analyzing') : t('analyze_btn')} <ArrowRight size={20} />
                         </button>
-                    </div>
+                    </section>
                 </div>
             </form>
 
-            {error && <div role="alert" className="m-8 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500"></div>{error}</div>}
+            {error && <div role="alert" className="inline-alert inline-alert-danger"><span className="alert-dot" />{error}</div>}
 
             {analysisResult && (
-                <div className="app-main pt-0">
-                    <div className="full-width">
+                <div className="results-stack">
+                    <section className="workspace-section">
                         <div className="dashboard-card">
                             <div className="card-header justify-between">
                                 <h3 className="card-title"><TrendingUp size={20} className="card-icon" /> {t('step_2_title')}</h3>
                             </div>
 
                             {analysisResult.warnings?.length > 0 && (
-                                <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                                    {analysisResult.warnings.map((w, i) => <p key={i} className="text-yellow-500 text-sm flex items-center gap-2"><Info size={14} /> {w}</p>)}
-                                </div>
+                                <details className="methodology-notes">
+                                    <summary>
+                                        <span className="methodology-summary-icon"><Info size={15} /></span>
+                                        <span className="methodology-summary-copy">
+                                            <strong>{t('methodology_notes_title')}</strong>
+                                            <small>{t('methodology_notes_summary').replace('{count}', analysisResult.warnings.length)}</small>
+                                        </span>
+                                        <ChevronDown className="methodology-chevron" size={17} aria-hidden="true" />
+                                    </summary>
+                                    <div className="methodology-list">
+                                        {analysisResult.warnings.map((warning, index) => (
+                                            <div className="methodology-item" key={index}>
+                                                <span>{String(index + 1).padStart(2, '0')}</span>
+                                                <p>{warning}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </details>
                             )}
 
-                            <ReactECharts option={getFrontierOptions()} style={{ height: 400 }} onEvents={{ 'click': onChartClick }} />
+                            <ReactECharts className="frontier-chart" option={getFrontierOptions()} style={{ height: 430 }} onEvents={{ 'click': onChartClick }} />
                             <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
                             {recommendationEvidence && (
-                                <div data-testid="recommendation-evidence" className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-4">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <h4 className="font-semibold text-sky-300">{t('recommendation_basis_title')}</h4>
-                                        <span className="text-xs text-slate-400">
+                                <div data-testid="recommendation-evidence" className="evidence-card">
+                                    <div className="evidence-card-header">
+                                        <h4>{t('recommendation_basis_title')}</h4>
+                                        <span>
                                             {t('recommendation_candidates')
                                                 .replace('{eligible}', recommendationEvidence.eligibleCount)
                                                 .replace('{total}', recommendationEvidence.totalCount)}
                                         </span>
                                     </div>
-                                    <p className="mt-2 text-sm text-slate-300">{t('recommendation_basis_explanation')}</p>
-                                    <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                                    <p className="evidence-copy">{t('recommendation_basis_explanation')}</p>
+                                    <div className="evidence-metrics">
                                         <div>
-                                            <div className="text-xs text-slate-500">{t('oos_excess_sharpe')}</div>
-                                            <div className="font-mono text-sky-300">{formatRatio(recommendationEvidence.point.frontier_walk_forward_sharpe)}</div>
+                                            <div className="metric-label">{t('oos_excess_sharpe')}</div>
+                                            <div className="metric-value metric-neutral">{formatRatio(recommendationEvidence.point.frontier_walk_forward_sharpe)}</div>
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-500">{t('walk_forward_return')}</div>
-                                            <div className="font-mono text-emerald-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_annualized_return)}</div>
+                                            <div className="metric-label">{t('walk_forward_return')}</div>
+                                            <div className="metric-value metric-success">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_annualized_return)}</div>
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-500">{t('walk_forward_max_dd')}</div>
-                                            <div className="font-mono text-amber-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_max_drawdown)}</div>
+                                            <div className="metric-label">{t('walk_forward_max_dd')}</div>
+                                            <div className="metric-value metric-warning">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_max_drawdown)}</div>
                                         </div>
                                         <div>
-                                            <div className="text-xs text-slate-500">{t('walk_forward_stability')}</div>
-                                            <div className="font-mono text-violet-300">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_weight_stability, 1)}</div>
+                                            <div className="metric-label">{t('walk_forward_stability')}</div>
+                                            <div className="metric-value metric-violet">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_weight_stability, 1)}</div>
                                         </div>
                                     </div>
                                     {recommendationEvidence.confidence === 'limited' && (
-                                        <p className="mt-3 text-xs text-amber-300">{t('recommendation_limited_confidence')}</p>
+                                        <p className="evidence-caveat">{t('recommendation_limited_confidence')}</p>
                                     )}
                                 </div>
                             )}
                         </div>
                         <AssetDiagnosticsPanel diagnostics={analysisResult.asset_diagnostics} />
                         {analysisResult.covariance_ablation && (
-                            <div className="dashboard-card mt-4">
+                            <div className="dashboard-card evidence-panel">
                                 <div className="card-header">
                                     <h3 className="card-title">{t('covariance_ablation_title')}</h3>
                                 </div>
-                                <p className="text-sm text-slate-300">{t('covariance_ablation_note')}</p>
-                                <div className={`mt-3 rounded-lg border p-3 text-sm ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'border-emerald-500/40 bg-emerald-900/10 text-emerald-300' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                <p className="panel-copy">{t('covariance_ablation_note')}</p>
+                                <div className={`state-notice ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'state-success' : 'state-neutral'}`}>
                                     {analysisResult.covariance_ablation.promotion_status === 'candidate'
                                         ? t('covariance_candidate')
                                         : t('covariance_retain_fixed')}
@@ -1088,21 +1113,21 @@ function PortfolioOptimizer() {
                                 </div>
                             </div>
                         )}
-                    </div>
+                    </section>
 
                     {selectedPoint && (
-                        <div className="full-width">
+                        <section className="workspace-section">
                             <div className="dashboard-card">
                                 <div className="card-header">
                                     <h3 className="card-title"><Settings size={20} className="card-icon" /> {t('strategy_title')}</h3>
                                 </div>
-                                <div className="space-y-6">
-                                    <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                <div className="strategy-stack">
+                                    <div className="strategy-callout">
                                         {analysisResult?.recommended_point_index !== null && analysisResult?.recommended_point_index !== undefined && analysisResult?.efficient_frontier?.[analysisResult.recommended_point_index] === selectedPoint && (
                                             <div className="text-sm text-sky-400 font-medium mb-2">{t('auto_selected_plan')}</div>
                                         )}
-                                        <p className="text-sm text-slate-300">{t('manual_override_hint')}</p>
-                                        <div className="mt-3 flex flex-wrap gap-2">
+                                        <p className="panel-copy">{t('manual_override_hint')}</p>
+                                        <div className="inline-actions strategy-actions">
                                             {recommendedPoint && (
                                                 <button
                                                     type="button"
@@ -1120,20 +1145,20 @@ function PortfolioOptimizer() {
                                             </button>
                                         </div>
                                         {showPortfolioDetails && (
-                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-                                                <div className="p-4 bg-slate-950/40 rounded-lg">
-                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('selected_metrics')}</h4>
-                                                    <div className="flex justify-between mb-2">
+                                            <div className="details-grid">
+                                                <div className="detail-panel">
+                                                    <h4>{t('selected_metrics')}</h4>
+                                                    <div className="detail-row">
                                                         <span>{t('expected_return')}</span>
-                                                        <span className="text-emerald-400 font-mono font-bold">{(selectedPoint.return * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-success">{(selectedPoint.return * 100).toFixed(2)}%</span>
                                                     </div>
-                                                    <div className="flex justify-between">
+                                                    <div className="detail-row">
                                                         <span>{t('expected_risk')}</span>
-                                                        <span className="text-amber-400 font-mono font-bold">{(selectedPoint.risk * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-warning">{(selectedPoint.risk * 100).toFixed(2)}%</span>
                                                     </div>
                                                 </div>
-                                                <div className="p-4 bg-slate-950/40 rounded-lg">
-                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('base_portfolio')}</h4>
+                                                <div className="detail-panel">
+                                                    <h4>{t('base_portfolio')}</h4>
                                                     <table className="data-table">
                                                         <thead><tr><th>{t('header_fund')}</th><th>{t('effective_risky_weight')}</th></tr></thead>
                                                         <tbody>
@@ -1151,9 +1176,9 @@ function PortfolioOptimizer() {
                                     </div>
 
                                     <div>
-                                        <h5 className="text-lg font-medium mb-4 flex items-center gap-2"><DollarSign size={18} className="text-sky-400" /> {t('current_holdings_monthly')}</h5>
+                                        <h5 className="subsection-title"><DollarSign size={18} /> {t('current_holdings_monthly')}</h5>
 
-                                        <div className="grid grid-cols-2 gap-6 mb-6">
+                                        <div className="holdings-input-grid">
                                             <div>
                                                 <label className="form-label">{t('current_cash')}</label>
                                                 <input type="number" className="form-input" value={currentCash} onChange={(e) => { setCurrentCash(e.target.value); localStorage.setItem('currentCash', e.target.value); }} placeholder="0" />
@@ -1164,7 +1189,7 @@ function PortfolioOptimizer() {
                                             </div>
                                         </div>
 
-                                        <div className="mb-6">
+                                        <div className="holdings-table-wrap">
                                             <table className="data-table">
                                                 <thead><tr><th>{t('current_holding_val')}</th><th>{t('input_amount')}</th></tr></thead>
                                                 <tbody>
@@ -1178,13 +1203,13 @@ function PortfolioOptimizer() {
                                             </table>
                                         </div>
 
-                                        <button className="text-link-btn mb-4" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
+                                        <button className="text-link-btn advanced-toggle" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
                                             <Settings size={14} />
                                             {showAdvancedParams ? t('collapse_advanced') : t('expand_advanced')}
                                         </button>
 
                                         {showAdvancedParams && (
-                                            <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-6 grid grid-cols-2 gap-4">
+                                            <div className="advanced-controls">
                                                 <div className="form-group col-span-2">
                                                     <label className="form-label text-xs">{t('strategy_mode')}</label>
                                                     <select
@@ -1300,24 +1325,24 @@ function PortfolioOptimizer() {
                                             </div>
                                         )}
 
-                                        <button className="btn btn-primary w-full" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
+                                        <button className="btn btn-primary strategy-submit" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
                                             {loading.strategy ? t('analyzing') : t('start_analysis_btn')}
                                         </button>
                                         {budgetError && (
-                                            <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm flex items-center gap-2">
-                                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                            <div className="inline-alert inline-alert-danger">
+                                                <span className="alert-dot"></span>
                                                 {budgetError}
                                             </div>
                                         )}
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                    </section>
                     )}
 
                     {strategyResult && (
-                        <div className="full-width">
-                            <div className="dashboard-card mb-6">
+                        <section className="workspace-section">
+                            <div className="dashboard-card backtest-card">
                                 <div className="card-header">
                                     <h3 className="card-title">{t('backtest_compare')}</h3>
                                     <div
@@ -1374,7 +1399,7 @@ function PortfolioOptimizer() {
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 mt-6">
+                                <div className="chart-grid">
                                     <div><ReactECharts option={getStrategyChartOptions('ideal_kelly_dca')} style={{ height: 300 }} /></div>
                                     {strategyResult.actual_kelly_dca && (
                                         <div><ReactECharts option={getStrategyChartOptions('actual_kelly_dca')} style={{ height: 300 }} /></div>
@@ -1382,7 +1407,7 @@ function PortfolioOptimizer() {
                                 </div>
 
                                 {strategyResult.walk_forward?.status === 'ok' && (
-                                    <div className="mt-8 overflow-x-auto">
+                                    <div className="audit-panel">
                                         <h4 className="text-lg font-semibold text-sky-400 mb-2">{t('executable_walk_forward_title')}</h4>
                                         <p className="text-xs text-slate-400 mb-2">{t('executable_walk_forward_note')}</p>
                                         <p className="text-xs text-emerald-300 mb-4">{t('wf_unit_nav_basis')}</p>
@@ -1436,27 +1461,27 @@ function PortfolioOptimizer() {
                                                 .filter(([, exposure]) => exposure > 0.00005);
                                             return (
                                                 <>
-                                                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                                                        <div className="rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
-                                                            <div className="text-sm font-semibold text-sky-300">{t('wf_frontier_transmission_title')}</div>
-                                                            <div className="mt-2 text-xs text-slate-300">
+                                            <div className="audit-evidence-grid">
+                                                <div className="diagnostic-card diagnostic-info">
+                                                    <div className="diagnostic-title">{t('wf_frontier_transmission_title')}</div>
+                                                    <div className="diagnostic-copy">
                                                                 {t('wf_avg_target_change')}: {formatPercentValue(full.average_frontier_target_weight_change)}
                                                                 {' · '}{t('wf_avg_actual_change')}: {formatPercentValue(full.average_actual_basket_weight_change)}
                                                                 {' · '}{t('wf_avg_transmission')}: {formatPercentValue(full.average_frontier_change_transmission)}
                                                             </div>
                                                         </div>
-                                                        <div className="rounded-lg border border-emerald-500/30 bg-emerald-900/10 p-3">
-                                                            <div className="text-sm font-semibold text-emerald-300">{t('wf_avg_category_exposure')}</div>
-                                                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                <div className="diagnostic-card diagnostic-success">
+                                                    <div className="diagnostic-title">{t('wf_avg_category_exposure')}</div>
+                                                    <div className="diagnostic-copy diagnostic-list">
                                                                 {categoryEntries.map(([category, exposure]) => (
                                                                     <span key={category}>{t(`asset_category_${category}`)} {formatPercentValue(exposure)}</span>
                                                                 ))}
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <details className="mt-4 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
-                                                        <summary className="cursor-pointer text-sm font-semibold text-sky-300">{t('wf_monthly_audit')}</summary>
-                                                        <div className="mt-3 max-h-[420px] overflow-auto">
+                                                    <details className="audit-details">
+                                                        <summary>{t('wf_monthly_audit')}</summary>
+                                                        <div className="audit-details-scroll">
                                                             <table className="data-table min-w-[1200px]">
                                                                 <thead>
                                                                     <tr>
@@ -1493,12 +1518,12 @@ function PortfolioOptimizer() {
                                             );
                                         })()}
                                         {strategyResult.walk_forward.kelly_window_comparison?.status === 'selected' && (
-                                            <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
-                                                <div className="text-sm font-semibold text-sky-300">
+                                            <div className="diagnostic-card diagnostic-info">
+                                                <div className="diagnostic-title">
                                                     {t('kelly_window_platform')}: {strategyResult.walk_forward.kelly_window_comparison.selected_window_months} {t('months')}
                                                 </div>
-                                                <p className="mt-1 text-xs text-slate-400">{t('kelly_window_platform_note')}</p>
-                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                <p className="diagnostic-copy">{t('kelly_window_platform_note')}</p>
+                                                <div className="diagnostic-copy diagnostic-list">
                                                     {strategyResult.walk_forward.kelly_window_comparison.windows.map((item) => (
                                                         <span key={item.window_months}>
                                                             {item.window_months}{t('month_short')}: {(item.annualized_return * 100).toFixed(1)}% / Sharpe {item.sharpe.toFixed(2)} / DD {(item.max_drawdown * 100).toFixed(1)}%
@@ -1508,10 +1533,10 @@ function PortfolioOptimizer() {
                                             </div>
                                         )}
                                         {strategyResult.walk_forward.covariance_ablation && (
-                                            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-900/10 p-3">
-                                                <div className="text-sm font-semibold text-violet-300">{t('complete_covariance_ablation')}</div>
-                                                <p className="mt-1 text-xs text-slate-400">{t('complete_covariance_ablation_note')}</p>
-                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                            <div className="diagnostic-card diagnostic-violet">
+                                                <div className="diagnostic-title">{t('complete_covariance_ablation')}</div>
+                                                <p className="diagnostic-copy">{t('complete_covariance_ablation_note')}</p>
+                                                <div className="diagnostic-copy diagnostic-list">
                                                     {Object.entries(strategyResult.walk_forward.covariance_ablation.segments).map(([segment, comparison]) => (
                                                         <span key={segment}>
                                                             {t(`ablation_${segment}`)}:
@@ -1536,14 +1561,14 @@ function PortfolioOptimizer() {
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        </section>
                     )}
 
                     {recommendationResult && (
-                        <div className="full-width">
+                        <section className="workspace-section recommendation-section">
                             <div className="recommendation-card">
                                 <div className="card-header">
-                                    <h3 className="card-title text-xl text-emerald-400"><TrendingUp size={24} /> {t('recommend_title')}</h3>
+                                    <h3 className="card-title recommendation-title"><TrendingUp size={24} /> {t('recommend_title')}</h3>
                                     <button className="text-link-btn" onClick={handleExport} aria-label={t('export_report')}>
                                         <Download size={16} /> {t('export_report')}
                                     </button>
@@ -1584,11 +1609,11 @@ function PortfolioOptimizer() {
                                 </div>
 
                                 {recommendationResult.window_robustness && (
-                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.window_robustness.status === 'unstable' ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                                        <div className="font-semibold">Kelly 回看窗口稳健性（3 年基准）</div>
-                                        <div className="mt-1">{recommendationResult.window_robustness.message}</div>
+                                    <div className={`recommendation-diagnostic ${recommendationResult.window_robustness.status === 'unstable' ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">Kelly 回看窗口稳健性（3 年基准）</div>
+                                        <div className="diagnostic-copy">{recommendationResult.window_robustness.message}</div>
                                         {recommendationResult.window_robustness.measurements?.length > 0 && (
-                                            <div className="mt-2 text-xs text-slate-400">
+                                            <div className="diagnostic-copy diagnostic-list">
                                                 {recommendationResult.window_robustness.measurements.map((item) => (
                                                     <span key={item.window_months} className="mr-3">
                                                         {item.window_months}月：{item.available ? `${(item.target_risky_ratio * 100).toFixed(1)}%` : '数据不足'}
@@ -1599,9 +1624,9 @@ function PortfolioOptimizer() {
                                     </div>
                                 )}
                                 {recommendationResult.optimizer_info?.cvar_confidence_status && (
-                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.optimizer_info.cvar_warning_only ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                                        <div className="font-semibold">{t('risk_diagnostics')}</div>
-                                        <div className="mt-1">
+                                    <div className={`recommendation-diagnostic ${recommendationResult.optimizer_info.cvar_warning_only ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">{t('risk_diagnostics')}</div>
+                                        <div className="diagnostic-copy">
                                             {t('risk_data_source')}: {t(`risk_source_${recommendationResult.optimizer_info.cvar_data_source}`)}
                                             {' · '}{t('risk_horizon')}: {recommendationResult.optimizer_info.risk_horizon_days} {t('trading_days')}
                                             {' · '}{t('risk_observations')}: {recommendationResult.optimizer_info.cvar_return_observations}
@@ -1609,30 +1634,30 @@ function PortfolioOptimizer() {
                                             {' · '}{t('risk_tail_samples')}: {recommendationResult.optimizer_info.cvar_effective_tail_count}
                                         </div>
                                         {recommendationResult.optimizer_info.cvar_warning_only && (
-                                            <div className="mt-1">{t('cvar_low_confidence_warning')}</div>
+                                            <div className="diagnostic-copy">{t('cvar_low_confidence_warning')}</div>
                                         )}
                                     </div>
                                 )}
                                 {recommendationResult.execution_allocation && (
-                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.execution_allocation.fallback_used ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                                        <div className="font-semibold">{t('execution_allocation_diagnostics')}</div>
-                                        <div className="mt-1">
+                                    <div className={`recommendation-diagnostic ${recommendationResult.execution_allocation.fallback_used ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">{t('execution_allocation_diagnostics')}</div>
+                                        <div className="diagnostic-copy">
                                             {t('execution_status')}: {recommendationResult.execution_allocation.status}
                                             {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}
                                         </div>
                                         {recommendationResult.execution_allocation.unspent_reason_label && (
-                                            <div className="mt-1">
+                                            <div className="diagnostic-copy">
                                                 {t('execution_unspent_reason')}: {recommendationResult.execution_allocation.unspent_reason_label}
                                             </div>
                                         )}
                                         {recommendationResult.execution_allocation.tracking_error_before !== null && recommendationResult.execution_allocation.tracking_error_before !== undefined && (
-                                            <div className="mt-1">
+                                            <div className="diagnostic-copy">
                                                 {t('tracking_error')}: {formatPercentValue(recommendationResult.execution_allocation.tracking_error_before)}
                                                 {' → '}{formatPercentValue(recommendationResult.execution_allocation.tracking_error_after)}
                                             </div>
                                         )}
                                         {Object.keys(recommendationResult.execution_allocation.substitute_purchases || {}).length > 0 && (
-                                            <div className="mt-1">{t('substitute_purchase_note')}</div>
+                                            <div className="diagnostic-copy">{t('substitute_purchase_note')}</div>
                                         )}
                                     </div>
                                 )}
@@ -1678,7 +1703,7 @@ function PortfolioOptimizer() {
                                     </table>
                                 )}
                             </div>
-                        </div>
+                        </section>
                     )}
                 </div>
             )}
