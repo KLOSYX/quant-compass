@@ -158,7 +158,15 @@ def test_regular_fund_keeps_using_open_fund_nav():
             ["000001"], date(2024, 1, 1), date(2024, 2, 29), None
         )
 
-    open_fetch.assert_called_once_with(symbol="000001", indicator="单位净值走势")
+    assert open_fetch.call_args_list[0].kwargs == {
+        "symbol": "000001",
+        "indicator": "单位净值走势",
+    }
+    assert {call.kwargs["indicator"] for call in open_fetch.call_args_list[1:]} == {
+        "分红送配详情",
+        "拆分详情",
+        "累计净值走势",
+    }
     money_fetch.assert_not_called()
     assert names == {"000001": "普通基金"}
     assert nav.iloc[-1, 0] == pytest.approx(1.1)

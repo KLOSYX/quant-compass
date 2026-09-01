@@ -23,7 +23,9 @@ from core.portfolio import (
     normalize_weights,
     validate_weight_universe,
 )
+from core.performance import performance_summary
 from core.risk import calculate_max_drawdown
+from core.reference import build_reference_basket
 from core.strategy import (
     calculate_target_ratio,
     calculate_target_ratio_optimized,
@@ -126,6 +128,9 @@ def backtest_dca(
         total_units = total_invested  # Initial units at price 1.0
 
     unit_nav_history = {}
+    external_contributions = []
+    if total_invested > 0:
+        external_contributions.append((df_nav.index[0], total_invested))
 
     for idx, (timestamp, nav_row) in enumerate(df_nav.iterrows()):
         # 1. Calculate Portfolio Value BEFORE new investment (market impact on existing assets)
@@ -137,10 +142,10 @@ def backtest_dca(
         else:
             unit_nav = 1.0
 
-        unit_nav_history[timestamp] = unit_nav
-
         # 3. Add New Investment (Buying Strategy Units)
         total_invested += monthly_investment
+        if monthly_investment > 0:
+            external_contributions.append((timestamp, monthly_investment))
         if unit_nav > 0:
             new_units = monthly_investment / unit_nav
             total_units += new_units
@@ -155,6 +160,9 @@ def backtest_dca(
         attr["Cash"] = cash_balance
         attribution_history[timestamp] = attr
         portfolio_history[timestamp] = current_asset_values.sum() + cash_balance
+        unit_nav_history[timestamp] = (
+            portfolio_history[timestamp] / total_units if total_units > 0 else 1.0
+        )
         invested_history[timestamp] = total_invested
 
     portfolio_series = pd.Series(portfolio_history)
@@ -162,7 +170,10 @@ def backtest_dca(
     # invested_series = pd.Series(invested_history) # No longer used for DD
 
     # Calculate Max Drawdown based on Unit NAV Series (True performance)
-    max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
+    anchored_unit_nav = pd.concat(
+        [pd.Series([1.0]), unit_nav_series.reset_index(drop=True)]
+    )
+    max_drawdown_nav = calculate_max_drawdown(anchored_unit_nav)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
     # Calculate Annualized Return (CAGR based on Strategy Unit NAV)
@@ -180,6 +191,9 @@ def backtest_dca(
         else:
             annualized_return = -1.0
 
+    performance = performance_summary(
+        unit_nav_series, external_contributions, list(portfolio_history.values())[-1]
+    )
     return {
         "total_invested": total_invested,
         "final_value": list(portfolio_history.values())[-1],
@@ -188,6 +202,8 @@ def backtest_dca(
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
+        "monthly_max_drawdown": float(max_drawdown_nav),
+        **performance,
         "history": {
             date.strftime("%Y-%m"): value for date, value in portfolio_history.items()
         },
@@ -229,6 +245,8 @@ def backtest_kelly_dca(
     substitute_for: Dict[str, str] = None,
     execution_allocation_method: str = "proportional_gap",
     planned_purchase_days: int = None,
+    estimation_nav: pd.DataFrame = None,
+    daily_estimation_nav: pd.DataFrame = None,
 ):
     """Kelly-guided DCA strategy.
 
@@ -298,11 +316,18 @@ def backtest_kelly_dca(
     category_attribution_history = {}
     invested_history = {}
 
+    signal_nav = estimation_nav if estimation_nav is not None else df_nav
+    signal_daily_nav = (
+        daily_estimation_nav if daily_estimation_nav is not None else daily_nav
+    )
     if has_risky_assets:
-        reference_portfolio_nav = df_nav[risky_columns].dot(risky_weights)
+        reference_portfolio_nav = build_reference_basket(
+            signal_nav[risky_columns], risky_weights
+        )
         daily_reference_portfolio_nav = (
-            daily_nav[risky_columns].dot(risky_weights)
-            if daily_nav is not None and set(risky_columns).issubset(daily_nav.columns)
+            build_reference_basket(signal_daily_nav[risky_columns], risky_weights)
+            if signal_daily_nav is not None
+            and set(risky_columns).issubset(signal_daily_nav.columns)
             else None
         )
         ma_series = reference_portfolio_nav.rolling(
@@ -319,6 +344,9 @@ def backtest_kelly_dca(
         total_units = accumulated_investment  # Initial units at 1.0
 
     unit_nav_history = {}
+    external_contributions = []
+    if accumulated_investment > 0:
+        external_contributions.append((df_nav.index[0], accumulated_investment))
     market_signal_current = "neutral"
     allocation_signal_current = "neutral"
     optimizer_info_current = None
@@ -337,11 +365,14 @@ def backtest_kelly_dca(
         else:
             unit_nav = 1.0
 
-        unit_nav_history[timestamp] = unit_nav
+        # The pre-flow NAV prices newly issued strategy units. Performance is
+        # recorded only after this period's trades and fees have settled.
         # --- Unit NAV Calculation End ---
 
         # 1. Income Step (External Inflow)
         accumulated_investment += monthly_investment
+        if monthly_investment > 0:
+            external_contributions.append((timestamp, monthly_investment))
 
         # Buy Strategy Units
         if unit_nav > 0:
@@ -426,17 +457,27 @@ def backtest_kelly_dca(
         # 4. DCA execution: this month's external contribution is the only
         # risky-asset purchase budget. Kelly chooses the target mix; it does
         # not create a VA-style catch-up contribution or forced rebalancing.
+        cash_hard_cap_ratio = max(
+            0.0,
+            1.0
+            - base_risk_free_ratio
+            - (minimum_cash_reserve / total_wealth if total_wealth > 0 else 0.0),
+        )
         final_target_risky_ratio = float(
-            np.clip(base_risky_ratio * tactical_ratio, 0.0, 1.0)
+            np.clip(
+                min(base_risky_ratio * tactical_ratio, cash_hard_cap_ratio),
+                0.0,
+                1.0,
+            )
         )
         target_equity_value = total_wealth * final_target_risky_ratio
         current_asset_values = total_shares * nav_row[total_shares.index]
         target_asset_values = risky_weights * target_equity_value
         non_risky_target_value = max(0.0, total_wealth - target_equity_value)
         if target_has_risk_free_asset:
-            target_cash_balance = min(minimum_cash_reserve, non_risky_target_value)
-            target_risk_free_value = max(
-                0.0, non_risky_target_value - target_cash_balance
+            target_risk_free_value = total_wealth * base_risk_free_ratio
+            target_cash_balance = max(
+                0.0, non_risky_target_value - target_risk_free_value
             )
         else:
             target_cash_balance = non_risky_target_value
@@ -459,11 +500,12 @@ def backtest_kelly_dca(
             current_risk_free=current_risk_free_value,
             target_risk_free=target_risk_free_value,
             target_cash=target_cash_balance,
-            can_manage_risk_free=can_use_risk_free_asset,
+            # Default household mode never redeems RiskFree automatically.
+            can_manage_risk_free=False,
             target_has_risk_free=target_has_risk_free_asset,
             allocation_method=execution_allocation_method,
             execution_covariance=build_execution_covariance(
-                df_nav.iloc[:idx],
+                signal_nav.loc[:timestamp],
                 risky_columns,
                 estimation_window=estimation_window,
             ),
@@ -534,12 +576,18 @@ def backtest_kelly_dca(
             ),
         }
         portfolio_history[timestamp] = total_portfolio_value
+        unit_nav_history[timestamp] = (
+            total_portfolio_value / total_units if total_units > 0 else 1.0
+        )
         invested_history[timestamp] = accumulated_investment
 
     portfolio_series = pd.Series(portfolio_history)
     unit_nav_series = pd.Series(unit_nav_history)
 
-    max_drawdown_nav = calculate_max_drawdown(unit_nav_series)
+    anchored_unit_nav = pd.concat(
+        [pd.Series([1.0]), unit_nav_series.reset_index(drop=True)]
+    )
+    max_drawdown_nav = calculate_max_drawdown(anchored_unit_nav)
     max_drawdown_value = calculate_max_drawdown(portfolio_series)
 
     # Calculate Annualized Return (CAGR based on Strategy Unit NAV)
@@ -557,6 +605,9 @@ def backtest_kelly_dca(
         else:
             annualized_return = -1.0
 
+    performance = performance_summary(
+        unit_nav_series, external_contributions, list(portfolio_history.values())[-1]
+    )
     return {
         "total_invested": accumulated_investment,
         "final_value": list(portfolio_history.values())[-1],
@@ -565,6 +616,8 @@ def backtest_kelly_dca(
         "max_drawdown": float(max_drawdown_nav),
         "max_drawdown_value": float(max_drawdown_value),
         "max_drawdown_nav": float(max_drawdown_nav),
+        "monthly_max_drawdown": float(max_drawdown_nav),
+        **performance,
         "market_signal": market_signal_current,
         "allocation_signal": allocation_signal_current,
         "strategy_mode": strategy_mode,

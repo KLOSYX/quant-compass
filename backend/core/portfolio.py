@@ -5,6 +5,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from core.constants import MAX_SINGLE_WEIGHT, RETURN_SHRINKAGE
+from core.validation import finite_number
 
 
 def normalize_weights(
@@ -13,7 +14,11 @@ def normalize_weights(
     *,
     include_risk_free: bool = True,
 ) -> pd.Series:
-    weights = pd.Series(weights_dict, dtype=float).reindex(columns).fillna(0.0)
+    parsed_weights = {
+        str(code): finite_number(weight, f"weight {code}")
+        for code, weight in weights_dict.items()
+    }
+    weights = pd.Series(parsed_weights, dtype=float).reindex(columns).fillna(0.0)
     weights = weights.clip(lower=0.0)
     if not include_risk_free and "RiskFree" in weights.index:
         weights["RiskFree"] = 0.0
@@ -36,7 +41,7 @@ def validate_weight_universe(
     unknown_positive_assets = sorted(
         code
         for code, weight in weights_dict.items()
-        if code not in columns and float(weight) > 1e-12
+        if code not in columns and finite_number(weight, f"weight {code}") > 1e-12
     )
     if unknown_positive_assets:
         raise HTTPException(
@@ -48,7 +53,8 @@ def validate_weight_universe(
         )
 
     available_positive_weight = sum(
-        max(float(weights_dict.get(code, 0.0)), 0.0) for code in columns
+        max(finite_number(weights_dict.get(code, 0.0), f"weight {code}"), 0.0)
+        for code in columns
     )
     if available_positive_weight <= 1e-12:
         raise HTTPException(
@@ -63,12 +69,17 @@ def decompose_selected_weights(
     validate_weight_universe(weights_dict, columns)
     full_weights = normalize_weights(weights_dict, columns)
     base_risk_free_ratio = float(full_weights.get("RiskFree", 0.0))
-    base_risky_ratio = float(full_weights.drop("RiskFree", errors="ignore").sum())
+    base_non_riskfree_fund_ratio = float(
+        full_weights.drop("RiskFree", errors="ignore").sum()
+    )
     risky_weights = normalize_risky_weights(full_weights.to_dict(), columns)
     return {
         "full_weights": full_weights,
         "risky_weights": risky_weights,
-        "base_risky_ratio": base_risky_ratio,
+        "base_non_riskfree_fund_ratio": base_non_riskfree_fund_ratio,
+        # Deprecated compatibility alias. This bucket is defined by code
+        # identity, not by an inferred economic risk classification.
+        "base_risky_ratio": base_non_riskfree_fund_ratio,
         "base_risk_free_ratio": base_risk_free_ratio,
     }
 

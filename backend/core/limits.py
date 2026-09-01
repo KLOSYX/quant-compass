@@ -3,6 +3,8 @@ from typing import Dict, Mapping, Optional
 
 import pandas as pd
 
+from core.validation import non_negative_number
+
 
 def business_days_in_month(timestamp) -> int:
     ts = pd.Timestamp(timestamp)
@@ -31,9 +33,7 @@ def monthly_investment_limit(
     candidates = []
 
     if daily_limit is not None and daily_limit != "":
-        daily_limit = float(daily_limit)
-        if daily_limit < 0:
-            raise ValueError("daily investment limit must be non-negative")
+        daily_limit = non_negative_number(daily_limit, "daily investment limit")
         purchase_days = (
             business_days_in_month(timestamp)
             if planned_purchase_days is None
@@ -44,9 +44,7 @@ def monthly_investment_limit(
         candidates.append(daily_limit * purchase_days)
 
     if monthly_limit is not None and monthly_limit != "":
-        monthly_limit = float(monthly_limit)
-        if monthly_limit < 0:
-            raise ValueError("monthly investment limit must be non-negative")
+        monthly_limit = non_negative_number(monthly_limit, "monthly investment limit")
         candidates.append(monthly_limit)
 
     return min(candidates) if candidates else math.inf

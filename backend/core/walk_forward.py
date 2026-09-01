@@ -24,6 +24,7 @@ from core.execution_optimizer import (
 )
 from core.frontier import calculate_efficient_frontier
 from core.portfolio import decompose_selected_weights
+from core.reference import build_reference_basket
 from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
 from core.strategy import calculate_target_ratio_optimized
 
@@ -663,10 +664,18 @@ def evaluate_executable_walk_forward(
                 }
                 or strategy_name in window_state_names
             ):
-                reference_nav = train_df[risky_weights.index].dot(risky_weights)
+                if float(risky_weights.sum()) <= 1e-12:
+                    reference_nav = pd.Series(1.0, index=train_df.index)
+                else:
+                    reference_nav = build_reference_basket(
+                        train_df[risky_weights.index], risky_weights
+                    )
                 daily_reference_nav = (
-                    daily_nav.loc[:signal_date, risky_weights.index].dot(risky_weights)
+                    build_reference_basket(
+                        daily_nav.loc[:signal_date, risky_weights.index], risky_weights
+                    )
                     if daily_nav is not None
+                    and float(risky_weights.sum()) > 1e-12
                     and set(risky_weights.index).issubset(daily_nav.columns)
                     else None
                 )
@@ -696,8 +705,13 @@ def evaluate_executable_walk_forward(
             else:
                 tactical_ratio = cash_cap
                 optimizer_info = {}
+            three_bucket_cap = max(0.0, cash_cap - base_risk_free_ratio)
             target_risky_ratio = float(
-                np.clip(base_risky_ratio * tactical_ratio, 0.0, 1.0)
+                np.clip(
+                    min(base_risky_ratio * tactical_ratio, three_bucket_cap),
+                    0.0,
+                    1.0,
+                )
             )
             target_risky_value = total_wealth * target_risky_ratio
             targets = risky_weights * target_risky_value
@@ -705,16 +719,10 @@ def evaluate_executable_walk_forward(
             target_has_risk_free = (
                 "RiskFree" in df_nav.columns and base_risk_free_ratio > 0
             )
-            target_cash = (
-                min(minimum_cash_reserve, non_risky_target)
-                if target_has_risk_free
-                else non_risky_target
-            )
             target_risk_free = (
-                max(0.0, non_risky_target - target_cash)
-                if target_has_risk_free
-                else 0.0
+                total_wealth * base_risk_free_ratio if target_has_risk_free else 0.0
             )
+            target_cash = max(0.0, non_risky_target - target_risk_free)
             execution = execute_monthly_plan(
                 fund_codes=risky_codes,
                 current_holdings=current_assets.to_dict(),
@@ -730,10 +738,8 @@ def evaluate_executable_walk_forward(
                 current_risk_free=current_risk_free,
                 target_risk_free=target_risk_free,
                 target_cash=target_cash,
-                can_manage_risk_free=(
-                    "RiskFree" in df_nav.columns
-                    and (target_has_risk_free or current_risk_free > 0)
-                ),
+                # Replay uses the same no-automatic-sale household policy.
+                can_manage_risk_free=False,
                 target_has_risk_free=target_has_risk_free,
                 allocation_method=(
                     "proportional_gap"

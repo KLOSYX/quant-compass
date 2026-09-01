@@ -415,8 +415,9 @@ def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
 
     first_month = result["attribution"][dates[0].strftime("%Y-%m")]
     assert first_month["000001"] == 100.0
-    assert first_month["Cash"] < 1.0
-    assert first_month["RiskFree"] > 900.0
+    # The base 60% safe sleeve remains distinct from residual cash.
+    assert first_month["Cash"] == pytest.approx(340.0)
+    assert first_month["RiskFree"] == pytest.approx(660.0)
 
 
 def test_fee_calculation_accuracy():

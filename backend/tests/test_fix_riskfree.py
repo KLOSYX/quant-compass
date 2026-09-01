@@ -51,5 +51,8 @@ def test_riskfree_post_trade_calculation():
 
         assert riskfree_advice["ideal_holding"] == 0.0
         assert riskfree_advice["target_holding"] == 0.0
-        assert riskfree_advice["action"] == "Sell"
+        # A zero theoretical target does not authorize an automatic redemption.
+        assert riskfree_advice["action"] == "Hold"
+        assert riskfree_advice["executable_holding"] == 1000.0
+        assert riskfree_advice["amount"] == 0.0
         assert cash_advice["target_holding"] == 550.0

@@ -4,6 +4,7 @@ from typing import Mapping, Sequence
 import pandas as pd
 
 from core.execution_optimizer import allocate_buy_amounts
+from core.validation import non_negative_number, unit_interval_number
 
 
 EXECUTION_EPSILON = 1e-9
@@ -54,17 +55,11 @@ class ExecutionResult:
 
 
 def _non_negative(value, name: str) -> float:
-    parsed = float(value or 0.0)
-    if parsed < -EXECUTION_EPSILON:
-        raise ValueError(f"{name} must be non-negative")
-    return max(0.0, parsed)
+    return non_negative_number(value, name, epsilon=EXECUTION_EPSILON)
 
 
 def _fee_rate(value, name: str) -> float:
-    parsed = _non_negative(value, name)
-    if parsed >= 1.0:
-        raise ValueError(f"{name} must be less than 1")
-    return parsed
+    return unit_interval_number(value, name, include_one=False)
 
 
 def execute_monthly_plan(
@@ -244,7 +239,10 @@ def execute_monthly_plan(
         risk_free_after -= redeem_amount
         cash_after += redeem_amount
     if target_has_risk_free and cash_after > cash_target:
-        risk_free_buy = cash_after - cash_target
+        risk_free_buy = min(
+            cash_after - cash_target,
+            max(0.0, risk_free_target - risk_free_after),
+        )
         risk_free_after += risk_free_buy
         cash_after -= risk_free_buy
 

@@ -1608,6 +1608,28 @@ function PortfolioOptimizer() {
                                     </div>
                                 </div>
 
+                                <div className={`recommendation-diagnostic ${recommendationResult.decision_readiness !== 'manual_review_required' || !recommendationResult.risk_limit_enforceable ? 'diagnostic-warning' : ''}`}>
+                                    <div className="diagnostic-title">{t('decision_readiness')}</div>
+                                    <div className="diagnostic-copy">
+                                        {t(`decision_${recommendationResult.decision_readiness || 'research_only'}`)}
+                                    </div>
+                                    <div className="diagnostic-copy">
+                                        {t('base_non_riskfree_ratio')}: {((recommendationResult.base_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
+                                        {' × '}{t('tactical_deployment_ratio')}: {((recommendationResult.tactical_deployment_ratio || 0) * 100).toFixed(1)}%
+                                        {' = '}{t('final_non_riskfree_ratio')}: {((recommendationResult.final_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
+                                    </div>
+                                    <div className="diagnostic-copy">
+                                        {t('safe_sleeve_ratio')}: {((recommendationResult.base_safe_sleeve_ratio || 0) * 100).toFixed(1)}%
+                                        {' · '}{t('residual_cash_ratio')}: {((recommendationResult.residual_cash_ratio || 0) * 100).toFixed(1)}%
+                                        {' · '}{t('actual_risk_ratio')}: {((recommendationResult.actual_risk_ratio || 0) * 100).toFixed(1)}%
+                                    </div>
+                                    {!recommendationResult.risk_limit_enforceable && (
+                                        <div className="diagnostic-copy">
+                                            {t('risk_not_enforceable')} · {t('cash_reserve_shortfall')}: ¥{Number(recommendationResult.cash_reserve_shortfall || 0).toFixed(2)}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {recommendationResult.window_robustness && (
                                     <div className={`recommendation-diagnostic ${recommendationResult.window_robustness.status === 'unstable' ? 'diagnostic-warning' : ''}`}>
                                         <div className="diagnostic-title">Kelly 回看窗口稳健性（3 年基准）</div>

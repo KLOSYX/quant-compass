@@ -1,6 +1,6 @@
 import math
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import akshare as ak
@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 import requests
 from fastapi import HTTPException
+
+from core.domain import CorporateAction, ReturnQuality
+from core.market_data import build_market_snapshot, reconstruct_total_return_index
 
 FUND_LIST_CACHE = None
 MONEY_FUND_NAV_CACHE = {}
@@ -210,6 +213,13 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
 
         fund_history = _fetch_with_retry(lambda: _fetch_money_fund_history(code), code)
         nav = _build_money_fund_nav(fund_history)
+        nav.attrs["corporate_actions"] = ()
+        nav.attrs["return_quality"] = ReturnQuality(
+            status="verified",
+            corporate_action_coverage_complete=True,
+            reconciliation_tolerance=0.0,
+            availability_quality="observed",
+        )
         MONEY_FUND_NAV_CACHE[code] = (time.time(), nav.copy())
         return nav
 
@@ -224,7 +234,150 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
     fund_history["净值日期"] = pd.to_datetime(fund_history["净值日期"], errors="coerce")
     nav = pd.to_numeric(fund_history["单位净值"], errors="coerce")
     nav.index = fund_history["净值日期"]
-    return nav.dropna().sort_index()
+    nav = nav.dropna().sort_index()
+
+    actions: list[CorporateAction] = []
+    raw_action_responses: dict[str, list[dict[str, Any]]] = {}
+    coverage_complete = True
+    observed_at = datetime.now(timezone.utc)
+    for indicator, kind in (
+        ("分红送配详情", "cash_distribution"),
+        ("拆分详情", "split"),
+    ):
+        try:
+            frame = _fetch_with_retry(
+                lambda indicator=indicator: ak.fund_open_fund_info_em(
+                    symbol=code, indicator=indicator
+                ),
+                code,
+                max_retries=2,
+            )
+            raw_action_responses[indicator] = frame.to_dict(orient="records")
+            for _, row in frame.iterrows():
+                date_values = [
+                    row.get(name)
+                    for name in (
+                        "除息日",
+                        "权益登记日",
+                        "红利发放日",
+                        "拆分折算日",
+                        "年份",
+                    )
+                    if row.get(name) is not None
+                ]
+                event_date = next(
+                    (pd.to_datetime(value, errors="coerce") for value in date_values),
+                    pd.NaT,
+                )
+                if pd.isna(event_date):
+                    continue
+                if kind == "cash_distribution":
+                    amount = pd.to_numeric(
+                        row.get("每份分红", row.get("分红", row.get("分红方案"))),
+                        errors="coerce",
+                    )
+                    if pd.isna(amount):
+                        continue
+                    actions.append(
+                        CorporateAction(
+                            asset_code=code,
+                            kind="cash_distribution",
+                            record_date=pd.to_datetime(
+                                row.get("权益登记日", event_date), errors="coerce"
+                            ),
+                            ex_date=pd.to_datetime(
+                                row.get("除息日", event_date), errors="coerce"
+                            ),
+                            payment_date=pd.to_datetime(
+                                row.get("红利发放日", event_date), errors="coerce"
+                            ),
+                            cash_per_share=float(amount),
+                            source="akshare:eastmoney",
+                            observed_at=observed_at,
+                        )
+                    )
+                else:
+                    ratio = pd.to_numeric(
+                        row.get("拆分比例", row.get("折算比例")), errors="coerce"
+                    )
+                    if pd.isna(ratio) or float(ratio) <= 0:
+                        continue
+                    actions.append(
+                        CorporateAction(
+                            asset_code=code,
+                            kind="split",
+                            ex_date=event_date,
+                            split_ratio=float(ratio),
+                            source="akshare:eastmoney",
+                            observed_at=observed_at,
+                        )
+                    )
+        except Exception:
+            coverage_complete = False
+
+    reconciliation_error = None
+    reconciliation_tolerance = None
+    try:
+        cumulative_frame = _fetch_with_retry(
+            lambda: ak.fund_open_fund_info_em(symbol=code, indicator="累计净值走势"),
+            code,
+            max_retries=2,
+        )
+        raw_action_responses["累计净值走势"] = cumulative_frame.to_dict(
+            orient="records"
+        )
+        if {"净值日期", "累计净值"}.issubset(cumulative_frame.columns):
+            cumulative = pd.Series(
+                pd.to_numeric(cumulative_frame["累计净值"], errors="coerce").values,
+                index=pd.to_datetime(cumulative_frame["净值日期"], errors="coerce"),
+            ).dropna()
+            reconstructed = reconstruct_total_return_index(nav, actions)
+            aligned = pd.concat(
+                [reconstructed.rename("rebuilt"), cumulative.rename("vendor")],
+                axis=1,
+                join="inner",
+            ).dropna()
+            if len(aligned) >= 2 and (aligned["vendor"] > 0).all():
+                aligned = aligned / aligned.iloc[0]
+                relative_error = (
+                    aligned["rebuilt"] - aligned["vendor"]
+                ).abs() / aligned["vendor"]
+                reconciliation_error = float(relative_error.max())
+                numeric_text = cumulative_frame["累计净值"].dropna().astype(str)
+                observed_decimal_places = [
+                    len(value.partition(".")[2].rstrip("0"))
+                    for value in numeric_text
+                    if len(value.partition(".")[2].rstrip("0")) > 0
+                ]
+                # Use the least precise non-integer observation as the
+                # provider field-resolution floor. Extra float digits must not
+                # fabricate a tighter reconciliation tolerance.
+                decimal_places = min(observed_decimal_places, default=0)
+                field_precision = 10.0 ** (-decimal_places)
+                reconciliation_tolerance = float(
+                    field_precision / max(float(cumulative.abs().median()), 1e-12)
+                )
+        else:
+            coverage_complete = False
+    except Exception:
+        coverage_complete = False
+
+    reconciled = bool(
+        coverage_complete
+        and reconciliation_error is not None
+        and reconciliation_tolerance is not None
+        and reconciliation_error <= reconciliation_tolerance
+    )
+    nav.attrs["corporate_actions"] = tuple(actions)
+    nav.attrs["corporate_action_source_responses"] = raw_action_responses
+    nav.attrs["return_quality"] = ReturnQuality(
+        status="reconciled" if reconciled else "partial",
+        corporate_action_coverage_complete=coverage_complete,
+        reconciliation_error=reconciliation_error,
+        reconciliation_tolerance=reconciliation_tolerance,
+        availability_quality="observed",
+    )
+    return nav
 
 
 def get_fund_data(
@@ -237,6 +390,10 @@ def get_fund_data(
 
     fund_data = {}
     daily_fund_data = {}
+    daily_total_return_data = {}
+    corporate_actions: list[CorporateAction] = []
+    return_quality: dict[str, ReturnQuality] = {}
+    raw_action_responses: dict[str, dict[str, list[dict[str, Any]]]] = {}
     fund_names = {}
     warnings = []
     if fund_codes:
@@ -253,6 +410,22 @@ def get_fund_data(
                 fund_nav = _get_fund_nav(code, fund_type)
                 daily_fund_data[code] = fund_nav
                 fund_data[code] = fund_nav.resample("ME").last()
+                quality = fund_nav.attrs.get("return_quality")
+                if not isinstance(quality, ReturnQuality):
+                    quality = ReturnQuality(
+                        status="unsupported",
+                        corporate_action_coverage_complete=False,
+                        availability_quality="inferred",
+                    )
+                actions = tuple(fund_nav.attrs.get("corporate_actions", ()))
+                return_quality[code] = quality
+                raw_action_responses[code] = dict(
+                    fund_nav.attrs.get("corporate_action_source_responses", {})
+                )
+                corporate_actions.extend(actions)
+                daily_total_return_data[code] = reconstruct_total_return_index(
+                    fund_nav, actions
+                )
 
             except Exception as e:
                 raise HTTPException(
@@ -262,6 +435,7 @@ def get_fund_data(
     df = pd.DataFrame(fund_data)
     df = df.sort_index()
     daily_df = pd.DataFrame(daily_fund_data).sort_index()
+    daily_total_return_df = pd.DataFrame(daily_total_return_data).sort_index()
 
     if not df.empty:
         latest_start_date = max(
@@ -287,6 +461,7 @@ def get_fund_data(
         daily_df = pd.DataFrame(
             index=pd.bdate_range(start=actual_start, end=actual_end)
         )
+        daily_total_return_df = pd.DataFrame(index=daily_df.index)
 
     if risk_free_rate is not None:
         if risk_free_rate <= -1:
@@ -304,6 +479,13 @@ def get_fund_data(
             (1 + daily_rf_return) ** np.arange(1, len(daily_rf_index) + 1),
             index=daily_rf_index,
         )
+        daily_total_return_df["RiskFree"] = daily_df["RiskFree"]
+        return_quality["RiskFree"] = ReturnQuality(
+            status="verified",
+            corporate_action_coverage_complete=True,
+            reconciliation_tolerance=0.0,
+            availability_quality="observed",
+        )
         fund_names["RiskFree"] = "无风险资产"
 
     if actual_start > user_start and fund_codes:
@@ -319,23 +501,51 @@ def get_fund_data(
     df_filtered = df.loc[actual_start:actual_end]
     df_processed = df_filtered.ffill().dropna()
     daily_processed = daily_df.loc[actual_start:actual_end].ffill().dropna()
+    daily_total_return_processed = (
+        daily_total_return_df.loc[actual_start:actual_end].ffill().dropna()
+    )
 
     if df_processed.empty:
         raise HTTPException(status_code=400, detail="数据处理后为空，无法进行分析。")
 
     df_processed.attrs["daily_nav"] = daily_processed
+    df_processed.attrs["daily_total_return"] = daily_total_return_processed
+    df_processed.attrs["monthly_total_return"] = daily_total_return_processed.resample(
+        "ME"
+    ).last()
+    df_processed.attrs["corporate_actions"] = tuple(corporate_actions)
+    df_processed.attrs["return_quality"] = return_quality
+    df_processed.attrs["corporate_action_source_responses"] = raw_action_responses
+    df_processed.attrs["market_snapshot"] = build_market_snapshot(
+        price_series=daily_processed,
+        corporate_actions=corporate_actions,
+        return_quality=return_quality,
+        source="akshare:eastmoney",
+        fetched_at=datetime.now(timezone.utc),
+        available_at={
+            code: datetime.now(timezone.utc) for code in daily_processed.columns
+        },
+    )
     return df_processed, fund_names, warnings
 
 
 def apply_fund_fee_drag(
     df_nav: pd.DataFrame, fund_fees: Dict[str, float]
 ) -> pd.DataFrame:
-    monthly_returns = df_nav.pct_change().fillna(0)
+    monthly_returns = df_nav.pct_change().dropna(how="all")
     for code in monthly_returns.columns:
         if code == "RiskFree":
             continue
         monthly_returns[code] -= fund_fees.get(code, 0.0) / 12
-    return (1 + monthly_returns).cumprod()
+    dragged = (1 + monthly_returns).cumprod()
+    if not df_nav.empty:
+        anchor = pd.DataFrame(
+            [np.ones(len(df_nav.columns))],
+            index=[df_nav.index[0]],
+            columns=df_nav.columns,
+        )
+        dragged = pd.concat([anchor, dragged])
+    return dragged
 
 
 def prepare_nav_for_analysis(
@@ -347,6 +557,40 @@ def prepare_nav_for_analysis(
     if apply_fund_fees_to_history:
         return apply_fund_fee_drag(df_nav, fund_fees)
     return df_nav.copy()
+
+
+def estimation_total_return_nav(
+    df_nav: pd.DataFrame, *, allow_degraded_research: bool = False
+) -> tuple[pd.DataFrame, list[str]]:
+    """Return the economic-return series and enforce its quality gate.
+
+    Synthetic frames used by core callers may have no provider metadata. Real
+    provider frames always carry ``return_quality`` and must pass this gate.
+    """
+
+    quality = df_nav.attrs.get("return_quality")
+    monthly_total_return = df_nav.attrs.get("monthly_total_return")
+    if quality is None or monthly_total_return is None:
+        return df_nav.copy(), []
+    degraded = sorted(
+        code
+        for code, item in quality.items()
+        if item.status not in {"verified", "reconciled"}
+    )
+    if degraded and not allow_degraded_research:
+        raise ValueError(
+            "total-return data quality blocks frontier and Kelly: "
+            + ", ".join(degraded)
+        )
+    warnings = []
+    if degraded:
+        warnings.append(
+            "降级研究结果：以下基金的公司行为数据不完整：" + ", ".join(degraded)
+        )
+    result = monthly_total_return.reindex(columns=df_nav.columns).dropna()
+    if result.empty:
+        raise ValueError("total-return series is empty after alignment")
+    return result, warnings
 
 
 def ensure_risk_free_column(
