@@ -112,8 +112,67 @@ def test_walk_forward_metrics_present_for_long_sample():
     assert metrics
     assert any(item["frontier_walk_forward_observations"] > 0 for item in metrics)
     assert all("frontier_walk_forward_sharpe" in item for item in metrics)
+    assert all(
+        "frontier_walk_forward_annualized_excess_return" in item for item in metrics
+    )
     assert all("frontier_walk_forward_cvar_loss" in item for item in metrics)
     assert all("robust_score" not in item for item in metrics)
+
+
+def test_walk_forward_scores_the_complete_frontier_point_including_risk_free():
+    dates = pd.date_range(start="2020-01-31", periods=40, freq="ME")
+    risky_returns = pd.Series(
+        [0.04 if index % 2 == 0 else -0.03 for index in range(40)],
+        index=dates,
+    )
+    risk_free_returns = pd.Series([0.02 / 12] * 40, index=dates)
+    df = pd.DataFrame(
+        {
+            "Risky": (1 + risky_returns).cumprod(),
+            "RiskFree": (1 + risk_free_returns).cumprod(),
+        },
+        index=dates,
+    )
+
+    metrics = calculate_frontier_walk_forward_metrics(
+        df,
+        {},
+        annual_risk_free_rate=0.02,
+    )
+
+    assert metrics
+    minimum_risk_metric = metrics[0]
+    assert minimum_risk_metric["frontier_walk_forward_volatility"] < 0.02
+    assert abs(minimum_risk_metric["frontier_walk_forward_sharpe"]) < 0.2
+
+
+def test_walk_forward_sharpe_uses_excess_return():
+    dates = pd.date_range(start="2020-01-31", periods=40, freq="ME")
+    returns = pd.Series(
+        [0.006 if index % 2 == 0 else 0.004 for index in range(40)],
+        index=dates,
+    )
+    df = pd.DataFrame({"AssetA": (1 + returns).cumprod()}, index=dates)
+
+    zero_rate = calculate_frontier_walk_forward_metrics(
+        df,
+        {},
+        annual_risk_free_rate=0.0,
+    )[0]
+    high_rate = calculate_frontier_walk_forward_metrics(
+        df,
+        {},
+        annual_risk_free_rate=0.06,
+    )[0]
+
+    assert (
+        high_rate["frontier_walk_forward_sharpe"]
+        < zero_rate["frontier_walk_forward_sharpe"]
+    )
+    assert (
+        high_rate["frontier_walk_forward_annualized_excess_return"]
+        < zero_rate["frontier_walk_forward_annualized_excess_return"]
+    )
 
 
 def test_ledoit_wolf_covariance_is_finite_and_preserves_riskfree_zero_risk():

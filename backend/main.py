@@ -1,6 +1,8 @@
 import requests
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from starlette.staticfiles import StaticFiles
 
 from api.routes import router
@@ -22,11 +24,23 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://127.0.0.1:8666",
+        "http://localhost:8666",
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(router, prefix="/api")
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+static_directory = Path(__file__).resolve().parent / "static"
+if static_directory.is_dir():
+    app.mount("/", StaticFiles(directory=static_directory, html=True), name="static")
+else:
+
+    @app.get("/", response_class=HTMLResponse)
+    async def development_root():
+        return "<html><body>Quant Compass API is running in research_only mode.</body></html>"

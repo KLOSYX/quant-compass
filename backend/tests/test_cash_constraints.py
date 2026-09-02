@@ -415,8 +415,9 @@ def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
 
     first_month = result["attribution"][dates[0].strftime("%Y-%m")]
     assert first_month["000001"] == 100.0
-    assert first_month["Cash"] < 1.0
-    assert first_month["RiskFree"] > 900.0
+    # The base 60% safe sleeve remains distinct from residual cash.
+    assert first_month["Cash"] == pytest.approx(340.0)
+    assert first_month["RiskFree"] == pytest.approx(660.0)
 
 
 def test_fee_calculation_accuracy():
@@ -521,6 +522,34 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
     assert advice["000002"]["amount"] == pytest.approx(4000.0)
     assert data["recommended_monthly_investment"] == pytest.approx(4500.0)
     assert advice["Cash"]["executable_holding"] == pytest.approx(5500.0)
+
+
+def test_daily_limit_uses_explicit_planned_purchase_days():
+    dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
+    mock_df = pd.DataFrame({"000001": [1.0] * len(dates)}, index=dates)
+
+    with patch("api.routes.get_fund_data") as mock_get_fund:
+        mock_get_fund.return_value = (mock_df, {"000001": "Daily Capped Fund"}, [])
+        response = client.post(
+            "/api/current_recommendation",
+            json={
+                "fund_codes": ["000001"],
+                "weights": {"000001": 1.0},
+                "monthly_budget": 10000.0,
+                "strategy_mode": "legacy_linear",
+                "min_weight": 1.0,
+                "max_weight": 1.0,
+                "fund_investment_limits": {"000001": {"daily_limit": 2000.0}},
+                "planned_purchase_days": 1,
+            },
+        )
+
+    assert response.status_code == 200
+    advice = next(
+        item for item in response.json()["fund_advice"] if item["code"] == "000001"
+    )
+    assert advice["monthly_buy_limit"] == pytest.approx(2000.0)
+    assert advice["amount"] == pytest.approx(2000.0)
 
 
 def test_recommendation_does_not_blame_limit_when_only_dca_budget_is_partial():

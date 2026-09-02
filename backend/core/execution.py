@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from core.limits import allocate_capped_buy_amounts
+import pandas as pd
+
+from core.execution_optimizer import allocate_buy_amounts
+from core.validation import non_negative_number, unit_interval_number
 
 
 EXECUTION_EPSILON = 1e-9
@@ -19,6 +22,8 @@ class FundExecution:
     net_sell_proceeds: float
     buy_fee_rate: float
     sell_fee_rate: float
+    execution_role: str
+    buy_source: str
 
     @property
     def gap(self) -> float:
@@ -46,20 +51,15 @@ class ExecutionResult:
     risk_free_after: float
     target_cash: float
     accounting_error: float
+    allocation_diagnostics: Mapping[str, object]
 
 
 def _non_negative(value, name: str) -> float:
-    parsed = float(value or 0.0)
-    if parsed < -EXECUTION_EPSILON:
-        raise ValueError(f"{name} must be non-negative")
-    return max(0.0, parsed)
+    return non_negative_number(value, name, epsilon=EXECUTION_EPSILON)
 
 
 def _fee_rate(value, name: str) -> float:
-    parsed = _non_negative(value, name)
-    if parsed >= 1.0:
-        raise ValueError(f"{name} must be less than 1")
-    return parsed
+    return unit_interval_number(value, name, include_one=False)
 
 
 def execute_monthly_plan(
@@ -82,6 +82,10 @@ def execute_monthly_plan(
     target_cash: float = 0.0,
     can_manage_risk_free: bool = False,
     target_has_risk_free: bool = False,
+    allocation_method: str = "proportional_gap",
+    execution_covariance: pd.DataFrame | None = None,
+    substitute_for: Mapping[str, str] | None = None,
+    planned_purchase_days: int | None = None,
 ) -> ExecutionResult:
     """Execute one fixed-budget contribution against theoretical target values."""
     codes = list(dict.fromkeys(fund_codes))
@@ -170,28 +174,37 @@ def execute_monthly_plan(
     max_cash_to_spend = min(requested_buy_budget, spendable_liquidity)
 
     post_sell_holdings = {code: current[code] - sell_amounts[code] for code in codes}
-    fund_gaps = {code: targets[code] - post_sell_holdings[code] for code in codes}
     buy_fee_rates = {
         code: _fee_rate(buy_fees.get(code, 0.0), f"buy fee {code}") for code in codes
     }
-    buy_allocations = allocate_capped_buy_amounts(
-        codes,
-        fund_gaps,
-        weights,
-        buy_fee_rates,
-        max_cash_to_spend,
-        investment_limits,
-        timestamp,
+    allocation = allocate_buy_amounts(
+        fund_codes=codes,
+        post_sell_holdings=post_sell_holdings,
+        target_holdings=targets,
+        target_weights=weights,
+        buy_fees=buy_fee_rates,
+        max_cash_to_spend=max_cash_to_spend,
+        investment_limits=investment_limits,
+        timestamp=timestamp,
+        allocation_method=allocation_method,
+        covariance=execution_covariance,
+        substitute_for=substitute_for,
+        planned_purchase_days=planned_purchase_days,
     )
+    buy_allocations = allocation.gross_allocations
+    substitute_codes = set(substitute_for or {})
 
     fund_results = {}
     for code in codes:
         gross_buy = float(buy_allocations.get(code, 0.0))
         net_buy_holding = gross_buy / (1.0 + buy_fee_rates[code])
         executable_holding = post_sell_holdings[code] + net_buy_holding
+        is_substitute_buy = code in substitute_codes and gross_buy > EXECUTION_EPSILON
         allocation_state = (
             "EXIT"
             if code in exits
+            else "ACTIVE_SUBSTITUTE"
+            if is_substitute_buy
             else "ACTIVE"
             if weights[code] > EXECUTION_EPSILON
             else "NO_NEW_BUY"
@@ -207,6 +220,14 @@ def execute_monthly_plan(
             net_sell_proceeds=net_sell_proceeds[code],
             buy_fee_rate=buy_fee_rates[code],
             sell_fee_rate=sell_fee_rates[code],
+            execution_role="substitute" if code in substitute_codes else "strategic",
+            buy_source=(
+                "limit_substitute"
+                if is_substitute_buy
+                else "target_gap"
+                if gross_buy > EXECUTION_EPSILON
+                else "none"
+            ),
         )
 
     total_gross_buy = sum(item.gross_buy for item in fund_results.values())
@@ -218,7 +239,10 @@ def execute_monthly_plan(
         risk_free_after -= redeem_amount
         cash_after += redeem_amount
     if target_has_risk_free and cash_after > cash_target:
-        risk_free_buy = cash_after - cash_target
+        risk_free_buy = min(
+            cash_after - cash_target,
+            max(0.0, risk_free_target - risk_free_after),
+        )
         risk_free_after += risk_free_buy
         cash_after -= risk_free_buy
 
@@ -253,4 +277,5 @@ def execute_monthly_plan(
         risk_free_after=risk_free_after,
         target_cash=cash_target,
         accounting_error=accounting_error,
+        allocation_diagnostics=allocation.diagnostics.to_dict(),
     )

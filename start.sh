@@ -22,4 +22,4 @@ uv pip install --upgrade akshare
 
 echo "Starting the unified server with uv..."
 # The server will now be accessible at http://localhost:8666
-uv run uvicorn main:app --host 0.0.0.0 --port 8666
+uv run uvicorn main:app --host 127.0.0.1 --port 8666

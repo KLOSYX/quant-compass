@@ -3,6 +3,8 @@ from typing import Dict, Mapping, Optional
 
 import pandas as pd
 
+from core.validation import non_negative_number
+
 
 def business_days_in_month(timestamp) -> int:
     ts = pd.Timestamp(timestamp)
@@ -11,7 +13,9 @@ def business_days_in_month(timestamp) -> int:
     return max(1, len(pd.bdate_range(start=start, end=end)))
 
 
-def monthly_investment_limit(limit_config, timestamp) -> float:
+def monthly_investment_limit(
+    limit_config, timestamp, *, planned_purchase_days: int | None = None
+) -> float:
     if limit_config is None:
         return math.inf
 
@@ -29,15 +33,18 @@ def monthly_investment_limit(limit_config, timestamp) -> float:
     candidates = []
 
     if daily_limit is not None and daily_limit != "":
-        daily_limit = float(daily_limit)
-        if daily_limit < 0:
-            raise ValueError("daily investment limit must be non-negative")
-        candidates.append(daily_limit * business_days_in_month(timestamp))
+        daily_limit = non_negative_number(daily_limit, "daily investment limit")
+        purchase_days = (
+            business_days_in_month(timestamp)
+            if planned_purchase_days is None
+            else int(planned_purchase_days)
+        )
+        if purchase_days < 1:
+            raise ValueError("planned_purchase_days must be at least 1")
+        candidates.append(daily_limit * purchase_days)
 
     if monthly_limit is not None and monthly_limit != "":
-        monthly_limit = float(monthly_limit)
-        if monthly_limit < 0:
-            raise ValueError("monthly investment limit must be non-negative")
+        monthly_limit = non_negative_number(monthly_limit, "monthly investment limit")
         candidates.append(monthly_limit)
 
     return min(candidates) if candidates else math.inf
@@ -47,10 +54,16 @@ def get_monthly_investment_limits(
     fund_codes,
     fund_investment_limits: Optional[Mapping[str, object]],
     timestamp,
+    *,
+    planned_purchase_days: int | None = None,
 ) -> Dict[str, float]:
     limits = fund_investment_limits or {}
     return {
-        code: monthly_investment_limit(limits.get(code), timestamp)
+        code: monthly_investment_limit(
+            limits.get(code),
+            timestamp,
+            planned_purchase_days=planned_purchase_days,
+        )
         for code in fund_codes
     }
 
@@ -63,6 +76,8 @@ def allocate_capped_buy_amounts(
     max_cash_to_spend: float,
     fund_investment_limits: Optional[Mapping[str, object]],
     timestamp,
+    *,
+    planned_purchase_days: int | None = None,
 ) -> Dict[str, float]:
     """Allocate gross buy cash across funds while respecting per-fund monthly caps."""
     if max_cash_to_spend <= 0:
@@ -70,7 +85,10 @@ def allocate_capped_buy_amounts(
 
     buy_fees = buy_fees or {}
     monthly_limits = get_monthly_investment_limits(
-        fund_codes, fund_investment_limits, timestamp
+        fund_codes,
+        fund_investment_limits,
+        timestamp,
+        planned_purchase_days=planned_purchase_days,
     )
     allocations = {code: 0.0 for code in fund_codes}
     remaining_cash = float(max_cash_to_spend)

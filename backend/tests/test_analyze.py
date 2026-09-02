@@ -40,6 +40,36 @@ def test_analyze_portfolio_success():
     }
 
 
+def test_substitute_fund_is_excluded_from_strategic_frontier():
+    dates = pd.date_range("2023-01-31", periods=24, freq="ME")
+    nav = pd.DataFrame(
+        {
+            "A": [1.0 * (1.01**idx) for idx in range(len(dates))],
+            "B": [1.0 * (1.009**idx) for idx in range(len(dates))],
+        },
+        index=dates,
+    )
+    with patch(
+        "api.routes.get_fund_data",
+        return_value=(nav, {"A": "Preferred", "B": "Proxy"}, []),
+    ):
+        response = client.post(
+            "/api/analyze",
+            json={
+                "fund_codes": ["A", "B"],
+                "fund_fees": {},
+                "substitute_for": {"B": "A"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["substitute_for"] == {"B": "A"}
+    assert all(
+        point["weights"].get("B", 0.0) == 0.0 for point in payload["efficient_frontier"]
+    )
+
+
 def test_analyze_no_funds_fails():
     """Test analysis with no funds and no risk-free rate, expecting failure."""
     request_data = {

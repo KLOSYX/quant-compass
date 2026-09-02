@@ -2,6 +2,7 @@ import asyncio
 from datetime import date
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -81,6 +82,284 @@ def test_execute_monthly_plan_keeps_cash_and_risk_free_separate():
     assert result.risk_free_after == pytest.approx(600.0)
     assert result.cash_after == pytest.approx(500.0)
     assert result.accounting_error == pytest.approx(0.0)
+
+
+def test_constrained_tracking_uses_same_group_substitute_after_limit_binds():
+    covariance = pd.DataFrame(
+        [[0.0100, 0.0095], [0.0095, 0.0100]],
+        index=["A", "B"],
+        columns=["A", "B"],
+    )
+
+    result = execute_monthly_plan(
+        fund_codes=["A", "B"],
+        current_holdings={},
+        target_holdings={"A": 1000.0, "B": 0.0},
+        target_weights={"A": 1.0, "B": 0.0},
+        current_cash=0.0,
+        monthly_budget=500.0,
+        buy_fees={},
+        sell_fees={},
+        investment_limits={"A": {"monthly_limit": 100.0}},
+        timestamp=date(2026, 7, 16),
+        allocation_method="constrained_tracking",
+        execution_covariance=covariance,
+        substitute_for={"B": "A"},
+    )
+
+    assert result.funds["A"].gross_buy == pytest.approx(100.0)
+    assert result.funds["B"].gross_buy > 350.0
+    assert result.funds["B"].allocation_state == "ACTIVE_SUBSTITUTE"
+    assert result.funds["B"].buy_source == "limit_substitute"
+    assert result.allocation_diagnostics["fallback_used"] is False
+    assert (
+        result.allocation_diagnostics["tracking_error_after"]
+        < result.allocation_diagnostics["tracking_error_before"]
+    )
+
+
+def test_constrained_tracking_does_not_use_unrelated_substitute_group():
+    covariance = pd.DataFrame(
+        [
+            [0.0100, 0.0095, 0.0095, 0.0000],
+            [0.0095, 0.0100, 0.0095, 0.0000],
+            [0.0095, 0.0095, 0.0100, 0.0000],
+            [0.0000, 0.0000, 0.0000, 0.0100],
+        ],
+        index=["A", "B", "C", "D"],
+        columns=["A", "B", "C", "D"],
+    )
+
+    result = execute_monthly_plan(
+        fund_codes=["A", "B", "C", "D"],
+        current_holdings={},
+        target_holdings={"A": 1000.0, "B": 0.0, "C": 0.0, "D": 0.0},
+        target_weights={"A": 1.0, "B": 0.0, "C": 0.0, "D": 0.0},
+        current_cash=0.0,
+        monthly_budget=500.0,
+        buy_fees={},
+        sell_fees={},
+        investment_limits={"A": {"monthly_limit": 100.0}},
+        timestamp=date(2026, 7, 16),
+        allocation_method="constrained_tracking",
+        execution_covariance=covariance,
+        substitute_for={"B": "A", "C": "D"},
+    )
+
+    assert result.funds["B"].gross_buy > 0.0
+    assert result.funds["C"].gross_buy == 0.0
+
+
+def test_tracking_error_can_prefer_cash_over_unrelated_substitute():
+    covariance = pd.DataFrame(
+        [[0.0100, 0.0000], [0.0000, 0.0100]],
+        index=["A", "B"],
+        columns=["A", "B"],
+    )
+
+    result = execute_monthly_plan(
+        fund_codes=["A", "B"],
+        current_holdings={},
+        target_holdings={"A": 1000.0, "B": 0.0},
+        target_weights={"A": 1.0, "B": 0.0},
+        current_cash=0.0,
+        monthly_budget=500.0,
+        buy_fees={},
+        sell_fees={},
+        investment_limits={"A": {"monthly_limit": 100.0}},
+        timestamp=date(2026, 7, 16),
+        allocation_method="constrained_tracking",
+        execution_covariance=covariance,
+        substitute_for={"B": "A"},
+    )
+
+    assert result.funds["A"].gross_buy == pytest.approx(100.0)
+    assert result.funds["B"].gross_buy == pytest.approx(0.0, abs=1e-5)
+    assert result.cash_after == pytest.approx(400.0, abs=1e-5)
+
+
+def test_constrained_tracking_keeps_feasible_strategic_dca_budget():
+    """A PSD tracking covariance must not cancel a feasible strategic DCA buy."""
+    covariance = pd.DataFrame(
+        [
+            [0.02492966, -0.07367545, -0.01763823, -0.00651928],
+            [-0.07367545, 1.0, 0.32762924, 0.07599422],
+            [-0.01763823, 0.32762924, 0.11108628, 0.02506479],
+            [-0.00651928, 0.07599422, 0.02506479, 0.01110494],
+        ],
+        index=["A", "B", "C", "D"],
+        columns=["A", "B", "C", "D"],
+    )
+    assert np.linalg.eigvalsh(covariance.to_numpy()).min() >= -1e-8
+
+    result = execute_monthly_plan(
+        fund_codes=["A", "B", "C", "D"],
+        current_holdings={"A": 2034.3, "B": 1653.1, "C": 9.8, "D": 1510.9},
+        target_holdings={"A": 1908.5, "B": 969.2, "C": 1157.6, "D": 1513.0},
+        target_weights={"A": 0.25, "B": 0.25, "C": 0.25, "D": 0.25},
+        current_cash=0.0,
+        monthly_budget=340.1,
+        buy_fees={},
+        sell_fees={},
+        investment_limits={},
+        timestamp=date(2026, 7, 16),
+        allocation_method="constrained_tracking",
+        execution_covariance=covariance,
+    )
+
+    # The proportional, cap-aware baseline spends the whole budget on the two
+    # positive gaps; constrained tracking must spend at least that feasible
+    # amount even though its unconstrained objective prefers cash here.
+    assert result.funds["C"].gross_buy > 300.0
+    assert result.funds["D"].gross_buy > 0.0
+    assert result.total_gross_buy == pytest.approx(340.1, abs=1e-5)
+    assert result.cash_after == pytest.approx(0.0, abs=1e-5)
+    assert result.allocation_diagnostics["unspent_budget"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("substitute_for", "message"),
+    [
+        ({"B": "B"}, "cannot reference itself"),
+        ({"B": "A", "C": "B"}, "not other substitutes"),
+        ({"B": "missing"}, "primary funds outside"),
+    ],
+)
+def test_substitute_relationships_reject_ambiguous_or_unknown_links(
+    substitute_for, message
+):
+    with pytest.raises(ValueError, match=message):
+        execute_monthly_plan(
+            fund_codes=["A", "B", "C"],
+            current_holdings={},
+            target_holdings={"A": 1000.0, "B": 0.0, "C": 0.0},
+            target_weights={"A": 1.0, "B": 0.0, "C": 0.0},
+            current_cash=0.0,
+            monthly_budget=500.0,
+            buy_fees={},
+            sell_fees={},
+            investment_limits={"A": {"monthly_limit": 100.0}},
+            timestamp=date(2026, 7, 16),
+            allocation_method="constrained_tracking",
+            execution_covariance=pd.DataFrame(
+                0.01,
+                index=["A", "B", "C"],
+                columns=["A", "B", "C"],
+            ),
+            substitute_for=substitute_for,
+        )
+
+
+def test_current_recommendation_reports_limit_substitute_purchase():
+    dates = pd.date_range("2024-01-31", periods=13, freq="ME")
+    returns = [0.02, -0.01, 0.015, -0.005, 0.018, -0.012] * 2
+    nav = pd.DataFrame(
+        {
+            "A": [1.0, *pd.Series([1 + value for value in returns]).cumprod()],
+            "B": [
+                1.0,
+                *pd.Series([1 + 0.95 * value for value in returns]).cumprod(),
+            ],
+        },
+        index=dates,
+    )
+    request = CurrentRecommendationRequest(
+        fund_codes=["A", "B"],
+        weights={"A": 1.0, "B": 0.0},
+        current_holdings={},
+        monthly_budget=500.0,
+        strategy_mode="legacy_linear",
+        min_weight=1.0,
+        max_weight=1.0,
+        fund_investment_limits={"A": {"monthly_limit": 100.0}},
+        substitute_for={"B": "A"},
+    )
+
+    with patch(
+        "api.routes.get_fund_data",
+        return_value=(nav, {"A": "Preferred", "B": "Proxy"}, []),
+    ):
+        recommendation = asyncio.run(get_current_recommendation(request))
+
+    advice = {item["code"]: item for item in recommendation["fund_advice"]}
+    assert advice["A"]["amount"] == pytest.approx(100.0)
+    assert advice["B"]["amount"] > 300.0
+    assert advice["B"]["buy_source"] == "limit_substitute"
+    assert recommendation["execution_allocation"]["fallback_used"] is False
+    assert recommendation["execution_allocation"]["substitute_purchases"]["B"] > 0
+
+
+def test_current_recommendation_exposes_per_fund_unspent_reason():
+    dates = pd.date_range("2024-01-31", periods=13, freq="ME")
+    nav = pd.DataFrame({"A": [1.0] * 13, "B": [1.0] * 13}, index=dates)
+    request = CurrentRecommendationRequest(
+        fund_codes=["A", "B"],
+        weights={"A": 0.5, "B": 0.5},
+        current_holdings={"B": 50.0},
+        current_cash=100.0,
+        monthly_budget=100.0,
+        strategy_mode="legacy_linear",
+        min_weight=1.0,
+        max_weight=1.0,
+    )
+
+    with patch(
+        "api.routes.get_fund_data",
+        return_value=(nav, {"A": "Fund A", "B": "Fund B"}, []),
+    ):
+        recommendation = asyncio.run(get_current_recommendation(request))
+
+    advice = {
+        item["code"]: item
+        for item in recommendation["fund_advice"]
+        if item["code"] in {"A", "B"}
+    }
+    assert all(
+        item["unspent_reason"] == "monthly_budget_exhausted" for item in advice.values()
+    )
+    assert all("低位观察不额外定投" not in item["reason"] for item in advice.values())
+    diagnostics = recommendation["execution_allocation"]
+    assert diagnostics["unspent_reason"] is None
+    assert diagnostics["unspent_reason_labels"] == {
+        "A": "月度 DCA 预算已分配完",
+        "B": "月度 DCA 预算已分配完",
+    }
+
+
+def test_backtest_only_uses_substitute_after_lagged_covariance_is_available():
+    dates = pd.date_range("2024-01-31", periods=8, freq="ME")
+    returns = [0.02, -0.01, 0.015, -0.005, 0.018, -0.012, 0.01]
+    nav = pd.DataFrame(
+        {
+            "A": [1.0, *pd.Series([1 + value for value in returns]).cumprod()],
+            "B": [
+                1.0,
+                *pd.Series([1 + 0.95 * value for value in returns]).cumprod(),
+            ],
+        },
+        index=dates,
+    )
+
+    result = backtest_kelly_dca(
+        nav,
+        {"A": 1.0, "B": 0.0},
+        monthly_investment=500.0,
+        min_weight=1.0,
+        max_weight=1.0,
+        strategy_mode="legacy_linear",
+        fund_investment_limits={"A": {"monthly_limit": 100.0}},
+        substitute_for={"B": "A"},
+        execution_allocation_method="constrained_tracking",
+        estimation_window=6,
+    )
+
+    executions = list(result["execution"].values())
+    assert executions[0]["funds"]["B"]["gross_buy"] == 0.0
+    assert any(
+        month["funds"]["B"]["gross_buy"] > 0
+        and month["allocation_diagnostics"]["fallback_used"] is False
+        for month in executions[4:]
+    )
 
 
 def test_execute_monthly_plan_rejects_unknown_current_holding():

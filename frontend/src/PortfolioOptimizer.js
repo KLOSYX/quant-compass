@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
-import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download } from 'lucide-react';
+import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download, RotateCcw, ChevronDown } from 'lucide-react';
 import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
 import { downloadPortfolioReport } from './exportPortfolioReport';
 
@@ -11,6 +11,16 @@ const formatDD = (obj, key, fallbackKey) => {
     if (val === undefined || val === null) return '--';
     return `${(val * 100).toFixed(2)}%`;
 };
+const formatPercentValue = (value, digits = 2) => (
+    value === undefined || value === null || !Number.isFinite(Number(value))
+        ? '--'
+        : `${(Number(value) * 100).toFixed(digits)}%`
+);
+const formatRatio = (value, digits = 2) => (
+    value === undefined || value === null || !Number.isFinite(Number(value))
+        ? '--'
+        : Number(value).toFixed(digits)
+);
 
 // Format money values for better readability (e.g., 1234567 -> "123.46万")
 const formatMoney = (value) => {
@@ -84,6 +94,30 @@ export const ASSET_CATEGORY_OPTIONS = ['equity', 'bond', 'commodity', 'gold', 'm
 export const buildAssetCategoriesPayload = (fundCodes, categories = {}) => Object.fromEntries(
     fundCodes.map(code => [code, ASSET_CATEGORY_OPTIONS.includes(categories[code]) ? categories[code] : 'other'])
 );
+export const buildSubstituteForPayload = (fundCodes, relationships = {}) => {
+    const currentCodes = new Set(fundCodes);
+    return Object.fromEntries(
+        fundCodes
+            .map(code => [code, String(relationships[code] || '').trim()])
+            .filter(([code, primary]) => primary && primary !== code && currentCodes.has(primary))
+    );
+};
+export const getRecommendedFrontierPoint = (analysis) => {
+    const index = analysis?.recommended_point_index;
+    if (!Number.isInteger(index) || index < 0) return null;
+    return analysis?.efficient_frontier?.[index] || null;
+};
+export const getRecommendationEvidence = (analysis) => {
+    const point = getRecommendedFrontierPoint(analysis);
+    const selection = analysis?.recommended_point_selection;
+    if (!point || !selection) return null;
+    return {
+        point,
+        eligibleCount: selection.eligible_count ?? 0,
+        totalCount: selection.total_count ?? analysis?.efficient_frontier?.length ?? 0,
+        confidence: selection.confidence || 'none'
+    };
+};
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -91,6 +125,13 @@ function PortfolioOptimizer() {
     const [fundBuyFees, setFundBuyFees] = useState({});
     const [fundSellFees, setFundSellFees] = useState({});
     const [fundInvestmentLimits, setFundInvestmentLimits] = useState({});
+    const [fundSubstituteFor, setFundSubstituteFor] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('fundSubstituteFor') || '{}');
+        } catch (_) {
+            return {};
+        }
+    });
     const [fundNames, setFundNames] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem('fundNames') || '{}');
@@ -153,6 +194,9 @@ function PortfolioOptimizer() {
     const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
     const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
     const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
+    const [plannedPurchaseDays, setPlannedPurchaseDays] = useState(
+        () => getStoredNumber('plannedPurchaseDays', 1)
+    );
     const [strategyResult, setStrategyResult] = useState(null);
     const [recommendationResult, setRecommendationResult] = useState(null);
     const [error, setError] = useState(null);
@@ -254,6 +298,11 @@ function PortfolioOptimizer() {
         const newFundFees = { ...fundFees };
         const newFundInvestmentLimits = { ...fundInvestmentLimits };
         const newFundAssetCategories = { ...fundAssetCategories };
+        const newSubstituteFor = Object.fromEntries(
+            Object.entries(fundSubstituteFor).filter(
+                ([substitute, primary]) => substitute !== codeToRemove && primary !== codeToRemove
+            )
+        );
         delete newFundFees[codeToRemove];
         delete newFundInvestmentLimits[codeToRemove];
         delete newFundAssetCategories[codeToRemove];
@@ -261,10 +310,12 @@ function PortfolioOptimizer() {
         setFundFees(newFundFees);
         setFundInvestmentLimits(newFundInvestmentLimits);
         setFundAssetCategories(newFundAssetCategories);
+        setFundSubstituteFor(newSubstituteFor);
         localStorage.setItem('fundCodes', JSON.stringify(newFundCodes));
         localStorage.setItem('fundFees', JSON.stringify(newFundFees));
         localStorage.setItem('fundInvestmentLimits', JSON.stringify(newFundInvestmentLimits));
         localStorage.setItem('fundAssetCategories', JSON.stringify(newFundAssetCategories));
+        localStorage.setItem('fundSubstituteFor', JSON.stringify(newSubstituteFor));
     };
 
     const handleFeeChange = (code, fee) => {
@@ -302,6 +353,18 @@ function PortfolioOptimizer() {
         clearAnalysisOutputs();
         setFundAssetCategories(newCategories);
         localStorage.setItem('fundAssetCategories', JSON.stringify(newCategories));
+    };
+
+    const handleSubstituteForChange = (code, primary) => {
+        const newRelationships = { ...fundSubstituteFor };
+        if (primary) {
+            newRelationships[code] = primary;
+        } else {
+            delete newRelationships[code];
+        }
+        clearAnalysisOutputs();
+        setFundSubstituteFor(newRelationships);
+        localStorage.setItem('fundSubstituteFor', JSON.stringify(newRelationships));
     };
 
     const buildFundInvestmentLimitsPayload = () => {
@@ -364,6 +427,8 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: startDate,
                 end_date: endDate,
                 strategy_mode: strategyMode,
@@ -441,6 +506,8 @@ function PortfolioOptimizer() {
                 weights,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
@@ -530,6 +597,8 @@ function PortfolioOptimizer() {
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
+                substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
+                planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
@@ -612,6 +681,7 @@ function PortfolioOptimizer() {
         const { risk: chartRisk } = selected;
         setSelectedPoint(selected);
         setStrategyResult(null);
+        setRecommendationResult(null);
 
         // Auto-tune parameters based on risk/return profile
         // Find relative position in the frontier
@@ -641,13 +711,27 @@ function PortfolioOptimizer() {
         }
     };
 
+    const handleResetToRecommendedPoint = () => {
+        const recommended = getRecommendedFrontierPoint(analysisResult);
+        if (!recommended) return;
+        setSelectedPoint(recommended);
+        setStrategyResult(null);
+        setRecommendationResult(null);
+        setBudgetError('');
+    };
+
     const getFrontierOptions = () => {
         if (!analysisResult) return {};
 
         const frontierData = analysisResult.efficient_frontier.map(p => [
             p.risk,
             p.return,
-            p.weights
+            p.weights,
+            p.frontier_walk_forward_sharpe,
+            p.frontier_walk_forward_annualized_return,
+            p.frontier_walk_forward_max_drawdown,
+            p.frontier_walk_forward_weight_stability,
+            p.frontier_recommendation_eligible
         ]);
         const xName = t('theoretical_vol');
         const yName = t('expected_return');
@@ -655,30 +739,65 @@ function PortfolioOptimizer() {
 
         return {
             backgroundColor: 'transparent',
-            textStyle: { color: '#F8FAFC' },
-            title: { text: `${t('efficient_frontier')} ${titleSuffix}`, left: 'center', textStyle: { fontSize: 16, color: '#F8FAFC' } },
+            textStyle: { color: '#b1b5ab', fontFamily: 'Outfit, Microsoft YaHei, sans-serif' },
+            title: {
+                text: `${t('efficient_frontier')} ${titleSuffix}`,
+                left: 'center',
+                top: 8,
+                textStyle: { fontSize: 15, fontWeight: 600, color: '#f3f0e8' }
+            },
             tooltip: {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
                     const ret = (p.data[1] * 100).toFixed(2);
-                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%`;
+                    const oosSharpe = Number.isFinite(Number(p.data[3])) ? Number(p.data[3]).toFixed(2) : '--';
+                    const oosReturn = Number.isFinite(Number(p.data[4])) ? `${(Number(p.data[4]) * 100).toFixed(2)}%` : '--';
+                    const oosDrawdown = Number.isFinite(Number(p.data[5])) ? `${(Number(p.data[5]) * 100).toFixed(2)}%` : '--';
+                    const stability = Number.isFinite(Number(p.data[6])) ? `${(Number(p.data[6]) * 100).toFixed(1)}%` : '--';
+                    const eligible = p.data[7] ? t('recommendation_eligible') : t('recommendation_not_eligible');
+                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%<br/><br/><b>${t('recommendation_oos_evidence')}</b><br/>${t('walk_forward_return')}: ${oosReturn}<br/>${t('oos_excess_sharpe')}: ${oosSharpe}<br/>${t('walk_forward_max_dd')}: ${oosDrawdown}<br/>${t('walk_forward_stability')}: ${stability}<br/>${eligible}`;
                 }
             },
             xAxis: {
                 type: 'value',
                 name: xName,
-                axisLabel: { formatter: (v) => `${(v * 100).toFixed(2)}%`, color: '#94A3B8' },
-                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+                nameGap: 18,
+                axisLabel: { formatter: (v) => `${(v * 100).toFixed(2)}%`, color: '#7d8478' },
+                axisLine: { lineStyle: { color: 'rgba(218,224,210,0.22)' } },
+                splitLine: { lineStyle: { color: 'rgba(218,224,210,0.07)' } },
                 min: 'dataMin'
             },
             yAxis: {
                 type: 'value',
                 name: yName,
-                axisLabel: { formatter: (v) => `${(v * 100).toFixed(1)}%`, color: '#94A3B8' },
-                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+                nameGap: 22,
+                axisLabel: { formatter: (v) => `${(v * 100).toFixed(1)}%`, color: '#7d8478' },
+                axisLine: { lineStyle: { color: 'rgba(218,224,210,0.22)' } },
+                splitLine: { lineStyle: { color: 'rgba(218,224,210,0.07)' } },
                 min: 'dataMin'
             },
-            series: [{ type: 'scatter', data: frontierData, symbolSize: 10, itemStyle: { color: '#3B82F6' } }]
+            grid: { top: 72, right: 64, bottom: 52, left: 64, containLabel: true },
+            series: [
+                {
+                    type: 'scatter',
+                    data: frontierData,
+                    symbolSize: 10,
+                    itemStyle: { color: '#8da7a4', opacity: 0.88 }
+                },
+                {
+                    name: t('selected_point'),
+                    type: 'scatter',
+                    silent: true,
+                    data: selectedPoint ? [[selectedPoint.risk, selectedPoint.return]] : [],
+                    symbolSize: 18,
+                    itemStyle: {
+                        color: '#d9a441',
+                        borderColor: '#f3f0e8',
+                        borderWidth: 2
+                    },
+                    z: 10
+                }
+            ]
         };
     };
 
@@ -754,19 +873,23 @@ function PortfolioOptimizer() {
 
 
 
+    const recommendedPoint = getRecommendedFrontierPoint(analysisResult);
+    const recommendationEvidence = getRecommendationEvidence(analysisResult);
+    const isRecommendedPointSelected = recommendedPoint === selectedPoint;
+
     return (
         <div className="portfolio-optimizer">
             <form onSubmit={handleAnalysisSubmit} className="main-form">
-                <div className="app-main">
-                    <div className="half-width p-0">
-                        <div className="dashboard-card h-full">
+                <div className="workspace-grid">
+                    <section className="workspace-pane assets-pane">
+                        <div className="dashboard-card card-fill">
                             <div className="card-header">
                                 <h3 className="card-title"><Wallet size={20} className="card-icon" /> {t('asset_config_title')}</h3>
                             </div>
 
                             <div className="form-group">
                                 <label className="form-label" htmlFor="fundCodeInput">{t('add_fund_label')}</label>
-                                <div className="flex gap-2">
+                                <div className="inline-actions">
                                     <input
                                         type="text"
                                         id="fundCodeInput"
@@ -783,15 +906,16 @@ function PortfolioOptimizer() {
                                 </div>
                             </div>
 
-                            {fundCodes.length > 0 && <div className="border-t border-glass my-4"></div>}
+                            {fundCodes.length > 0 && <div className="section-divider" />}
 
-                            <div className="asset-list-scroll space-y-3 max-h-[400px] pr-2">
+                            <div className="asset-list-scroll asset-list-stack">
                                 {fundCodes.length > 0 && (
                                     <>
                                         <>
                                             <div className="asset-list-header">
                                                 <div>{t('header_fund')}</div>
                                                 <div>{t('header_asset_category')}</div>
+                                                <div>{t('header_substitute_for')}</div>
                                                 <div>{t('header_buy')}</div>
                                                 <div>{t('header_sell')}</div>
                                                 <div>{t('header_manage')}</div>
@@ -814,6 +938,25 @@ function PortfolioOptimizer() {
                                                             ))}
                                                         </select>
                                                     </label>
+                                                    <label className="asset-field">
+                                                        <span className="asset-mobile-label">{t('header_substitute_for')}</span>
+                                                        <select
+                                                            className="asset-input-small"
+                                                            value={fundSubstituteFor[code] || ''}
+                                                            onChange={(e) => handleSubstituteForChange(code, e.target.value)}
+                                                            disabled={Object.values(fundSubstituteFor).includes(code)}
+                                                            title={Object.values(fundSubstituteFor).includes(code) ? t('substitute_primary_locked') : t('substitute_for_help')}
+                                                        >
+                                                            <option value="">{t('substitute_none')}</option>
+                                                            {fundCodes
+                                                                .filter(primary => primary !== code && !fundSubstituteFor[primary])
+                                                                .map(primary => (
+                                                                    <option key={primary} value={primary}>
+                                                                        {fundNames[primary] || primary}
+                                                                    </option>
+                                                                ))}
+                                                        </select>
+                                                    </label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_buy')}</span><input type="number" step="0.01" className="asset-input-small" value={fundBuyFees[code] || ''} onChange={(e) => handleBuyFeeChange(code, e.target.value)} placeholder="0.15" /></label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_sell')}</span><input type="number" step="0.01" className="asset-input-small" value={fundSellFees[code] || ''} onChange={(e) => handleSellFeeChange(code, e.target.value)} placeholder="0.5" /></label>
                                                     <label className="asset-field"><span className="asset-mobile-label">{t('header_manage')}</span><input type="number" step="0.01" className="asset-input-small" value={fundFees[code] || ''} onChange={(e) => handleFeeChange(code, e.target.value)} placeholder="0.6" /></label>
@@ -827,14 +970,14 @@ function PortfolioOptimizer() {
                                 )}
                             </div>
                         </div>
-                    </div>
+                    </section>
 
-                    <div className="half-width p-0">
-                        <div className="dashboard-card mb-6">
+                    <section className="workspace-pane backtest-pane">
+                        <div className="dashboard-card">
                             <div className="card-header">
                                 <h3 className="card-title"><Calendar size={20} className="card-icon" /> {t('backtest_title')}</h3>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="form-grid two-col">
                                 <div className="form-group">
                                     <label className="form-label">{t('start_date')}</label>
                                     <input type="date" className="form-input" value={startDate} onChange={(e) => { clearAnalysisOutputs(); setStartDate(e.target.value); localStorage.setItem('startDate', e.target.value); }} />
@@ -844,46 +987,95 @@ function PortfolioOptimizer() {
                                     <input type="date" className="form-input" value={endDate} onChange={(e) => { clearAnalysisOutputs(); setEndDate(e.target.value); localStorage.setItem('endDate', e.target.value); }} />
                                 </div>
                             </div>
-                            <div className="flex gap-2 mt-4">
+                            <div className="inline-actions date-presets">
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(1)}>{t('last_1_year')}</button>
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(3)}>{t('last_3_years')}</button>
                                 <button type="button" className="btn btn-secondary text-sm py-1" onClick={() => setDateRange(5)}>{t('last_5_years')}</button>
                             </div>
                         </div>
-                        <button type="submit" className="btn btn-primary w-full py-4 text-lg shadow-lg-glow" disabled={loading.analysis || fundCodes.length === 0}>
+                        <button type="submit" className="btn btn-primary analyze-button" disabled={loading.analysis || fundCodes.length === 0}>
                             {loading.analysis ? t('analyzing') : t('analyze_btn')} <ArrowRight size={20} />
                         </button>
-                    </div>
+                    </section>
                 </div>
             </form>
 
-            {error && <div role="alert" className="m-8 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500"></div>{error}</div>}
+            {error && <div role="alert" className="inline-alert inline-alert-danger"><span className="alert-dot" />{error}</div>}
 
             {analysisResult && (
-                <div className="app-main pt-0">
-                    <div className="full-width">
+                <div className="results-stack">
+                    <section className="workspace-section">
                         <div className="dashboard-card">
                             <div className="card-header justify-between">
                                 <h3 className="card-title"><TrendingUp size={20} className="card-icon" /> {t('step_2_title')}</h3>
                             </div>
 
                             {analysisResult.warnings?.length > 0 && (
-                                <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                                    {analysisResult.warnings.map((w, i) => <p key={i} className="text-yellow-500 text-sm flex items-center gap-2"><Info size={14} /> {w}</p>)}
-                                </div>
+                                <details className="methodology-notes">
+                                    <summary>
+                                        <span className="methodology-summary-icon"><Info size={15} /></span>
+                                        <span className="methodology-summary-copy">
+                                            <strong>{t('methodology_notes_title')}</strong>
+                                            <small>{t('methodology_notes_summary').replace('{count}', analysisResult.warnings.length)}</small>
+                                        </span>
+                                        <ChevronDown className="methodology-chevron" size={17} aria-hidden="true" />
+                                    </summary>
+                                    <div className="methodology-list">
+                                        {analysisResult.warnings.map((warning, index) => (
+                                            <div className="methodology-item" key={index}>
+                                                <span>{String(index + 1).padStart(2, '0')}</span>
+                                                <p>{warning}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </details>
                             )}
 
-                            <ReactECharts option={getFrontierOptions()} style={{ height: 400 }} onEvents={{ 'click': onChartClick }} />
+                            <ReactECharts className="frontier-chart" option={getFrontierOptions()} style={{ height: 430 }} onEvents={{ 'click': onChartClick }} />
                             <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
+                            {recommendationEvidence && (
+                                <div data-testid="recommendation-evidence" className="evidence-card">
+                                    <div className="evidence-card-header">
+                                        <h4>{t('recommendation_basis_title')}</h4>
+                                        <span>
+                                            {t('recommendation_candidates')
+                                                .replace('{eligible}', recommendationEvidence.eligibleCount)
+                                                .replace('{total}', recommendationEvidence.totalCount)}
+                                        </span>
+                                    </div>
+                                    <p className="evidence-copy">{t('recommendation_basis_explanation')}</p>
+                                    <div className="evidence-metrics">
+                                        <div>
+                                            <div className="metric-label">{t('oos_excess_sharpe')}</div>
+                                            <div className="metric-value metric-neutral">{formatRatio(recommendationEvidence.point.frontier_walk_forward_sharpe)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="metric-label">{t('walk_forward_return')}</div>
+                                            <div className="metric-value metric-success">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_annualized_return)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="metric-label">{t('walk_forward_max_dd')}</div>
+                                            <div className="metric-value metric-warning">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_max_drawdown)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="metric-label">{t('walk_forward_stability')}</div>
+                                            <div className="metric-value metric-violet">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_weight_stability, 1)}</div>
+                                        </div>
+                                    </div>
+                                    {recommendationEvidence.confidence === 'limited' && (
+                                        <p className="evidence-caveat">{t('recommendation_limited_confidence')}</p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <AssetDiagnosticsPanel diagnostics={analysisResult.asset_diagnostics} />
                         {analysisResult.covariance_ablation && (
-                            <div className="dashboard-card mt-4">
+                            <div className="dashboard-card evidence-panel">
                                 <div className="card-header">
                                     <h3 className="card-title">{t('covariance_ablation_title')}</h3>
                                 </div>
-                                <p className="text-sm text-slate-300">{t('covariance_ablation_note')}</p>
-                                <div className={`mt-3 rounded-lg border p-3 text-sm ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'border-emerald-500/40 bg-emerald-900/10 text-emerald-300' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                                <p className="panel-copy">{t('covariance_ablation_note')}</p>
+                                <div className={`state-notice ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'state-success' : 'state-neutral'}`}>
                                     {analysisResult.covariance_ablation.promotion_status === 'candidate'
                                         ? t('covariance_candidate')
                                         : t('covariance_retain_fixed')}
@@ -921,39 +1113,52 @@ function PortfolioOptimizer() {
                                 </div>
                             </div>
                         )}
-                    </div>
+                    </section>
 
                     {selectedPoint && (
-                        <div className="full-width">
+                        <section className="workspace-section">
                             <div className="dashboard-card">
                                 <div className="card-header">
                                     <h3 className="card-title"><Settings size={20} className="card-icon" /> {t('strategy_title')}</h3>
                                 </div>
-                                <div className="space-y-6">
-                                    <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                <div className="strategy-stack">
+                                    <div className="strategy-callout">
                                         {analysisResult?.recommended_point_index !== null && analysisResult?.recommended_point_index !== undefined && analysisResult?.efficient_frontier?.[analysisResult.recommended_point_index] === selectedPoint && (
                                             <div className="text-sm text-sky-400 font-medium mb-2">{t('auto_selected_plan')}</div>
                                         )}
-                                        <p className="text-sm text-slate-300">{t('manual_override_hint')}</p>
-                                        <button className="text-link-btn mt-3" onClick={() => setShowPortfolioDetails(prev => !prev)}>
-                                            <Settings size={14} />
-                                            {showPortfolioDetails ? t('hide_base_portfolio') : t('view_base_portfolio')}
-                                        </button>
+                                        <p className="panel-copy">{t('manual_override_hint')}</p>
+                                        <div className="inline-actions strategy-actions">
+                                            {recommendedPoint && (
+                                                <button
+                                                    type="button"
+                                                    className="text-link-btn"
+                                                    onClick={handleResetToRecommendedPoint}
+                                                    disabled={isRecommendedPointSelected}
+                                                >
+                                                    <RotateCcw size={14} />
+                                                    {t('reset_to_recommended_point')}
+                                                </button>
+                                            )}
+                                            <button type="button" className="text-link-btn" onClick={() => setShowPortfolioDetails(prev => !prev)}>
+                                                <Settings size={14} />
+                                                {showPortfolioDetails ? t('hide_base_portfolio') : t('view_base_portfolio')}
+                                            </button>
+                                        </div>
                                         {showPortfolioDetails && (
-                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-                                                <div className="p-4 bg-slate-950/40 rounded-lg">
-                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('selected_metrics')}</h4>
-                                                    <div className="flex justify-between mb-2">
+                                            <div className="details-grid">
+                                                <div className="detail-panel">
+                                                    <h4>{t('selected_metrics')}</h4>
+                                                    <div className="detail-row">
                                                         <span>{t('expected_return')}</span>
-                                                        <span className="text-emerald-400 font-mono font-bold">{(selectedPoint.return * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-success">{(selectedPoint.return * 100).toFixed(2)}%</span>
                                                     </div>
-                                                    <div className="flex justify-between">
+                                                    <div className="detail-row">
                                                         <span>{t('expected_risk')}</span>
-                                                        <span className="text-amber-400 font-mono font-bold">{(selectedPoint.risk * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-warning">{(selectedPoint.risk * 100).toFixed(2)}%</span>
                                                     </div>
                                                 </div>
-                                                <div className="p-4 bg-slate-950/40 rounded-lg">
-                                                    <h4 className="text-slate-400 text-sm uppercase mb-4">{t('base_portfolio')}</h4>
+                                                <div className="detail-panel">
+                                                    <h4>{t('base_portfolio')}</h4>
                                                     <table className="data-table">
                                                         <thead><tr><th>{t('header_fund')}</th><th>{t('effective_risky_weight')}</th></tr></thead>
                                                         <tbody>
@@ -971,9 +1176,9 @@ function PortfolioOptimizer() {
                                     </div>
 
                                     <div>
-                                        <h5 className="text-lg font-medium mb-4 flex items-center gap-2"><DollarSign size={18} className="text-sky-400" /> {t('current_holdings_monthly')}</h5>
+                                        <h5 className="subsection-title"><DollarSign size={18} /> {t('current_holdings_monthly')}</h5>
 
-                                        <div className="grid grid-cols-2 gap-6 mb-6">
+                                        <div className="holdings-input-grid">
                                             <div>
                                                 <label className="form-label">{t('current_cash')}</label>
                                                 <input type="number" className="form-input" value={currentCash} onChange={(e) => { setCurrentCash(e.target.value); localStorage.setItem('currentCash', e.target.value); }} placeholder="0" />
@@ -984,7 +1189,7 @@ function PortfolioOptimizer() {
                                             </div>
                                         </div>
 
-                                        <div className="mb-6">
+                                        <div className="holdings-table-wrap">
                                             <table className="data-table">
                                                 <thead><tr><th>{t('current_holding_val')}</th><th>{t('input_amount')}</th></tr></thead>
                                                 <tbody>
@@ -998,13 +1203,13 @@ function PortfolioOptimizer() {
                                             </table>
                                         </div>
 
-                                        <button className="text-link-btn mb-4" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
+                                        <button className="text-link-btn advanced-toggle" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
                                             <Settings size={14} />
                                             {showAdvancedParams ? t('collapse_advanced') : t('expand_advanced')}
                                         </button>
 
                                         {showAdvancedParams && (
-                                            <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 mb-6 grid grid-cols-2 gap-4">
+                                            <div className="advanced-controls">
                                                 <div className="form-group col-span-2">
                                                     <label className="form-label text-xs">{t('strategy_mode')}</label>
                                                     <select
@@ -1019,6 +1224,11 @@ function PortfolioOptimizer() {
                                                         <option value="legacy_linear">{t('mode_legacy_linear')}</option>
                                                     </select>
                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label className="form-label text-xs">{t('planned_purchase_days')}</label>
+                                                    <input className="form-input text-sm" type="number" step="1" min="1" value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('plannedPurchaseDays', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('planned_purchase_days_help')}</p>
                                                 </div>
                                                 <div className="form-group">
                                                     <label className="form-label text-xs">{t('min_equity_ratio')}</label>
@@ -1115,24 +1325,24 @@ function PortfolioOptimizer() {
                                             </div>
                                         )}
 
-                                        <button className="btn btn-primary w-full" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
+                                        <button className="btn btn-primary strategy-submit" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
                                             {loading.strategy ? t('analyzing') : t('start_analysis_btn')}
                                         </button>
                                         {budgetError && (
-                                            <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm flex items-center gap-2">
-                                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                            <div className="inline-alert inline-alert-danger">
+                                                <span className="alert-dot"></span>
                                                 {budgetError}
                                             </div>
                                         )}
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                    </section>
                     )}
 
                     {strategyResult && (
-                        <div className="full-width">
-                            <div className="dashboard-card mb-6">
+                        <section className="workspace-section">
+                            <div className="dashboard-card backtest-card">
                                 <div className="card-header">
                                     <h3 className="card-title">{t('backtest_compare')}</h3>
                                     <div
@@ -1189,7 +1399,7 @@ function PortfolioOptimizer() {
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 mt-6">
+                                <div className="chart-grid">
                                     <div><ReactECharts option={getStrategyChartOptions('ideal_kelly_dca')} style={{ height: 300 }} /></div>
                                     {strategyResult.actual_kelly_dca && (
                                         <div><ReactECharts option={getStrategyChartOptions('actual_kelly_dca')} style={{ height: 300 }} /></div>
@@ -1197,15 +1407,29 @@ function PortfolioOptimizer() {
                                 </div>
 
                                 {strategyResult.walk_forward?.status === 'ok' && (
-                                    <div className="mt-8 overflow-x-auto">
+                                    <div className="audit-panel">
                                         <h4 className="text-lg font-semibold text-sky-400 mb-2">{t('executable_walk_forward_title')}</h4>
-                                        <p className="text-xs text-slate-400 mb-4">{t('executable_walk_forward_note')}</p>
-                                        <table className="data-table min-w-[900px]">
+                                        <p className="text-xs text-slate-400 mb-2">{t('executable_walk_forward_note')}</p>
+                                        <p className="text-xs text-emerald-300 mb-4">{t('wf_unit_nav_basis')}</p>
+                                        {strategyResult.walk_forward.strategies.full_strategy?.evidence_quality?.status === 'low' && (
+                                            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-900/10 p-3 text-xs text-amber-200">
+                                                {t('wf_low_evidence')
+                                                    .replace('{months}', strategyResult.walk_forward.strategies.full_strategy.evidence_quality.evaluation_months)
+                                                    .replace('{tail}', strategyResult.walk_forward.strategies.full_strategy.cvar_tail_observations)
+                                                    .replace('{downside}', strategyResult.walk_forward.strategies.full_strategy.sortino_downside_observations)}
+                                            </div>
+                                        )}
+                                        <table className="data-table min-w-[1500px]">
                                             <thead>
                                                 <tr>
                                                     <th>{t('wf_strategy')}</th>
                                                     <th>{t('walk_forward_return')}</th>
+                                                    <th>{t('walk_forward_vol')}</th>
+                                                    <th>{t('walk_forward_sharpe')}</th>
+                                                    <th>{t('wf_sortino')}</th>
                                                     <th>{t('walk_forward_max_dd')}</th>
+                                                    <th>{t('wf_worst_month')}</th>
+                                                    <th>{t('wf_cvar')}</th>
                                                     <th>{t('wf_final_wealth')}</th>
                                                     <th>{t('wf_fees')}</th>
                                                     <th>{t('wf_avg_cash')}</th>
@@ -1216,23 +1440,90 @@ function PortfolioOptimizer() {
                                                 {Object.entries(strategyResult.walk_forward.strategies).map(([name, metrics]) => (
                                                     <tr key={name} className={name === 'full_strategy' ? 'bg-sky-500/5' : ''}>
                                                         <td>{t(`wf_${name}`)}</td>
-                                                        <td>{(metrics.annualized_return * 100).toFixed(2)}%</td>
-                                                        <td>{(metrics.max_drawdown * 100).toFixed(2)}%</td>
+                                                        <td>{formatPercentValue(metrics.annualized_return)}</td>
+                                                        <td>{formatPercentValue(metrics.annualized_volatility)}</td>
+                                                        <td>{formatRatio(metrics.sharpe)}</td>
+                                                        <td>{formatRatio(metrics.sortino)}</td>
+                                                        <td>{formatPercentValue(metrics.max_drawdown)}</td>
+                                                        <td>{formatPercentValue(metrics.worst_month)}</td>
+                                                        <td>{formatPercentValue(metrics.cvar_loss)}</td>
                                                         <td>¥{metrics.final_wealth.toFixed(2)}</td>
                                                         <td>¥{metrics.total_transaction_fees.toFixed(2)}</td>
-                                                        <td>{(metrics.average_cash_exposure * 100).toFixed(2)}%</td>
-                                                        <td>{(metrics.average_execution_deviation * 100).toFixed(2)}%</td>
+                                                        <td>{formatPercentValue(metrics.average_cash_exposure)}</td>
+                                                        <td>{formatPercentValue(metrics.average_execution_deviation)}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
+                                        {strategyResult.walk_forward.strategies.full_strategy && (() => {
+                                            const full = strategyResult.walk_forward.strategies.full_strategy;
+                                            const categoryEntries = Object.entries(full.average_asset_category_exposures || {})
+                                                .filter(([, exposure]) => exposure > 0.00005);
+                                            return (
+                                                <>
+                                            <div className="audit-evidence-grid">
+                                                <div className="diagnostic-card diagnostic-info">
+                                                    <div className="diagnostic-title">{t('wf_frontier_transmission_title')}</div>
+                                                    <div className="diagnostic-copy">
+                                                                {t('wf_avg_target_change')}: {formatPercentValue(full.average_frontier_target_weight_change)}
+                                                                {' · '}{t('wf_avg_actual_change')}: {formatPercentValue(full.average_actual_basket_weight_change)}
+                                                                {' · '}{t('wf_avg_transmission')}: {formatPercentValue(full.average_frontier_change_transmission)}
+                                                            </div>
+                                                        </div>
+                                                <div className="diagnostic-card diagnostic-success">
+                                                    <div className="diagnostic-title">{t('wf_avg_category_exposure')}</div>
+                                                    <div className="diagnostic-copy diagnostic-list">
+                                                                {categoryEntries.map(([category, exposure]) => (
+                                                                    <span key={category}>{t(`asset_category_${category}`)} {formatPercentValue(exposure)}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <details className="audit-details">
+                                                        <summary>{t('wf_monthly_audit')}</summary>
+                                                        <div className="audit-details-scroll">
+                                                            <table className="data-table min-w-[1200px]">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>{t('wf_month')}</th>
+                                                                        <th>{t('wf_full_kelly_raw')}</th>
+                                                                        <th>{t('wf_fractional_kelly_raw')}</th>
+                                                                        <th>{t('wf_kelly_clipped')}</th>
+                                                                        <th>{t('wf_actual_position')}</th>
+                                                                        <th>{t('wf_kelly_changed_trade')}</th>
+                                                                        <th>{t('wf_target_weight_change')}</th>
+                                                                        <th>{t('wf_actual_weight_change')}</th>
+                                                                        <th>{t('wf_transmission')}</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {(full.data_access_audit || []).map((month) => (
+                                                                        <tr key={month.realized_date}>
+                                                                            <td>{month.realized_date?.slice(0, 7)}</td>
+                                                                            <td>{formatPercentValue(month.full_kelly_raw)}</td>
+                                                                            <td>{formatPercentValue(month.fractional_kelly_raw)}</td>
+                                                                            <td>{formatPercentValue(month.kelly_clipped_target)}</td>
+                                                                            <td>{formatPercentValue(month.actual_fund_position)}</td>
+                                                                            <td>{month.kelly_changed_trade ? t('wf_yes') : t('wf_no')}</td>
+                                                                            <td>{formatPercentValue(month.frontier_target_weight_change)}</td>
+                                                                            <td>{formatPercentValue(month.actual_basket_weight_change)}</td>
+                                                                            <td>{formatPercentValue(month.frontier_change_transmission)}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </details>
+                                                </>
+                                            );
+                                        })()}
                                         {strategyResult.walk_forward.kelly_window_comparison?.status === 'selected' && (
-                                            <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-900/10 p-3">
-                                                <div className="text-sm font-semibold text-sky-300">
+                                            <div className="diagnostic-card diagnostic-info">
+                                                <div className="diagnostic-title">
                                                     {t('kelly_window_platform')}: {strategyResult.walk_forward.kelly_window_comparison.selected_window_months} {t('months')}
                                                 </div>
-                                                <p className="mt-1 text-xs text-slate-400">{t('kelly_window_platform_note')}</p>
-                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                                <p className="diagnostic-copy">{t('kelly_window_platform_note')}</p>
+                                                <div className="diagnostic-copy diagnostic-list">
                                                     {strategyResult.walk_forward.kelly_window_comparison.windows.map((item) => (
                                                         <span key={item.window_months}>
                                                             {item.window_months}{t('month_short')}: {(item.annualized_return * 100).toFixed(1)}% / Sharpe {item.sharpe.toFixed(2)} / DD {(item.max_drawdown * 100).toFixed(1)}%
@@ -1242,10 +1533,10 @@ function PortfolioOptimizer() {
                                             </div>
                                         )}
                                         {strategyResult.walk_forward.covariance_ablation && (
-                                            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-900/10 p-3">
-                                                <div className="text-sm font-semibold text-violet-300">{t('complete_covariance_ablation')}</div>
-                                                <p className="mt-1 text-xs text-slate-400">{t('complete_covariance_ablation_note')}</p>
-                                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-300">
+                                            <div className="diagnostic-card diagnostic-violet">
+                                                <div className="diagnostic-title">{t('complete_covariance_ablation')}</div>
+                                                <p className="diagnostic-copy">{t('complete_covariance_ablation_note')}</p>
+                                                <div className="diagnostic-copy diagnostic-list">
                                                     {Object.entries(strategyResult.walk_forward.covariance_ablation.segments).map(([segment, comparison]) => (
                                                         <span key={segment}>
                                                             {t(`ablation_${segment}`)}:
@@ -1270,14 +1561,14 @@ function PortfolioOptimizer() {
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        </section>
                     )}
 
                     {recommendationResult && (
-                        <div className="full-width">
+                        <section className="workspace-section recommendation-section">
                             <div className="recommendation-card">
                                 <div className="card-header">
-                                    <h3 className="card-title text-xl text-emerald-400"><TrendingUp size={24} /> {t('recommend_title')}</h3>
+                                    <h3 className="card-title recommendation-title"><TrendingUp size={24} /> {t('recommend_title')}</h3>
                                     <button className="text-link-btn" onClick={handleExport} aria-label={t('export_report')}>
                                         <Download size={16} /> {t('export_report')}
                                     </button>
@@ -1317,12 +1608,34 @@ function PortfolioOptimizer() {
                                     </div>
                                 </div>
 
+                                <div className={`recommendation-diagnostic ${recommendationResult.decision_readiness !== 'manual_review_required' || !recommendationResult.risk_limit_enforceable ? 'diagnostic-warning' : ''}`}>
+                                    <div className="diagnostic-title">{t('decision_readiness')}</div>
+                                    <div className="diagnostic-copy">
+                                        {t(`decision_${recommendationResult.decision_readiness || 'research_only'}`)}
+                                    </div>
+                                    <div className="diagnostic-copy">
+                                        {t('base_non_riskfree_ratio')}: {((recommendationResult.base_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
+                                        {' × '}{t('tactical_deployment_ratio')}: {((recommendationResult.tactical_deployment_ratio || 0) * 100).toFixed(1)}%
+                                        {' = '}{t('final_non_riskfree_ratio')}: {((recommendationResult.final_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
+                                    </div>
+                                    <div className="diagnostic-copy">
+                                        {t('safe_sleeve_ratio')}: {((recommendationResult.base_safe_sleeve_ratio || 0) * 100).toFixed(1)}%
+                                        {' · '}{t('residual_cash_ratio')}: {((recommendationResult.residual_cash_ratio || 0) * 100).toFixed(1)}%
+                                        {' · '}{t('actual_risk_ratio')}: {((recommendationResult.actual_risk_ratio || 0) * 100).toFixed(1)}%
+                                    </div>
+                                    {!recommendationResult.risk_limit_enforceable && (
+                                        <div className="diagnostic-copy">
+                                            {t('risk_not_enforceable')} · {t('cash_reserve_shortfall')}: ¥{Number(recommendationResult.cash_reserve_shortfall || 0).toFixed(2)}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {recommendationResult.window_robustness && (
-                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.window_robustness.status === 'unstable' ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                                        <div className="font-semibold">Kelly 回看窗口稳健性（3 年基准）</div>
-                                        <div className="mt-1">{recommendationResult.window_robustness.message}</div>
+                                    <div className={`recommendation-diagnostic ${recommendationResult.window_robustness.status === 'unstable' ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">Kelly 回看窗口稳健性（3 年基准）</div>
+                                        <div className="diagnostic-copy">{recommendationResult.window_robustness.message}</div>
                                         {recommendationResult.window_robustness.measurements?.length > 0 && (
-                                            <div className="mt-2 text-xs text-slate-400">
+                                            <div className="diagnostic-copy diagnostic-list">
                                                 {recommendationResult.window_robustness.measurements.map((item) => (
                                                     <span key={item.window_months} className="mr-3">
                                                         {item.window_months}月：{item.available ? `${(item.target_risky_ratio * 100).toFixed(1)}%` : '数据不足'}
@@ -1333,9 +1646,9 @@ function PortfolioOptimizer() {
                                     </div>
                                 )}
                                 {recommendationResult.optimizer_info?.cvar_confidence_status && (
-                                    <div className={`mt-4 rounded-lg border p-3 text-sm ${recommendationResult.optimizer_info.cvar_warning_only ? 'border-amber-500/60 bg-amber-900/20 text-amber-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                                        <div className="font-semibold">{t('risk_diagnostics')}</div>
-                                        <div className="mt-1">
+                                    <div className={`recommendation-diagnostic ${recommendationResult.optimizer_info.cvar_warning_only ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">{t('risk_diagnostics')}</div>
+                                        <div className="diagnostic-copy">
                                             {t('risk_data_source')}: {t(`risk_source_${recommendationResult.optimizer_info.cvar_data_source}`)}
                                             {' · '}{t('risk_horizon')}: {recommendationResult.optimizer_info.risk_horizon_days} {t('trading_days')}
                                             {' · '}{t('risk_observations')}: {recommendationResult.optimizer_info.cvar_return_observations}
@@ -1343,7 +1656,30 @@ function PortfolioOptimizer() {
                                             {' · '}{t('risk_tail_samples')}: {recommendationResult.optimizer_info.cvar_effective_tail_count}
                                         </div>
                                         {recommendationResult.optimizer_info.cvar_warning_only && (
-                                            <div className="mt-1">{t('cvar_low_confidence_warning')}</div>
+                                            <div className="diagnostic-copy">{t('cvar_low_confidence_warning')}</div>
+                                        )}
+                                    </div>
+                                )}
+                                {recommendationResult.execution_allocation && (
+                                    <div className={`recommendation-diagnostic ${recommendationResult.execution_allocation.fallback_used ? 'diagnostic-warning' : ''}`}>
+                                        <div className="diagnostic-title">{t('execution_allocation_diagnostics')}</div>
+                                        <div className="diagnostic-copy">
+                                            {t('execution_status')}: {recommendationResult.execution_allocation.status}
+                                            {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}
+                                        </div>
+                                        {recommendationResult.execution_allocation.unspent_reason_label && (
+                                            <div className="diagnostic-copy">
+                                                {t('execution_unspent_reason')}: {recommendationResult.execution_allocation.unspent_reason_label}
+                                            </div>
+                                        )}
+                                        {recommendationResult.execution_allocation.tracking_error_before !== null && recommendationResult.execution_allocation.tracking_error_before !== undefined && (
+                                            <div className="diagnostic-copy">
+                                                {t('tracking_error')}: {formatPercentValue(recommendationResult.execution_allocation.tracking_error_before)}
+                                                {' → '}{formatPercentValue(recommendationResult.execution_allocation.tracking_error_after)}
+                                            </div>
+                                        )}
+                                        {Object.keys(recommendationResult.execution_allocation.substitute_purchases || {}).length > 0 && (
+                                            <div className="diagnostic-copy">{t('substitute_purchase_note')}</div>
                                         )}
                                     </div>
                                 )}
@@ -1389,7 +1725,7 @@ function PortfolioOptimizer() {
                                     </table>
                                 )}
                             </div>
-                        </div>
+                        </section>
                     )}
                 </div>
             )}

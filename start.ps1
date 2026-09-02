@@ -98,7 +98,7 @@ try {
         }
 
         Write-Host "Starting Quant Compass at http://localhost:8666"
-        Invoke-CheckedCommand $Uv "run" "uvicorn" "main:app" "--host" "0.0.0.0" "--port" "8666"
+        Invoke-CheckedCommand $Uv "run" "uvicorn" "main:app" "--host" "127.0.0.1" "--port" "8666"
     }
     finally {
         Pop-Location

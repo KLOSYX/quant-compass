@@ -1,9 +1,51 @@
 # Quant Compass 量化定投优化计划
 
-> 状态：已审查，按修订优先级实施中
+> 状态：v2 正确性修正实施中；产品保持 `research_only`
 > 制定日期：2026-07-15
 > 最近审查：2026-07-17
 > 适用范围：`quant-compass` 当前的“收缩有效前沿 + 受约束 Fractional Kelly + 固定预算 DCA + 限购感知现金流再平衡”架构
+
+## 2026-09-01 v2 正确性修正状态
+
+本节优先于下文旧阶段状态。旧计划中标记“已完成”的工作不等于已通过 v2 的总回报、策略身份和点时数据契约。
+
+| 阶段 | 当前状态 | 已落地内容 | 尚未满足的外部条件 |
+|---|---|---|---|
+| P0-0 | 已完成 | 领域类型、有限值校验、规范化哈希、黄金样本 | 无 |
+| P0-1 | 已完成 | 统一执行 envelope、water-filling、QP/fallback 共用硬约束、替代组容量 | 真实渠道限额仍需人工核对 |
+| P0-2 | 核心完成，事件回放接线待完成 | 事件驱动账户单位账本、末期费用进入单位净值、TWR/XIRR 和月度回撤口径 | 固定 DCA、Kelly 与完整 Walk-forward 尚未统一消费公司行为事件流 |
+| P0-3 | 代码完成，真实对账待完成 | 公司行为类型、总回报重建、质量门禁、原始响应元数据 | 逐基金公告对账和供应商历史事件覆盖 |
+| P0-4 | 已完成 | 参数化参考篮子、缩放不变性、带生效日权重日程、推荐/回测/Walk-forward 迁移 | 无 |
+| P1-1 | 契约完成，历史逐期同入口迁移待完成 | `DecisionInput`、纯 `decide`、策略和快照哈希、软下限别名 | 动态 Walk-forward 尚未逐期调用 `decide` |
+| P1-2 | 契约完成，数据待积累 | 可用时间门禁和基金成交时间线类型 | 历史 `published_at` 多为推断值 |
+| P1-3 | 主要口径完成 | 费后 TWR、XIRR、实际风险、现金缺口、频率标签、benchmark 与 Cash/RiskFree 分离 | 完整 Walk-forward 的 XIRR 与日频账户路径仍待统一 |
+| P1-4 | 基础完成 | SQLite schema/migration、审计记录类型、本地绑定和 CORS | 在线路由持久化和实际成交回填仍待接线 |
+
+产品状态保持：
+
+```text
+blocked_data_quality -> research_only -> manual_review_required
+```
+
+在真实基金事件完成对账、历史可得时间假设完成敏感性验证、且在线与历史逐期调用同一 `decide` 入口前，不得从 `research_only` 提升。即使提升后，也只表示“可供人工核对后执行的月度建议”。
+
+本轮验收基线绑定到：
+
+```text
+repository: quant-compass
+worktree: C:\Users\klosy\.codex\worktrees\e300\quant-compass
+branch: codex/framework-correction-v2
+base HEAD: 7e512eedbacd7836e3bdf069f055b50d26b23316
+Python: CPython 3.13.12 (uv locked worktree environment)
+Node: 24.13.0
+npm: 11.6.2
+backend: 153 passed
+frontend: 4 suites / 17 tests passed through a temporary non-hidden path
+frontend production build: passed
+pre-commit: passed
+```
+
+Jest 在含 `.codex` 的真实路径下错误地把测试文件排除，因此验收将同一份 `src`、`public` 和锁文件复制到唯一临时目录，并通过 junction 复用当前工作树的 `node_modules`。这只规避测试发现路径问题，没有替换源码或依赖。`npm ci` 同时报告当前锁文件依赖树有 60 个已知漏洞（13 low、15 moderate、29 high、3 critical）；本轮未运行会引入破坏性升级的 `npm audit fix --force`，需作为依赖治理事项处理。
 
 ## 1. 目标与边界
 

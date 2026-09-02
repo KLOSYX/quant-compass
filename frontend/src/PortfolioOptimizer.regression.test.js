@@ -1,8 +1,24 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { buildAssetCategoriesPayload, sanitizeLegacyHoldings } from './PortfolioOptimizer';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+    buildAssetCategoriesPayload,
+    buildSubstituteForPayload,
+    getRecommendationEvidence,
+    getRecommendedFrontierPoint,
+    sanitizeLegacyHoldings
+} from './PortfolioOptimizer';
 import PortfolioOptimizer from './PortfolioOptimizer';
 import { LanguageProvider } from './LanguageContext';
 import { translations } from './i18n/translations';
+
+jest.mock('echarts-for-react', () => ({ onEvents }) => (
+    <button
+        type="button"
+        data-testid="mock-frontier-chart"
+        onClick={() => onEvents?.click?.({ dataIndex: 0 })}
+    >
+        mock chart
+    </button>
+));
 
 beforeEach(() => {
     localStorage.clear();
@@ -26,6 +42,126 @@ test('builds explicit categories only for the current analysis universe', () => 
     });
 });
 
+test('builds only valid substitute relationships in the current fund universe', () => {
+    expect(buildSubstituteForPayload(
+        ['A', 'B', 'C'],
+        { A: '', B: ' A ', C: 'C', old: 'A', ignored: 'missing' }
+    )).toEqual({
+        B: 'A'
+    });
+});
+
+test('resolves the backend recommended frontier point for explicit reset', () => {
+    const frontier = [{ risk: 0.1 }, { risk: 0.2 }];
+    expect(getRecommendedFrontierPoint({
+        efficient_frontier: frontier,
+        recommended_point_index: 1
+    })).toBe(frontier[1]);
+    expect(getRecommendedFrontierPoint({
+        efficient_frontier: frontier,
+        recommended_point_index: null
+    })).toBeNull();
+    expect(translations.zh.reset_to_recommended_point).toContain('推荐点');
+    expect(translations.en.reset_to_recommended_point).toContain('Recommended Point');
+});
+
+test('exposes the evidence attached to the backend recommendation', () => {
+    const frontier = [{ risk: 0.1 }, { risk: 0.2, frontier_walk_forward_sharpe: 0.8 }];
+    expect(getRecommendationEvidence({
+        efficient_frontier: frontier,
+        recommended_point_index: 1,
+        recommended_point_selection: {
+            eligible_count: 3,
+            total_count: 20,
+            confidence: 'limited'
+        }
+    })).toEqual({
+        point: frontier[1],
+        eligibleCount: 3,
+        totalCount: 20,
+        confidence: 'limited'
+    });
+});
+
+test('shows an explicit reset button after the backend recommends a frontier point', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['A']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            efficient_frontier: [
+                { risk: 0.1, return: 0.05, weights: { A: 1 } },
+                {
+                    risk: 0.2,
+                    return: 0.08,
+                    weights: { A: 1 },
+                    frontier_walk_forward_sharpe: 0.75,
+                    frontier_walk_forward_annualized_return: 0.07,
+                    frontier_walk_forward_max_drawdown: 0.12,
+                    frontier_walk_forward_weight_stability: 0.82
+                }
+            ],
+            recommended_point_index: 1,
+            recommended_point_selection: {
+                eligible_count: 4,
+                total_count: 20,
+                confidence: 'limited'
+            },
+            fund_names: { A: 'Fund A' },
+            asset_categories: { A: 'equity' },
+            backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' },
+            warnings: []
+        })
+    });
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+
+    const resetButton = await screen.findByRole('button', {
+        name: translations.zh.reset_to_recommended_point
+    });
+    expect(resetButton).toBeInTheDocument();
+    expect(resetButton).toBeDisabled();
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent('4/20');
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent('0.75');
+    expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent(
+        translations.zh.recommendation_limited_confidence
+    );
+
+    fireEvent.click(screen.getByTestId('mock-frontier-chart'));
+    expect(resetButton).toBeEnabled();
+
+    fireEvent.click(resetButton);
+    expect(resetButton).toBeDisabled();
+});
+
+test('keeps analysis warnings in a compact expandable methodology section', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['A']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            efficient_frontier: [{ risk: 0.1, return: 0.05, weights: { A: 1 } }],
+            recommended_point_index: 0,
+            recommended_point_selection: { eligible_count: 1, total_count: 1, confidence: 'standard' },
+            fund_names: { A: 'Fund A' },
+            asset_categories: { A: 'equity' },
+            backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' },
+            warnings: ['First methodology note', 'Second methodology note']
+        })
+    });
+
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+
+    const summary = await screen.findByText(translations.zh.methodology_notes_title);
+    const details = summary.closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('2 条说明');
+    expect(details).toHaveTextContent('First methodology note');
+    expect(details).toHaveTextContent('Second methodology note');
+});
+
 test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
     expect(translations.zh.min_equity_ratio).toContain('基金组合');
     expect(translations.en.min_equity_ratio).toContain('Fund Portfolio');
@@ -36,6 +172,7 @@ test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
 test('explains the executable walk-forward comparison separately from the frontier', () => {
     expect(translations.zh.executable_walk_forward_title).toContain('可执行策略');
     expect(translations.zh.executable_walk_forward_note).toContain('只使用当时可见数据');
+    expect(translations.zh.wf_low_evidence).toContain('不足以支持策略切换');
     expect(translations.en.wf_full_strategy).toContain('Kelly');
 });
 

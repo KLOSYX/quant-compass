@@ -141,11 +141,13 @@ def test_kelly_dca_independent_fee_ledger_uses_fixed_budget_without_sales():
     )
 
     february = actual["attribution"]["2024-02"]
-    # Independent two-period DCA ledger: January buys 50 gross in each fund.
+    # January equalizes net asset additions. B's fee therefore requires a
+    # slightly larger gross allocation than A under the fixed gross budget.
     # In February A is overweight after doubling, so the entire 100 budget goes
     # to B; no A sale and no use of the sell fee is permitted.
-    january_a = 550.0
-    january_b = 500.0 + 50.0 / 1.02
+    january_net_each = 100.0 / (1.0 + 1.02)
+    january_a = 500.0 + january_net_each
+    january_b = 500.0 + january_net_each
     expected_a = january_a * 2.0
     expected_b = january_b + 100.0 / 1.02
 

@@ -4,14 +4,28 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from core.classification import (
+    ASSET_CATEGORIES,
+    calculate_exposure_metrics,
+    normalize_asset_categories,
+)
 from core.constants import (
     DEFAULT_RISK_HORIZON_DAYS,
+    MIN_COVARIANCE_ABLATION_SEGMENT_MONTHS,
+    MIN_CVAR_TAIL_OBSERVATIONS,
+    MIN_SORTINO_DOWNSIDE_OBSERVATIONS,
+    MIN_WALK_FORWARD_EVALUATION_MONTHS,
     MIN_WALK_FORWARD_TRAIN_MONTHS,
 )
 from core.execution import execute_monthly_plan
+from core.execution_optimizer import (
+    build_execution_covariance,
+    strategic_fund_codes,
+)
 from core.frontier import calculate_efficient_frontier
 from core.portfolio import decompose_selected_weights
-from core.risk import calculate_drawdown_from_returns
+from core.reference import build_reference_basket
+from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
 from core.strategy import calculate_target_ratio_optimized
 
 
@@ -75,11 +89,18 @@ def _select_stable_kelly_platform(window_metrics: dict[int, dict]) -> dict:
 
 
 def _summarize_ablation_slice(
-    returns: list[float], weight_drifts: list[float], risk_free_rate: float
+    returns: list[float],
+    weight_drifts: list[float],
+    risk_free_rate: float,
+    min_observations: int = MIN_COVARIANCE_ABLATION_SEGMENT_MONTHS,
 ) -> dict:
     series = pd.Series(returns, dtype=float)
-    if series.empty:
-        return {"status": "insufficient_data", "observations": 0}
+    if len(series) < min_observations:
+        return {
+            "status": "insufficient_data",
+            "observations": int(len(series)),
+            "minimum_observations": int(min_observations),
+        }
     annualized_return = (
         float((1 + series).prod() ** (12 / len(series)) - 1)
         if (series > -1).all()
@@ -181,12 +202,21 @@ class _StrategyState:
     cash_exposures: list[float] = field(default_factory=list)
     execution_deviations: list[float] = field(default_factory=list)
     weight_drifts: list[float] = field(default_factory=list)
+    actual_weight_drifts: list[float] = field(default_factory=list)
+    frontier_change_transmissions: list[float] = field(default_factory=list)
+    category_exposures: list[dict[str, float]] = field(default_factory=list)
     total_trade_value: float = 0.0
     total_fee_cost: float = 0.0
     total_unfilled_gap: float = 0.0
     sell_count: int = 0
     previous_weights: pd.Series | None = None
+    previous_actual_weights: pd.Series | None = None
     purchase_lots: list[tuple[int, float]] = field(default_factory=list)
+    total_unspent_execution_budget: float = 0.0
+    total_substitute_purchases: float = 0.0
+    tracking_errors_before: list[float] = field(default_factory=list)
+    tracking_errors_after: list[float] = field(default_factory=list)
+    allocation_fallback_count: int = 0
 
 
 def _select_train_point(frontier: list[dict], risk_free_rate: float) -> dict:
@@ -241,9 +271,13 @@ def _initialize_state(
     return state
 
 
-def _summarize_state(state: _StrategyState, risk_free_rate: float) -> dict:
+def _summarize_state(
+    state: _StrategyState, risk_free_rate: float, cvar_confidence: float
+) -> dict:
     returns = pd.Series(state.returns, dtype=float)
     observations = len(returns)
+    downside_observations = 0
+    cvar_tail_observations = 0
     if observations:
         annualized_return = (
             float((1 + returns).prod() ** (12 / observations) - 1)
@@ -256,6 +290,20 @@ def _summarize_state(state: _StrategyState, risk_free_rate: float) -> dict:
             if volatility > 1e-9
             else 0.0
         )
+        monthly_risk_free = (1 + risk_free_rate) ** (1 / 12) - 1
+        downside = np.minimum(returns - monthly_risk_free, 0.0)
+        downside_observations = int((returns < monthly_risk_free).sum())
+        downside_deviation = float(np.sqrt(np.mean(np.square(downside))) * np.sqrt(12))
+        sortino = (
+            float((annualized_return - risk_free_rate) / downside_deviation)
+            if downside_deviation > 1e-9
+            else None
+        )
+        worst_month = float(returns.min())
+        cvar_tail_observations = max(
+            1, int(np.ceil(observations * (1 - cvar_confidence)))
+        )
+        cvar_loss = float(calculate_cvar_loss(returns, cvar_confidence))
         average_monthly_log_return = (
             float(np.log1p(returns).mean()) if (returns > -1).all() else None
         )
@@ -264,6 +312,9 @@ def _summarize_state(state: _StrategyState, risk_free_rate: float) -> dict:
         annualized_return = 0.0
         volatility = 0.0
         sharpe = 0.0
+        sortino = None
+        worst_month = 0.0
+        cvar_loss = 0.0
         average_monthly_log_return = None
         max_drawdown = 0.0
     final_wealth = (
@@ -276,12 +327,53 @@ def _summarize_state(state: _StrategyState, risk_free_rate: float) -> dict:
         if state.wealth_history
         else max(state.initial_wealth, 1.0)
     )
+    average_category_exposures = {
+        category: float(
+            np.mean(
+                [exposures.get(category, 0.0) for exposures in state.category_exposures]
+            )
+        )
+        for category in ASSET_CATEGORIES
+    }
+    target_change_months = len(state.weight_drifts)
+    transmitted_months = len(state.frontier_change_transmissions)
+    evidence_reasons = []
+    if observations < MIN_WALK_FORWARD_EVALUATION_MONTHS:
+        evidence_reasons.append("short_evaluation_window")
+    if cvar_tail_observations < MIN_CVAR_TAIL_OBSERVATIONS:
+        evidence_reasons.append("insufficient_cvar_tail")
+    if downside_observations < MIN_SORTINO_DOWNSIDE_OBSERVATIONS:
+        evidence_reasons.append("insufficient_sortino_downside_months")
     return {
         "observations": observations,
+        "metric_basis": "unit_nav_after_external_cash_flows",
+        "external_cash_flow_timing": "start_of_period_unit_issuance",
         "annualized_return": annualized_return,
         "average_monthly_log_return": average_monthly_log_return,
         "annualized_volatility": volatility,
         "sharpe": sharpe,
+        "sortino": sortino,
+        "sortino_downside_observations": downside_observations,
+        "sortino_confidence_status": (
+            "adequate"
+            if downside_observations >= MIN_SORTINO_DOWNSIDE_OBSERVATIONS
+            else "low"
+        ),
+        "worst_month": worst_month,
+        "cvar_loss": cvar_loss,
+        "cvar_confidence": cvar_confidence,
+        "cvar_tail_observations": cvar_tail_observations,
+        "cvar_confidence_status": (
+            "adequate"
+            if cvar_tail_observations >= MIN_CVAR_TAIL_OBSERVATIONS
+            else "low"
+        ),
+        "evidence_quality": {
+            "status": "low" if evidence_reasons else "adequate",
+            "evaluation_months": observations,
+            "minimum_evaluation_months": MIN_WALK_FORWARD_EVALUATION_MONTHS,
+            "reasons": evidence_reasons,
+        },
         "max_drawdown": max_drawdown,
         "final_wealth": final_wealth,
         "total_external_capital": state.initial_wealth + state.external_contributions,
@@ -299,7 +391,42 @@ def _summarize_state(state: _StrategyState, risk_free_rate: float) -> dict:
         "average_weight_drift": float(np.mean(state.weight_drifts))
         if state.weight_drifts
         else 0.0,
+        "average_frontier_target_weight_change": (
+            float(np.mean(state.weight_drifts)) if state.weight_drifts else 0.0
+        ),
+        "average_actual_basket_weight_change": (
+            float(np.mean(state.actual_weight_drifts))
+            if state.actual_weight_drifts
+            else 0.0
+        ),
+        "average_frontier_change_transmission": (
+            float(np.mean(state.frontier_change_transmissions))
+            if state.frontier_change_transmissions
+            else 0.0
+        ),
+        "months_with_frontier_target_change": sum(
+            change > 1e-9 for change in state.weight_drifts
+        ),
+        "months_with_executed_frontier_change": sum(
+            change > 1e-9 for change in state.actual_weight_drifts
+        ),
+        "frontier_change_observations": target_change_months,
+        "frontier_transmission_observations": transmitted_months,
+        "average_asset_category_exposures": average_category_exposures,
         "sell_count": state.sell_count,
+        "total_unspent_execution_budget": state.total_unspent_execution_budget,
+        "total_substitute_purchases": state.total_substitute_purchases,
+        "average_tracking_error_before": (
+            float(np.mean(state.tracking_errors_before))
+            if state.tracking_errors_before
+            else None
+        ),
+        "average_tracking_error_after": (
+            float(np.mean(state.tracking_errors_after))
+            if state.tracking_errors_after
+            else None
+        ),
+        "allocation_fallback_count": state.allocation_fallback_count,
         "average_holding_period_months": (
             sum(
                 (observations - month) * amount for month, amount in state.purchase_lots
@@ -339,6 +466,10 @@ def evaluate_executable_walk_forward(
     daily_nav: pd.DataFrame | None = None,
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
     include_covariance_ablation: bool = False,
+    asset_categories: Mapping[str, str] | None = None,
+    substitute_for: Mapping[str, str] | None = None,
+    execution_allocation_method: str = "proportional_gap",
+    planned_purchase_days: int | None = None,
 ) -> dict:
     """Evaluate executable strategies using only information available at each split."""
     if monthly_investment < 0:
@@ -373,6 +504,7 @@ def evaluate_executable_walk_forward(
     buy_fees = buy_fees or {}
     sell_fees = sell_fees or {}
     risky_codes = [code for code in df_nav.columns if code != "RiskFree"]
+    strategic_codes = strategic_fund_codes(risky_codes, substitute_for)
     if not risky_codes:
         return {
             "status": "not_applicable",
@@ -380,6 +512,9 @@ def evaluate_executable_walk_forward(
             "available_months": len(df_nav) - 1,
             "strategies": {},
         }
+    normalized_asset_categories = normalize_asset_categories(
+        list(df_nav.columns), asset_categories
+    )
     first_signal_position = min_train_months - 1
     strategy_states = {
         name: _initialize_state(
@@ -418,7 +553,19 @@ def evaluate_executable_walk_forward(
             initial_holdings,
             initial_cash,
         )
-    equal_weights = {code: 1.0 / len(risky_codes) for code in risky_codes}
+    allocation_baseline_name = None
+    if execution_allocation_method == "constrained_tracking":
+        allocation_baseline_name = "full_strategy_proportional_gap"
+        states[allocation_baseline_name] = _initialize_state(
+            df_nav,
+            first_signal_position,
+            risky_codes,
+            initial_holdings,
+            initial_cash,
+        )
+    if not strategic_codes:
+        raise ValueError("at least one strategic fund is required")
+    equal_weights = {code: 1.0 / len(strategic_codes) for code in strategic_codes}
     fixed_weights = None
 
     for realized_position in range(min_train_months, len(df_nav)):
@@ -426,14 +573,19 @@ def evaluate_executable_walk_forward(
         train_df = df_nav.iloc[: signal_position + 1]
         signal_date = df_nav.index[signal_position]
         realized_date = df_nav.index[realized_position]
-        frontier = calculate_efficient_frontier(train_df, dict(fund_fees))
+        frontier_columns = [
+            *strategic_codes,
+            *(["RiskFree"] if "RiskFree" in train_df.columns else []),
+        ]
+        frontier_train_df = train_df[frontier_columns]
+        frontier = calculate_efficient_frontier(frontier_train_df, dict(fund_fees))
         if not frontier:
             continue
         dynamic_weights = _select_train_point(frontier, risk_free_rate)["weights"]
         candidate_weights = None
         if include_covariance_ablation:
             candidate_frontier = calculate_efficient_frontier(
-                train_df,
+                frontier_train_df,
                 dict(fund_fees),
                 covariance_method="ledoit_wolf",
             )
@@ -459,7 +611,13 @@ def evaluate_executable_walk_forward(
                 if candidate_weights is not None
                 else {}
             ),
+            **(
+                {allocation_baseline_name: dynamic_weights}
+                if allocation_baseline_name is not None
+                else {}
+            ),
         }
+        monthly_execution_snapshots: dict[str, dict] = {}
 
         for strategy_name, weights in strategy_weights.items():
             state = states[strategy_name]
@@ -498,17 +656,30 @@ def evaluate_executable_walk_forward(
                 else 0.0
             )
             if (
-                strategy_name in {"full_strategy", "full_strategy_ledoit_wolf"}
+                strategy_name
+                in {
+                    "full_strategy",
+                    "full_strategy_ledoit_wolf",
+                    "full_strategy_proportional_gap",
+                }
                 or strategy_name in window_state_names
             ):
-                reference_nav = train_df[risky_weights.index].dot(risky_weights)
+                if float(risky_weights.sum()) <= 1e-12:
+                    reference_nav = pd.Series(1.0, index=train_df.index)
+                else:
+                    reference_nav = build_reference_basket(
+                        train_df[risky_weights.index], risky_weights
+                    )
                 daily_reference_nav = (
-                    daily_nav.loc[:signal_date, risky_weights.index].dot(risky_weights)
+                    build_reference_basket(
+                        daily_nav.loc[:signal_date, risky_weights.index], risky_weights
+                    )
                     if daily_nav is not None
+                    and float(risky_weights.sum()) > 1e-12
                     and set(risky_weights.index).issubset(daily_nav.columns)
                     else None
                 )
-                tactical_ratio, _, _ = calculate_target_ratio_optimized(
+                tactical_ratio, _, optimizer_info = calculate_target_ratio_optimized(
                     reference_portfolio_nav=reference_nav,
                     timestamp=signal_date,
                     min_weight=min_weight,
@@ -530,10 +701,17 @@ def evaluate_executable_walk_forward(
                 )
             elif strategy_name == "no_kelly":
                 tactical_ratio = min(max_weight, cash_cap)
+                optimizer_info = {}
             else:
                 tactical_ratio = cash_cap
+                optimizer_info = {}
+            three_bucket_cap = max(0.0, cash_cap - base_risk_free_ratio)
             target_risky_ratio = float(
-                np.clip(base_risky_ratio * tactical_ratio, 0.0, 1.0)
+                np.clip(
+                    min(base_risky_ratio * tactical_ratio, three_bucket_cap),
+                    0.0,
+                    1.0,
+                )
             )
             target_risky_value = total_wealth * target_risky_ratio
             targets = risky_weights * target_risky_value
@@ -541,16 +719,10 @@ def evaluate_executable_walk_forward(
             target_has_risk_free = (
                 "RiskFree" in df_nav.columns and base_risk_free_ratio > 0
             )
-            target_cash = (
-                min(minimum_cash_reserve, non_risky_target)
-                if target_has_risk_free
-                else non_risky_target
-            )
             target_risk_free = (
-                max(0.0, non_risky_target - target_cash)
-                if target_has_risk_free
-                else 0.0
+                total_wealth * base_risk_free_ratio if target_has_risk_free else 0.0
             )
+            target_cash = max(0.0, non_risky_target - target_risk_free)
             execution = execute_monthly_plan(
                 fund_codes=risky_codes,
                 current_holdings=current_assets.to_dict(),
@@ -566,11 +738,26 @@ def evaluate_executable_walk_forward(
                 current_risk_free=current_risk_free,
                 target_risk_free=target_risk_free,
                 target_cash=target_cash,
-                can_manage_risk_free=(
-                    "RiskFree" in df_nav.columns
-                    and (target_has_risk_free or current_risk_free > 0)
-                ),
+                # Replay uses the same no-automatic-sale household policy.
+                can_manage_risk_free=False,
                 target_has_risk_free=target_has_risk_free,
+                allocation_method=(
+                    "proportional_gap"
+                    if strategy_name == allocation_baseline_name
+                    else execution_allocation_method
+                ),
+                execution_covariance=build_execution_covariance(
+                    train_df,
+                    risky_codes,
+                    estimation_window=estimation_window,
+                    covariance_method=(
+                        "ledoit_wolf"
+                        if strategy_name == "full_strategy_ledoit_wolf"
+                        else "fixed_20"
+                    ),
+                ),
+                substitute_for=substitute_for,
+                planned_purchase_days=planned_purchase_days,
             )
             for code, item in execution.funds.items():
                 state.shares[code] = item.executable_holding / float(signal_nav[code])
@@ -589,6 +776,25 @@ def evaluate_executable_walk_forward(
                 for item in execution.funds.values()
             )
             state.total_fee_cost += buy_fee_cost + sell_fee_cost
+            allocation_diagnostics = execution.allocation_diagnostics
+            state.total_unspent_execution_budget += float(
+                allocation_diagnostics.get("unspent_budget", 0.0) or 0.0
+            )
+            state.total_substitute_purchases += sum(
+                float(value)
+                for value in (
+                    allocation_diagnostics.get("substitute_purchases", {}) or {}
+                ).values()
+            )
+            tracking_before = allocation_diagnostics.get("tracking_error_before")
+            tracking_after = allocation_diagnostics.get("tracking_error_after")
+            if tracking_before is not None:
+                state.tracking_errors_before.append(float(tracking_before))
+            if tracking_after is not None:
+                state.tracking_errors_after.append(float(tracking_after))
+            state.allocation_fallback_count += int(
+                bool(allocation_diagnostics.get("fallback_used"))
+            )
             acquired_value = execution.total_gross_buy
             risk_free_purchase = max(
                 0.0, execution.risk_free_after - execution.current_risk_free
@@ -638,14 +844,67 @@ def evaluate_executable_walk_forward(
             state.execution_deviations.append(
                 float((actual_values - target_values).abs().sum() / (2 * denominator))
             )
-            current_weight_vector = pd.Series(weights, index=df_nav.columns).fillna(0)
+            current_weight_vector = risky_weights.reindex(risky_codes).fillna(0.0)
+            current_weight_total = float(current_weight_vector.sum())
+            if current_weight_total > 0:
+                current_weight_vector = current_weight_vector / current_weight_total
+            actual_weight_vector = pd.Series(
+                {
+                    code: execution.funds[code].executable_holding
+                    for code in risky_codes
+                },
+                dtype=float,
+            )
+            actual_weight_total = float(actual_weight_vector.sum())
+            if actual_weight_total > 0:
+                actual_weight_vector = actual_weight_vector / actual_weight_total
+            else:
+                actual_weight_vector[:] = 0.0
+            frontier_target_change = 0.0
+            actual_basket_change = 0.0
+            frontier_change_transmission = None
             if state.previous_weights is not None:
-                state.weight_drifts.append(
-                    float(
-                        (current_weight_vector - state.previous_weights).abs().sum() / 2
+                target_delta = current_weight_vector - state.previous_weights
+                actual_delta = actual_weight_vector - state.previous_actual_weights
+                frontier_target_change = float(target_delta.abs().sum() / 2)
+                actual_basket_change = float(actual_delta.abs().sum() / 2)
+                state.weight_drifts.append(frontier_target_change)
+                state.actual_weight_drifts.append(actual_basket_change)
+                target_move = float(target_delta.abs().sum())
+                if target_move > 1e-9:
+                    aligned_move = sum(
+                        min(
+                            abs(float(actual_delta[code])),
+                            abs(float(target_delta[code])),
+                        )
+                        for code in risky_codes
+                        if float(actual_delta[code]) * float(target_delta[code]) > 0
                     )
-                )
+                    frontier_change_transmission = float(
+                        np.clip(aligned_move / target_move, 0.0, 1.0)
+                    )
+                    state.frontier_change_transmissions.append(
+                        frontier_change_transmission
+                    )
             state.previous_weights = current_weight_vector
+            state.previous_actual_weights = actual_weight_vector
+
+            trade_signature = {
+                code: {
+                    "gross_buy": float(item.gross_buy),
+                    "gross_sell": float(item.gross_sell),
+                }
+                for code, item in execution.funds.items()
+            }
+            trade_signature["RiskFree"] = {
+                "gross_buy": float(
+                    max(0.0, execution.risk_free_after - execution.current_risk_free)
+                ),
+                "gross_sell": float(
+                    max(0.0, execution.current_risk_free - execution.risk_free_after)
+                ),
+            }
+            monthly_execution_snapshots[strategy_name] = trade_signature
 
             realized_assets = state.shares * realized_nav[state.shares.index]
             realized_risk_free = (
@@ -667,20 +926,73 @@ def evaluate_executable_walk_forward(
             state.cash_exposures.append(
                 state.cash / realized_wealth if realized_wealth > 0 else 0.0
             )
+            realized_asset_values = {
+                **realized_assets.to_dict(),
+                **(
+                    {"RiskFree": realized_risk_free}
+                    if "RiskFree" in df_nav.columns
+                    else {}
+                ),
+            }
+            exposure_metrics = calculate_exposure_metrics(
+                realized_asset_values,
+                total_wealth=realized_wealth,
+                asset_categories=normalized_asset_categories,
+            )
+            state.category_exposures.append(exposure_metrics["category_exposures"])
+            no_kelly_signature = monthly_execution_snapshots.get("no_kelly")
+            kelly_changed_trade = None
+            if strategy_name == "full_strategy" and no_kelly_signature is not None:
+                all_trade_codes = set(trade_signature) | set(no_kelly_signature)
+                kelly_changed_trade = any(
+                    abs(
+                        trade_signature.get(code, {}).get(action, 0.0)
+                        - no_kelly_signature.get(code, {}).get(action, 0.0)
+                    )
+                    > 1e-6
+                    for code in all_trade_codes
+                    for action in ("gross_buy", "gross_sell")
+                )
             state.audit.append(
                 {
                     "training_end": signal_date.strftime("%Y-%m-%d"),
                     "execution_date": signal_date.strftime("%Y-%m-%d"),
                     "realized_date": realized_date.strftime("%Y-%m-%d"),
+                    "full_kelly_raw": optimizer_info.get("full_kelly"),
+                    "fractional_kelly_raw": optimizer_info.get("fractional_kelly"),
+                    "kelly_clipped_target": float(tactical_ratio),
+                    "target_fund_position": target_risky_ratio,
+                    "actual_fund_position": (
+                        float(
+                            sum(
+                                item.executable_holding
+                                for item in execution.funds.values()
+                            )
+                            / closing_signal_wealth
+                        )
+                        if closing_signal_wealth > 0
+                        else 0.0
+                    ),
+                    "kelly_changed_trade": kelly_changed_trade,
+                    "frontier_target_weight_change": frontier_target_change,
+                    "actual_basket_weight_change": actual_basket_change,
+                    "frontier_change_transmission": frontier_change_transmission,
+                    "frontier_target_weights": {
+                        code: float(current_weight_vector[code]) for code in risky_codes
+                    },
+                    "actual_basket_weights": {
+                        code: float(actual_weight_vector[code]) for code in risky_codes
+                    },
+                    "allocation_diagnostics": dict(execution.allocation_diagnostics),
                 }
             )
 
     strategies = {
-        name: _summarize_state(strategy_states[name], risk_free_rate)
+        name: _summarize_state(strategy_states[name], risk_free_rate, cvar_confidence)
         for name in WALK_FORWARD_STRATEGIES
     }
     window_metrics = {
-        window: _summarize_state(states[name], risk_free_rate)
+        window: _summarize_state(states[name], risk_free_rate, cvar_confidence)
         for name, window in window_state_names.items()
     }
     covariance_ablation = (
@@ -692,6 +1004,34 @@ def evaluate_executable_walk_forward(
         if include_covariance_ablation
         else None
     )
+    allocation_ablation = None
+    if allocation_baseline_name is not None:
+        baseline_metrics = _summarize_state(
+            states[allocation_baseline_name], risk_free_rate, cvar_confidence
+        )
+        candidate_metrics = strategies["full_strategy"]
+        candidate_qualifies = (
+            candidate_metrics["average_execution_deviation"]
+            <= baseline_metrics["average_execution_deviation"] + 1e-9
+            and candidate_metrics["max_drawdown"]
+            <= baseline_metrics["max_drawdown"] + 0.01
+            and candidate_metrics["total_transaction_fees"]
+            <= baseline_metrics["total_transaction_fees"] * 1.05 + 1e-9
+        )
+        allocation_ablation = {
+            "evaluation_scope": "complete_executable_strategy",
+            "baseline_method": "proportional_gap",
+            "candidate_method": "constrained_tracking",
+            "auto_switched": False,
+            "promotion_status": (
+                "candidate" if candidate_qualifies else "retain_proportional"
+            ),
+            "selection_rule": (
+                "lower_execution_deviation_with_noninferior_drawdown_and_fees"
+            ),
+            "baseline": baseline_metrics,
+            "candidate": candidate_metrics,
+        }
     return {
         "status": "ok",
         "minimum_training_months": min_train_months,
@@ -699,6 +1039,14 @@ def evaluate_executable_walk_forward(
         "selection_rule": "training_only_maximum_excess_sharpe",
         "limit_history_assumption": "fixed_user_scenario",
         "cash_flow_policy": "identical_initial_capital_and_monthly_contributions",
+        "metric_basis": {
+            "return_series": "unit_nav_after_external_cash_flows",
+            "external_cash_flow_timing": "start_of_period_unit_issuance",
+            "annualized_return": "geometric_from_monthly_unit_nav_returns",
+            "sharpe": "annualized_return_minus_risk_free_over_annualized_volatility",
+            "max_drawdown": "unit_nav_with_initial_nav_anchor",
+            "cvar_horizon": "monthly",
+        },
         "strategies": strategies,
         "kelly_window_comparison": {
             "windows": [
@@ -709,4 +1057,5 @@ def evaluate_executable_walk_forward(
             **_select_stable_kelly_platform(window_metrics),
         },
         "covariance_ablation": covariance_ablation,
+        "allocation_ablation": allocation_ablation,
     }

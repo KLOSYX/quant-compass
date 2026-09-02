@@ -27,6 +27,7 @@ yarn-error.log
 
 # Generated Assets
 backend/static/
+backend/data/*.sqlite3
 docs/
 .codex
 

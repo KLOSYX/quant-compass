@@ -196,13 +196,16 @@ def test_current_recommendation_separates_riskfree_and_cash_rows():
     cash_row = next(item for item in advice_list if item["code"] == "Cash")
 
     assert abs(payload["target_equity_value"] - 360.0) < 1e-9
-    assert abs(payload["target_risk_free_value"] - 740.0) < 1e-9
-    assert abs(payload["target_cash_value"] - 100.0) < 1e-9
+    assert abs(payload["target_risk_free_value"] - 480.0) < 1e-9
+    assert abs(payload["target_cash_value"] - 360.0) < 1e-9
     assert risk_free["action"] == "Hold"
     assert abs(risk_free["amount"]) < 1e-9
-    assert abs(risk_free["target_holding"] - 740.0) < 1e-9
+    assert abs(risk_free["target_holding"] - 480.0) < 1e-9
     assert cash_row["action"] == "持有"
-    assert abs(cash_row["target_holding"] - 100.0) < 1e-9
+    assert abs(cash_row["target_holding"] - 360.0) < 1e-9
+    assert abs(risk_free["executable_holding"] - 1000.0) < 1e-9
+    assert abs(cash_row["executable_holding"] - 100.0) < 1e-9
+    assert payload["risk_limit_enforceable"] is True
 
 
 def test_current_recommendation_default_optimized_mode():

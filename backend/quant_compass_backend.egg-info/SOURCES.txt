@@ -1,3 +1,4 @@
+main.py
 pyproject.toml
 quant_compass_backend.egg-info/PKG-INFO
 quant_compass_backend.egg-info/SOURCES.txt
@@ -5,5 +6,21 @@ quant_compass_backend.egg-info/dependency_links.txt
 quant_compass_backend.egg-info/requires.txt
 quant_compass_backend.egg-info/top_level.txt
 tests/test_analyze.py
+tests/test_asset_classification.py
 tests/test_backtest.py
+tests/test_cash_constraints.py
+tests/test_drawdown_integrated.py
+tests/test_edge_cases.py
+tests/test_executable_walk_forward.py
+tests/test_execution.py
+tests/test_fee_overdraft.py
+tests/test_fix_riskfree.py
+tests/test_frontier_robustness.py
+tests/test_fund_names.py
+tests/test_independent_backtest_oracle.py
+tests/test_kelly_robustness.py
 tests/test_main.py
+tests/test_money_fund_data.py
+tests/test_risk_free_interest.py
+tests/test_risk_frequency.py
+tests/test_va_drawdown.py
