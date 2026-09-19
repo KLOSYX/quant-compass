@@ -8,47 +8,12 @@ from core.frontier import calculate_efficient_frontier
 from core.risk import calculate_drawdown_from_returns
 from core.walk_forward import (
     WALK_FORWARD_STRATEGIES,
-    _select_stable_kelly_platform,
     evaluate_executable_walk_forward,
 )
 from main import app
 
 
 client = TestClient(app)
-
-
-def test_stable_kelly_platform_keeps_36_month_default_when_on_platform():
-    metrics = {
-        24: {
-            "observations": 12,
-            "annualized_return": 0.20,
-            "sharpe": 1.8,
-            "max_drawdown": 0.18,
-        },
-        36: {
-            "observations": 12,
-            "annualized_return": 0.10,
-            "sharpe": 0.8,
-            "max_drawdown": 0.12,
-        },
-        48: {
-            "observations": 12,
-            "annualized_return": 0.11,
-            "sharpe": 0.9,
-            "max_drawdown": 0.13,
-        },
-        60: {
-            "observations": 12,
-            "annualized_return": 0.30,
-            "sharpe": 2.0,
-            "max_drawdown": 0.25,
-        },
-    }
-
-    selected = _select_stable_kelly_platform(metrics)
-
-    assert selected["selected_window_months"] == 36
-    assert selected["selection_rule"] == "median_long_window_platform"
 
 
 def test_one_asset_walk_forward_matches_independent_cash_flow_ledger():
@@ -60,8 +25,6 @@ def test_one_asset_walk_forward_matches_independent_cash_flow_ledger():
         {},
         monthly_investment=100.0,
         min_train_months=2,
-        min_weight=1.0,
-        max_weight=1.0,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )
@@ -89,8 +52,6 @@ def test_external_contributions_do_not_create_returns_or_hide_drawdowns():
         monthly_investment=100.0,
         initial_cash=100.0,
         min_train_months=2,
-        min_weight=1.0,
-        max_weight=1.0,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )
@@ -109,7 +70,7 @@ def test_external_contributions_do_not_create_returns_or_hide_drawdowns():
     assert calculate_drawdown_from_returns(pd.Series([-0.10])) == pytest.approx(0.10)
 
 
-def test_complete_strategy_reports_kelly_risk_exposure_and_transmission_audit():
+def test_complete_strategy_reports_account_risk_exposure_and_transmission_audit():
     dates = pd.date_range("2023-01-31", periods=8, freq="ME")
     nav = pd.DataFrame(
         {
@@ -164,16 +125,11 @@ def test_complete_strategy_reports_kelly_risk_exposure_and_transmission_audit():
     assert len(metrics["data_access_audit"]) == result["evaluation_months"]
     for month in metrics["data_access_audit"]:
         assert {
-            "full_kelly_raw",
-            "fractional_kelly_raw",
-            "kelly_clipped_target",
             "actual_fund_position",
-            "kelly_changed_trade",
             "frontier_target_weight_change",
             "actual_basket_weight_change",
             "frontier_change_transmission",
         } <= month.keys()
-        assert isinstance(month["kelly_changed_trade"], bool)
 
 
 def test_walk_forward_never_passes_realized_nav_to_training_optimizer():
@@ -197,8 +153,6 @@ def test_walk_forward_never_passes_realized_nav_to_training_optimizer():
             {},
             monthly_investment=100.0,
             min_train_months=4,
-            min_weight=0.5,
-            max_weight=1.0,
             enable_cvar_constraint=False,
             enable_drawdown_constraint=False,
         )
@@ -255,8 +209,6 @@ def test_all_benchmarks_share_fees_limits_and_external_cash_flows():
         buy_fees={"A": 0.1},
         fund_investment_limits={"A": {"monthly_limit": 50.0}},
         min_train_months=2,
-        min_weight=1.0,
-        max_weight=1.0,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )
@@ -337,8 +289,6 @@ def test_walk_forward_compares_tracking_allocator_with_proportional_baseline():
         {},
         monthly_investment=100.0,
         min_train_months=4,
-        min_weight=1.0,
-        max_weight=1.0,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
         fund_investment_limits={"A": {"monthly_limit": 20.0}},

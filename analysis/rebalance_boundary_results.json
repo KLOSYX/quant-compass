@@ -1,0 +1,2252 @@
+{
+  "scope": "synthetic mechanism and current production boundary audit; not independent historical performance validation",
+  "production_changes": false,
+  "promotion": "not_passed: tested guards trade off rapid restoration and churn; no universally accepted policy validated",
+  "experimental_parameters_are_not_defaults": true,
+  "target_experiments": {
+    "small_alternation": {
+      "immediate_exact": {
+        "gross_sold": 23000.0,
+        "buy_plus_sell_turnover": 46000.0,
+        "trade_months": 12,
+        "direction_reversals": 11,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -1000.0000000000009
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          },
+          {
+            "month": 3,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -2000.0000000000018
+          },
+          {
+            "month": 4,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          },
+          {
+            "month": 5,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -2000.0000000000018
+          },
+          {
+            "month": 6,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          },
+          {
+            "month": 7,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -2000.0000000000018
+          },
+          {
+            "month": 8,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          },
+          {
+            "month": 9,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -2000.0000000000018
+          },
+          {
+            "month": 10,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          },
+          {
+            "month": 11,
+            "target": 0.49,
+            "actual": 0.49,
+            "A_net_buy": -2000.0000000000018
+          },
+          {
+            "month": 12,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 2000.0000000000018
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 1.0,
+        "terminal_remaining_deviation_pp": 1.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 1.0,
+        "terminal_remaining_deviation_pp": 1.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.49,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      }
+    },
+    "large_alternation": {
+      "immediate_exact": {
+        "gross_sold": 230000.0,
+        "buy_plus_sell_turnover": 460000.0,
+        "trade_months": 12,
+        "direction_reversals": 11,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -9999.999999999998
+          },
+          {
+            "month": 2,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 3,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 6,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 7,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 10,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 11,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 230000.0,
+        "buy_plus_sell_turnover": 460000.0,
+        "trade_months": 12,
+        "direction_reversals": 11,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -9999.999999999998
+          },
+          {
+            "month": 2,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 3,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 6,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 7,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 10,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 11,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 10.0,
+        "terminal_remaining_deviation_pp": 10.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      }
+    },
+    "just_outside_band": {
+      "immediate_exact": {
+        "gross_sold": 48300.0,
+        "buy_plus_sell_turnover": 96600.0,
+        "trade_months": 12,
+        "direction_reversals": 11,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -2100.000000000002
+          },
+          {
+            "month": 2,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 3,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 4,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 5,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 6,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 7,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 8,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 9,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 10,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 11,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 12,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 48300.0,
+        "buy_plus_sell_turnover": 96600.0,
+        "trade_months": 12,
+        "direction_reversals": 11,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -2100.000000000002
+          },
+          {
+            "month": 2,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 3,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 4,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 5,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 6,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 7,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 8,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 9,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 10,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          },
+          {
+            "month": 11,
+            "target": 0.479,
+            "actual": 0.479,
+            "A_net_buy": -4200.000000000004
+          },
+          {
+            "month": 12,
+            "target": 0.521,
+            "actual": 0.521,
+            "A_net_buy": 4200.000000000004
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 2.1,
+        "terminal_remaining_deviation_pp": 2.1,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.479,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.521,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      }
+    },
+    "permanent_target_change": {
+      "immediate_exact": {
+        "gross_sold": 20000.0,
+        "buy_plus_sell_turnover": 40000.0,
+        "trade_months": 1,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 2,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 20000.0,
+        "buy_plus_sell_turnover": 40000.0,
+        "trade_months": 1,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 2,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 20000.0,
+        "buy_plus_sell_turnover": 40000.0,
+        "trade_months": 1,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 20.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.7,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 3,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.7,
+            "actual": 0.7,
+            "A_net_buy": 0.0
+          }
+        ]
+      }
+    },
+    "slow_drift": {
+      "immediate_exact": {
+        "gross_sold": 6000.0,
+        "buy_plus_sell_turnover": 12000.0,
+        "trade_months": 12,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.505,
+            "actual": 0.505,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.51,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 3,
+            "target": 0.515,
+            "actual": 0.515,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 4,
+            "target": 0.52,
+            "actual": 0.52,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 5,
+            "target": 0.525,
+            "actual": 0.525,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 6,
+            "target": 0.53,
+            "actual": 0.53,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 7,
+            "target": 0.535,
+            "actual": 0.535,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 8,
+            "target": 0.54,
+            "actual": 0.54,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 9,
+            "target": 0.545,
+            "actual": 0.545,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 10,
+            "target": 0.55,
+            "actual": 0.55,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 11,
+            "target": 0.555,
+            "actual": 0.555,
+            "A_net_buy": 500.00000000000045
+          },
+          {
+            "month": 12,
+            "target": 0.56,
+            "actual": 0.56,
+            "A_net_buy": 500.00000000000045
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 5000.0,
+        "buy_plus_sell_turnover": 10000.0,
+        "trade_months": 2,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 2.0,
+        "terminal_remaining_deviation_pp": 1.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.505,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.515,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.52,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.525,
+            "actual": 0.525,
+            "A_net_buy": 2500.0000000000023
+          },
+          {
+            "month": 6,
+            "target": 0.53,
+            "actual": 0.525,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.535,
+            "actual": 0.525,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.54,
+            "actual": 0.525,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.545,
+            "actual": 0.525,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.55,
+            "actual": 0.55,
+            "A_net_buy": 2500.0000000000023
+          },
+          {
+            "month": 11,
+            "target": 0.555,
+            "actual": 0.55,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.56,
+            "actual": 0.55,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 6000.0,
+        "buy_plus_sell_turnover": 12000.0,
+        "trade_months": 2,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 2.5,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.505,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.51,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.515,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.52,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.525,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.53,
+            "actual": 0.53,
+            "A_net_buy": 3000.0000000000027
+          },
+          {
+            "month": 7,
+            "target": 0.535,
+            "actual": 0.53,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.54,
+            "actual": 0.53,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.545,
+            "actual": 0.53,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.55,
+            "actual": 0.53,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.555,
+            "actual": 0.53,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.56,
+            "actual": 0.56,
+            "A_net_buy": 3000.0000000000027
+          }
+        ]
+      }
+    },
+    "persistent_small_change": {
+      "immediate_exact": {
+        "gross_sold": 1900.0,
+        "buy_plus_sell_turnover": 3800.0,
+        "trade_months": 1,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 1900.0000000000016
+          },
+          {
+            "month": 2,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.519,
+            "actual": 0.519,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 1.9,
+        "terminal_remaining_deviation_pp": 1.9,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 0.0,
+        "buy_plus_sell_turnover": 0.0,
+        "trade_months": 0,
+        "direction_reversals": 0,
+        "max_remaining_deviation_pp": 1.9,
+        "terminal_remaining_deviation_pp": 1.9,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.519,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          }
+        ]
+      }
+    },
+    "two_month_reversals": {
+      "immediate_exact": {
+        "gross_sold": 110000.0,
+        "buy_plus_sell_turnover": 220000.0,
+        "trade_months": 6,
+        "direction_reversals": 5,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -9999.999999999998
+          },
+          {
+            "month": 2,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 6,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 10,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp": {
+        "gross_sold": 110000.0,
+        "buy_plus_sell_turnover": 220000.0,
+        "trade_months": 6,
+        "direction_reversals": 5,
+        "max_remaining_deviation_pp": 0.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -9999.999999999998
+          },
+          {
+            "month": 2,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 3,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 6,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 7,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 10,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 11,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          }
+        ]
+      },
+      "band_2pp_confirm_2": {
+        "gross_sold": 110000.0,
+        "buy_plus_sell_turnover": 220000.0,
+        "trade_months": 6,
+        "direction_reversals": 5,
+        "max_remaining_deviation_pp": 20.0,
+        "terminal_remaining_deviation_pp": 0.0,
+        "trace": [
+          {
+            "month": 1,
+            "target": 0.4,
+            "actual": 0.5,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 2,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -9999.999999999998
+          },
+          {
+            "month": 3,
+            "target": 0.6,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 4,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 5,
+            "target": 0.4,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 6,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 7,
+            "target": 0.6,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 8,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          },
+          {
+            "month": 9,
+            "target": 0.4,
+            "actual": 0.6,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 10,
+            "target": 0.4,
+            "actual": 0.4,
+            "A_net_buy": -19999.999999999996
+          },
+          {
+            "month": 11,
+            "target": 0.6,
+            "actual": 0.4,
+            "A_net_buy": 0.0
+          },
+          {
+            "month": 12,
+            "target": 0.6,
+            "actual": 0.6,
+            "A_net_buy": 19999.999999999996
+          }
+        ]
+      }
+    }
+  },
+  "band_sensitivity": {
+    "0": {
+      "gross_sold": 23000.0,
+      "buy_plus_sell_turnover": 46000.0,
+      "trade_months": 12,
+      "direction_reversals": 11,
+      "max_remaining_deviation_pp": 0.0,
+      "terminal_remaining_deviation_pp": 0.0,
+      "trace": [
+        {
+          "month": 1,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -1000.0000000000009
+        },
+        {
+          "month": 2,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 3,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 4,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 5,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 6,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 7,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 8,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 9,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 10,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 11,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 12,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        }
+      ]
+    },
+    "0.005": {
+      "gross_sold": 23000.0,
+      "buy_plus_sell_turnover": 46000.0,
+      "trade_months": 12,
+      "direction_reversals": 11,
+      "max_remaining_deviation_pp": 0.0,
+      "terminal_remaining_deviation_pp": 0.0,
+      "trace": [
+        {
+          "month": 1,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -1000.0000000000009
+        },
+        {
+          "month": 2,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 3,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 4,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 5,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 6,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 7,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 8,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 9,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 10,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        },
+        {
+          "month": 11,
+          "target": 0.49,
+          "actual": 0.49,
+          "A_net_buy": -2000.0000000000018
+        },
+        {
+          "month": 12,
+          "target": 0.51,
+          "actual": 0.51,
+          "A_net_buy": 2000.0000000000018
+        }
+      ]
+    },
+    "0.01": {
+      "gross_sold": 0.0,
+      "buy_plus_sell_turnover": 0.0,
+      "trade_months": 0,
+      "direction_reversals": 0,
+      "max_remaining_deviation_pp": 1.0,
+      "terminal_remaining_deviation_pp": 1.0,
+      "trace": [
+        {
+          "month": 1,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 2,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 3,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 4,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 5,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 6,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 7,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 8,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 9,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 10,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 11,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 12,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        }
+      ]
+    },
+    "0.02": {
+      "gross_sold": 0.0,
+      "buy_plus_sell_turnover": 0.0,
+      "trade_months": 0,
+      "direction_reversals": 0,
+      "max_remaining_deviation_pp": 1.0,
+      "terminal_remaining_deviation_pp": 1.0,
+      "trace": [
+        {
+          "month": 1,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 2,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 3,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 4,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 5,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 6,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 7,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 8,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 9,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 10,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 11,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 12,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        }
+      ]
+    },
+    "0.05": {
+      "gross_sold": 0.0,
+      "buy_plus_sell_turnover": 0.0,
+      "trade_months": 0,
+      "direction_reversals": 0,
+      "max_remaining_deviation_pp": 1.0,
+      "terminal_remaining_deviation_pp": 1.0,
+      "trace": [
+        {
+          "month": 1,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 2,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 3,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 4,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 5,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 6,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 7,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 8,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 9,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 10,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 11,
+          "target": 0.49,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        },
+        {
+          "month": 12,
+          "target": 0.51,
+          "actual": 0.5,
+          "A_net_buy": 0.0
+        }
+      ]
+    }
+  },
+  "production_boundaries": {
+    "named_cases": {
+      "empty_account": {
+        "buy": 0.0,
+        "sell": 0.0,
+        "cash": 0.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "zero_budget_large_drift": {
+        "buy": 0.0,
+        "sell": 0.0,
+        "cash": 0.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "all_purchases_blocked": {
+        "buy": 0.0,
+        "sell": 0.0,
+        "cash": 1000.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "below_purchase_minimum": {
+        "buy": 0.0,
+        "sell": 0.0,
+        "cash": 9.99,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "two_days_205_budget": {
+        "buy": 200.0,
+        "sell": 0.0,
+        "cash": 5.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "reserve_repair_delayed_high_fee": {
+        "buy": 0.0,
+        "sell": 470.5882352941177,
+        "cash": 100.0,
+        "pending": 400.0,
+        "reserve_shortfall": 400.0
+      },
+      "reserve_impossible": {
+        "buy": 0.0,
+        "sell": 100.0,
+        "cash": 0.0,
+        "pending": 100.0,
+        "reserve_shortfall": 1000.0
+      },
+      "settled_explicit_exit": {
+        "buy": 1000.0,
+        "sell": 1000.0,
+        "cash": 0.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      },
+      "unsettled_explicit_exit": {
+        "buy": 0.0,
+        "sell": 1000.0,
+        "cash": 0.0,
+        "pending": 1000.0,
+        "reserve_shortfall": 0.0
+      },
+      "riskfree_and_cash": {
+        "buy": 100.0,
+        "sell": 0.0,
+        "cash": 400.0,
+        "pending": 0.0,
+        "reserve_shortfall": 0.0
+      }
+    },
+    "randomized_cases_passed": 300
+  },
+  "kelly_benchmark_probe": {
+    "synthetic_monthly_mean": 0.004,
+    "ratios_by_annual_benchmark": {
+      "0": 1.0,
+      "0.012": 0.9131166402777993
+    },
+    "same_account_policy_changes": true
+  },
+  "limitations": [
+    "No historical alpha inference",
+    "Toy sell candidates do not model fees, constraints, settlement or market returns",
+    "Production boundaries validate existing executor, not toy candidates",
+    "No fund calendar or exact lot-based settlement validation",
+    "No approved thresholds inferred from experiments"
+  ],
+  "source_sha256": {
+    "analysis/rebalance_boundary_audit.py": "a071540bcd070a40f40edbc6ce763176a7ad095ed307a6814367e2a40f293ecc",
+    "backend/core/execution.py": "4632079e0d3fae61f6ead5f5042af494fa56cb5b868bba8a45c93907761c5511",
+    "backend/core/decision.py": "4508153190f95b10f9be1327e1e1a1b8af702b7571c375a1451e72243f1eb871",
+    "backend/core/strategy.py": "880c9f28440f9c92a15a872e33436c3a3bc6bb97b10358be838ebcedff9c39ea"
+  }
+}

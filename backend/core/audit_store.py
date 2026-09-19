@@ -70,7 +70,9 @@ class AuditStore:
     def save_decision(
         self, decision_input: Any, decision_result: Any, created_at: Any
     ) -> str:
-        decision_hash = canonical_hash(decision_result)
+        decision_hash = canonical_hash(
+            {"input": decision_input, "result": decision_result}
+        )
         self.connection.execute(
             "INSERT OR REPLACE INTO decisions VALUES (?, ?, ?, ?, ?)",
             (

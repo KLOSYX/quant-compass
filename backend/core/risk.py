@@ -6,6 +6,61 @@ import pandas as pd
 from core.portfolio import shrink_frontier_expected_returns
 
 
+def estimate_account_risk(
+    total_return_nav,
+    holdings,
+    total_wealth,
+    *,
+    confidence=0.95,
+    horizon=21,
+    data_verified=True,
+):
+    """Historical scenario proxy at projected exposures, not an account backtest.
+
+    Cash and receivables carry zero modeled return; real fund sleeves use their
+    own observed returns. Insufficient evidence is unavailable, never zero risk.
+    """
+    missing = {
+        "basis": "projected_account_frozen_exposures",
+        "status": "unavailable",
+        "cvar_loss": None,
+        "max_drawdown": None,
+        "annualized_volatility": None,
+        "horizon_days": horizon,
+    }
+    active = {c: v for c, v in holdings.items() if v > 1e-9}
+    if not data_verified or total_return_nav is None or total_wealth <= 0 or not active:
+        return missing
+    if set(active) - set(total_return_nav.columns):
+        return {**missing, "reason": "missing_held_asset_returns"}
+    returns = total_return_nav[list(active)].pct_change(fill_method=None).dropna()
+    if len(returns) < horizon + 1:
+        return {**missing, "reason": "insufficient_observations"}
+    account_returns = returns.mul(pd.Series(active) / total_wealth).sum(axis=1)
+    horizon_returns = (1 + account_returns).rolling(horizon).apply(
+        np.prod, raw=True
+    ) - 1
+    scenarios = horizon_returns.dropna()
+    diagnostic = calculate_cvar_diagnostics(
+        scenarios,
+        confidence,
+        risk_horizon_days=horizon,
+        minimum_tail_observations=5,
+        observation_stride=horizon,
+    )
+    return {
+        "basis": "projected_account_frozen_exposures",
+        "status": diagnostic["confidence_status"],
+        "cvar_loss": calculate_cvar_loss(scenarios, confidence),
+        "max_drawdown": calculate_drawdown_from_returns(account_returns),
+        "annualized_volatility": float(account_returns.std(ddof=1) * np.sqrt(252)),
+        "observations": len(returns),
+        "horizon_days": horizon,
+        "effective_tail_count": diagnostic["cvar_effective_tail_count"],
+        "cash_and_receivables_return": 0.0,
+    }
+
+
 def calculate_nav_max_drawdown(nav_series: pd.Series) -> float:
     nav = pd.Series(nav_series, dtype=float)
     if nav.empty:

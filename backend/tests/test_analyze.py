@@ -20,7 +20,7 @@ def test_analyze_portfolio_success():
             "fund_codes": ["000001", "000002"],
             "fund_fees": {"000001": 0.015, "000002": 0.01},
             "start_date": "2023-01-15",
-            "end_date": "2023-03-15",
+            "end_date": "2023-03-31",
             "risk_free_rate": 0.02,
         }
 

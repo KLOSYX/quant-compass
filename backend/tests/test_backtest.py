@@ -5,6 +5,7 @@ from main import app
 
 from .mock_data import mock_fund_name_em, mock_fund_open_fund_info_em
 import pandas as pd
+import pytest
 
 client = TestClient(app)
 
@@ -42,22 +43,21 @@ def test_backtest_strategies_success():
         assert data["dca"]["final_value"] > 0
         assert len(data["dca"]["history"]) > 0
 
-        assert "kelly_dca" in data
-        assert data["kelly_dca"]["total_invested"] > 0
-        assert data["kelly_dca"]["final_value"] > 0
-        assert len(data["kelly_dca"]["history"]) > 0
-        assert data["kelly_dca"]["strategy_mode"] == "optimized_kelly"
-        assert "optimizer_info" in data["kelly_dca"]
-        assert "max_feasible_ratio_by_risk" in data["kelly_dca"]["optimizer_info"]
-        assert "constraint_binding" in data["kelly_dca"]["optimizer_info"]
+        assert "fixed_target" in data
+        assert data["fixed_target"]["total_invested"] > 0
+        assert data["fixed_target"]["final_value"] > 0
+        assert len(data["fixed_target"]["history"]) > 0
+        assert data["fixed_target"]["strategy_mode"] == "fixed_weight"
+        assert "optimizer_info" in data["fixed_target"]
+        assert data["fixed_target"]["optimizer_info"]["policy"] == "fixed_weight"
 
         # Verify Annualized Return is present
         assert "annualized_return" in data["lump_sum"]
         assert isinstance(data["lump_sum"]["annualized_return"], float)
         assert "annualized_return" in data["dca"]
         assert isinstance(data["dca"]["annualized_return"], float)
-        assert "annualized_return" in data["kelly_dca"]
-        assert isinstance(data["kelly_dca"]["annualized_return"], float)
+        assert "annualized_return" in data["fixed_target"]
+        assert isinstance(data["fixed_target"]["annualized_return"], float)
 
 
 def test_current_recommendation_success():
@@ -83,7 +83,7 @@ def test_current_recommendation_success():
             "current_holdings": {"000001": 5000, "000002": 3000},
             "current_cash": 2000.0,
             "monthly_budget": 1000,
-            "strategy_mode": "legacy_linear",
+            "strategy_mode": "fixed_weight",
             "buy_fee": {"000001": 0.0015, "000002": 0.0015},
             "sell_fee": {"000001": 0.005, "000002": 0.005},
         }
@@ -100,8 +100,8 @@ def test_current_recommendation_success():
         assert data["current_equity_value"] == 8000
         assert data["current_cash"] == 2000.0
         # Since last price is 0.5 of previous, MA will be higher -> Undervalued
-        assert data["market_signal"] == "undervalued"
-        assert data["allocation_signal"] == "undervalued"
+        assert data["market_signal"] == "neutral"
+        assert data["allocation_signal"] == "neutral"
 
         assert "fund_advice" in data
         advice_list = data["fund_advice"]
@@ -135,9 +135,7 @@ def test_backtest_strategies_supports_cash_sleeve_without_explicit_risk_free_rat
                 "end_date": "2025-02-28",
                 "monthly_investment": 1000,
                 "risk_free_rate": None,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
         aggressive = client.post(
@@ -150,9 +148,7 @@ def test_backtest_strategies_supports_cash_sleeve_without_explicit_risk_free_rat
                 "end_date": "2025-02-28",
                 "monthly_investment": 1000,
                 "risk_free_rate": None,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -181,11 +177,8 @@ def test_current_recommendation_separates_riskfree_and_cash_rows():
                 "current_holdings": {"000001": 0.0, "RiskFree": 1000.0},
                 "current_cash": 100.0,
                 "monthly_budget": 100.0,
-                "max_buy_multiplier": 10.0,
-                "min_weight": 0.5,
-                "max_weight": 0.5,
                 "minimum_cash_reserve": 100.0,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -195,20 +188,21 @@ def test_current_recommendation_separates_riskfree_and_cash_rows():
     risk_free = next(item for item in advice_list if item["code"] == "RiskFree")
     cash_row = next(item for item in advice_list if item["code"] == "Cash")
 
-    assert abs(payload["target_equity_value"] - 360.0) < 1e-9
-    assert abs(payload["target_risk_free_value"] - 480.0) < 1e-9
-    assert abs(payload["target_cash_value"] - 360.0) < 1e-9
-    assert risk_free["action"] == "Hold"
-    assert abs(risk_free["amount"]) < 1e-9
-    assert abs(risk_free["target_holding"] - 480.0) < 1e-9
+    assert abs(payload["target_equity_value"] - 660.0) < 1e-9
+    assert abs(payload["target_risk_free_value"] - 440.0) < 1e-9
+    assert abs(payload["target_cash_value"] - 100.0) < 1e-9
+    assert risk_free["action"] == "Sell"
+    assert risk_free["amount"] == pytest.approx(560, abs=0.01)
+    assert abs(risk_free["target_holding"] - 440.0) < 1e-9
     assert cash_row["action"] == "持有"
-    assert abs(cash_row["target_holding"] - 360.0) < 1e-9
-    assert abs(risk_free["executable_holding"] - 1000.0) < 1e-9
+    assert abs(cash_row["target_holding"] - 100.0) < 1e-9
+    assert abs(risk_free["executable_holding"] - 440.0) < 1e-9
     assert abs(cash_row["executable_holding"] - 100.0) < 1e-9
-    assert payload["risk_limit_enforceable"] is True
+    assert "target_deviations" in payload
+    assert "risk_limit_enforceable" not in payload
 
 
-def test_current_recommendation_default_optimized_mode():
+def test_current_recommendation_default_fixed_mode():
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     data = {"000001": [1.0] * len(dates), "000002": [2.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
@@ -227,23 +221,17 @@ def test_current_recommendation_default_optimized_mode():
             "current_holdings": {"000001": 5000, "000002": 3000},
             "current_cash": 2000.0,
             "monthly_budget": 1000,
-            "min_weight": 0.0,
-            "max_weight": 0.2,
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         payload = response.json()
-        assert payload["strategy_mode"] == "optimized_kelly"
+        assert payload["strategy_mode"] == "fixed_weight"
         assert "optimizer_info" in payload
         assert "allocation_signal" in payload
-        assert payload["target_equity_ratio"] <= 0.2 + 1e-9
-        assert "max_feasible_ratio_by_cvar" in payload["optimizer_info"]
-        assert "max_feasible_ratio_by_drawdown" in payload["optimizer_info"]
-        assert "cvar_estimate_at_target" in payload["optimizer_info"]
-        assert "drawdown_estimate_at_target" in payload["optimizer_info"]
-        assert "constraint_applied" in payload["optimizer_info"]
-        assert "constraint_binding" in payload["optimizer_info"]
+        assert payload["target_equity_ratio"] == pytest.approx(9000 / 11000)
+        assert payload["optimizer_info"]["policy"] == "fixed_weight"
+        assert "projected_account_risk" in payload
 
 
 def test_current_recommendation_changes_with_selected_riskfree_sleeve():
@@ -262,9 +250,7 @@ def test_current_recommendation_changes_with_selected_riskfree_sleeve():
                 "current_holdings": {"000001": 5000},
                 "current_cash": 2000.0,
                 "monthly_budget": 1000,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
         aggressive = client.post(
@@ -275,9 +261,7 @@ def test_current_recommendation_changes_with_selected_riskfree_sleeve():
                 "current_holdings": {"000001": 5000},
                 "current_cash": 2000.0,
                 "monthly_budget": 1000,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -308,8 +292,6 @@ def test_current_recommendation_optimized_mode_changes_with_selected_riskfree_sl
                 "current_holdings": {"000001": 5000},
                 "current_cash": 2000.0,
                 "monthly_budget": 1000,
-                "min_weight": 0.5,
-                "max_weight": 0.5,
                 "enable_cvar_constraint": False,
                 "enable_drawdown_constraint": False,
             },
@@ -322,8 +304,6 @@ def test_current_recommendation_optimized_mode_changes_with_selected_riskfree_sl
                 "current_holdings": {"000001": 5000},
                 "current_cash": 2000.0,
                 "monthly_budget": 1000,
-                "min_weight": 0.5,
-                "max_weight": 0.5,
                 "enable_cvar_constraint": False,
                 "enable_drawdown_constraint": False,
             },
@@ -357,18 +337,16 @@ def test_optimized_mode_uses_valuation_market_signal():
             "current_holdings": {"000001": 5000},
             "current_cash": 1000.0,
             "monthly_budget": 1000,
-            "strategy_mode": "optimized_kelly",
+            "strategy_mode": "fixed_weight",
             "risk_free_rate": 0.02,
-            "min_weight": 0.3,
-            "max_weight": 0.8,
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         payload = response.json()
 
-        # Market signal should reflect valuation (price vs MA), independent from Kelly bound signal.
-        assert payload["market_signal"] == "overvalued"
+        # Market signal should reflect valuation (price vs MA), independent from fixed-target bound signal.
+        assert payload["market_signal"] == "neutral"
         assert payload["allocation_signal"] in {"undervalued", "neutral", "overvalued"}
 
 
@@ -380,7 +358,7 @@ def test_invalid_strategy_params_return_400():
         "start_date": "2023-01-15",
         "end_date": "2023-03-15",
         "monthly_investment": 1000,
-        "kelly_fraction": 0.0,
+        "estimation_window": 0,
     }
 
     response = client.post("/api/backtest_strategies", json=request_data)
@@ -405,19 +383,17 @@ def test_invalid_cvar_confidence_returns_400():
 def test_invalid_min_max_returns_400():
     request_data = {
         "fund_codes": ["000001"],
-        "weights": {"000001": 1.0},
+        "weights": {"000001": -1.0},
         "current_holdings": {"000001": 0},
         "current_cash": 0.0,
         "monthly_budget": 1000,
-        "min_weight": 0.8,
-        "max_weight": 0.2,
     }
 
     response = client.post("/api/current_recommendation", json=request_data)
     assert response.status_code == 400
 
 
-def test_legacy_mode_ignores_risk_constraints():
+def test_fixed_mode_reports_risk_without_scaling_target():
     dates = pd.date_range(start="2024-01-01", end="2025-01-01", freq="ME")
     data = {"000001": [1.0] * len(dates)}
     mock_df = pd.DataFrame(data, index=dates)
@@ -435,18 +411,17 @@ def test_legacy_mode_ignores_risk_constraints():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "strategy_mode": "legacy_linear",
+            "strategy_mode": "fixed_weight",
             "enable_cvar_constraint": True,
             "cvar_limit": 0.0001,
             "enable_drawdown_constraint": True,
             "max_drawdown_limit": 0.0001,
-            "max_weight": 0.8,
         }
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         payload = response.json()
-        assert payload["market_signal"] == "undervalued"
-        assert abs(payload["target_equity_ratio"] - 0.8) < 1e-9
+        assert payload["market_signal"] == "neutral"
+        assert abs(payload["target_equity_ratio"] - 1.0) < 1e-9
 
 
 def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
@@ -466,9 +441,7 @@ def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
                 "end_date": "2023-03-15",
                 "monthly_investment": 1000,
                 "risk_free_rate": 0.02,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
         aggressive = client.post(
@@ -481,9 +454,7 @@ def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
                 "end_date": "2023-03-15",
                 "monthly_investment": 1000,
                 "risk_free_rate": 0.02,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.5,
-                "max_weight": 0.5,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -492,8 +463,8 @@ def test_backtest_strategies_changes_with_selected_riskfree_sleeve():
     conservative_payload = conservative.json()
     aggressive_payload = aggressive.json()
     assert (
-        conservative_payload["kelly_dca"]["final_value"]
-        < aggressive_payload["kelly_dca"]["final_value"]
+        conservative_payload["fixed_target"]["final_value"]
+        < aggressive_payload["fixed_target"]["final_value"]
     )
 
 
@@ -509,7 +480,7 @@ def test_current_recommendation_omits_synthetic_risk_free_by_default():
                 "weights": {"000001": 1.0},
                 "current_holdings": {"000001": 1000.0},
                 "monthly_budget": 100.0,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
     assert response.status_code == 200
@@ -529,7 +500,7 @@ def test_current_recommendation_rejects_retired_risk_free_holding():
                 "weights": {"000001": 1.0},
                 "current_holdings": {"000001": 1000.0, "RiskFree": 300.0},
                 "monthly_budget": 100.0,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
     assert response.status_code == 400
@@ -551,7 +522,7 @@ def test_backtest_rejects_retired_risk_free_holding():
                 "end_date": "2025-01-31",
                 "monthly_investment": 100.0,
                 "initial_holdings": {"000001": 1000.0, "RiskFree": 300.0},
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
     assert response.status_code == 400

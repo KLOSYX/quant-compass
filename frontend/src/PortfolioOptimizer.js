@@ -1,123 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from './LanguageContext';
 import ReactECharts from 'echarts-for-react';
-import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, Download, RotateCcw, ChevronDown } from 'lucide-react';
+import { Plus, X, ArrowRight, Settings, Info, TrendingUp, DollarSign, Wallet, Calendar, RotateCcw, ChevronDown } from 'lucide-react';
 import AssetDiagnosticsPanel from './AssetDiagnosticsPanel';
 import { downloadPortfolioReport } from './exportPortfolioReport';
 
-const getISODate = (date) => date.toISOString().split('T')[0];
-const formatDD = (obj, key, fallbackKey) => {
-    const val = obj?.[key] ?? obj?.[fallbackKey];
-    if (val === undefined || val === null) return '--';
-    return `${(val * 100).toFixed(2)}%`;
-};
-const formatPercentValue = (value, digits = 2) => (
-    value === undefined || value === null || !Number.isFinite(Number(value))
-        ? '--'
-        : `${(Number(value) * 100).toFixed(digits)}%`
-);
-const formatRatio = (value, digits = 2) => (
-    value === undefined || value === null || !Number.isFinite(Number(value))
-        ? '--'
-        : Number(value).toFixed(digits)
-);
+import { getISODate, formatDD, formatPercentValue, formatRatio, formatMoney, getStoredNumber, getStoredPercentWithLegacyRatioSupport, sanitizeLegacyHoldings, ASSET_CATEGORY_OPTIONS, buildAssetCategoriesPayload, buildSubstituteForPayload, getRecommendedFrontierPoint, getRecommendationEvidence } from "./portfolioViewUtils";
+import MonthlyRecommendation from "./MonthlyRecommendation";
 
-// Format money values for better readability (e.g., 1234567 -> "123.46万")
-const formatMoney = (value) => {
-    if (value === null || value === undefined) return '--';
-    const num = Number(value);
-    if (isNaN(num)) return '--';
-
-    const absNum = Math.abs(num);
-    const sign = num < 0 ? '-' : '';
-
-    if (absNum >= 100000000) {
-        // >= 1亿
-        return `${sign}${(absNum / 100000000).toFixed(2)}亿`;
-    } else if (absNum >= 10000) {
-        // >= 1万
-        return `${sign}${(absNum / 10000).toFixed(2)}万`;
-    } else if (absNum >= 1) {
-        return `${sign}${absNum.toFixed(2)}`;
-    } else {
-        return `${sign}${absNum.toFixed(2)}`;
-    }
-};
-
-const getAdviceActionMeta = (action, t) => {
-    if (action === 'Buy') {
-        return { label: t('action_buy'), badgeClass: 'buy' };
-    }
-    if (action === 'Sell') {
-        return { label: t('action_sell'), badgeClass: 'sell' };
-    }
-    if (action === '存入' || action === 'Deposit') {
-        return { label: t('action_deposit'), badgeClass: 'deposit' };
-    }
-    if (action === '取用' || action === 'Withdraw') {
-        return { label: t('action_withdraw'), badgeClass: 'withdraw' };
-    }
-    return { label: t('action_hold'), badgeClass: 'hold' };
-};
-
-const getAllocationSignalLabel = (signal, t) => {
-    if (signal === 'undervalued') return t('allocation_upper');
-    if (signal === 'overvalued') return t('allocation_lower');
-    return t('allocation_neutral');
-};
-
-const getStoredNumber = (key, fallback) => {
-    const raw = localStorage.getItem(key);
-    if (raw === null || raw === undefined || raw === '') return fallback;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const getStoredPercentWithLegacyRatioSupport = (key, fallback) => {
-    const raw = localStorage.getItem(key);
-    if (raw === null || raw === undefined || raw === '') return fallback;
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return fallback;
-    // Legacy versions persisted ratios (0~1). Current UI expects percentages (0~100).
-    if (parsed > 0 && parsed <= 1) {
-        const migrated = parsed * 100;
-        localStorage.setItem(key, String(migrated));
-        return migrated;
-    }
-    return parsed;
-};
-
-export const sanitizeLegacyHoldings = (holdings = {}) => Object.fromEntries(
-    Object.entries(holdings).filter(([code]) => code !== 'RiskFree')
-);
-export const ASSET_CATEGORY_OPTIONS = ['equity', 'bond', 'commodity', 'gold', 'money_market', 'cash_equivalent', 'other'];
-export const buildAssetCategoriesPayload = (fundCodes, categories = {}) => Object.fromEntries(
-    fundCodes.map(code => [code, ASSET_CATEGORY_OPTIONS.includes(categories[code]) ? categories[code] : 'other'])
-);
-export const buildSubstituteForPayload = (fundCodes, relationships = {}) => {
-    const currentCodes = new Set(fundCodes);
-    return Object.fromEntries(
-        fundCodes
-            .map(code => [code, String(relationships[code] || '').trim()])
-            .filter(([code, primary]) => primary && primary !== code && currentCodes.has(primary))
-    );
-};
-export const getRecommendedFrontierPoint = (analysis) => {
-    const index = analysis?.recommended_point_index;
-    if (!Number.isInteger(index) || index < 0) return null;
-    return analysis?.efficient_frontier?.[index] || null;
-};
-export const getRecommendationEvidence = (analysis) => {
-    const point = getRecommendedFrontierPoint(analysis);
-    const selection = analysis?.recommended_point_selection;
-    if (!point || !selection) return null;
-    return {
-        point,
-        eligibleCount: selection.eligible_count ?? 0,
-        totalCount: selection.total_count ?? analysis?.efficient_frontier?.length ?? 0,
-        confidence: selection.confidence || 'none'
-    };
-};
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
     const [fundCodes, setFundCodes] = useState([]);
@@ -156,7 +46,10 @@ function PortfolioOptimizer() {
     });
     const [endDate, setEndDate] = useState(() => localStorage.getItem('endDate') || getISODate(new Date()));
     const [analysisResult, setAnalysisResult] = useState(null);
-    const [selectedPoint, setSelectedPoint] = useState(null);
+    const [selectedPoint, setSelectedPoint] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('confirmedTarget') || 'null'); }
+        catch (_) { return null; }
+    });
     const [monthlyInvestment, setMonthlyInvestment] = useState(() => localStorage.getItem('monthlyInvestment') || '');
     const [initialHoldings, setInitialHoldings] = useState(() => {
         let stored = {};
@@ -166,18 +59,44 @@ function PortfolioOptimizer() {
             stored = {};
         }
         const sanitized = sanitizeLegacyHoldings(stored);
-        if (Object.prototype.hasOwnProperty.call(stored, 'RiskFree')) {
-            localStorage.setItem('initialHoldings', JSON.stringify(sanitized));
-        }
         return sanitized;
     });
     const [currentCash, setCurrentCash] = useState(() => localStorage.getItem('currentCash') || '');
 
     // Advanced Strategy Parameters
     const [showAdvancedParams, setShowAdvancedParams] = useState(false);
-    const [strategyMode, setStrategyMode] = useState(() => localStorage.getItem('strategyMode') || 'optimized_kelly');
-    const [kellyFraction, setKellyFraction] = useState(() => getStoredPercentWithLegacyRatioSupport('kellyFraction', 50)); // pct
     const [estimationWindow, setEstimationWindow] = useState(() => getStoredNumber('estimationWindow', 36));
+    const [rebalanceBand, setRebalanceBand] = useState(() => getStoredNumber('rebalanceBand', 2));
+    const [availableCash, setAvailableCash] = useState(() => getStoredNumber('availableCash', 0));
+    const [pendingProceeds, setPendingProceeds] = useState(() => getStoredNumber('pendingProceeds', 0));
+    const [pendingSells, setPendingSells] = useState(() => JSON.parse(localStorage.getItem('pendingSells') || '{}'));
+    const [redemptionLimits, setRedemptionLimits] = useState(() => JSON.parse(localStorage.getItem('redemptionLimits') || '{}'));
+    const [purchaseDates, setPurchaseDates] = useState('');
+    const [addedExceptionCodes, setAddedExceptionCodes] = useState([]);
+    const exceptionCodes = fundCodes.filter(code => addedExceptionCodes.includes(code)
+        || (pendingSells[code] !== undefined && pendingSells[code] !== '')
+        || (redemptionLimits[code] !== undefined && redemptionLimits[code] !== ''));
+    const updateException = (code, value, state, setter, storageKey) => {
+        const next = { ...state, [code]: value };
+        setter(next);
+        localStorage.setItem(storageKey, JSON.stringify(next));
+    };
+    const removeException = code => {
+        setAddedExceptionCodes(previous => previous.filter(item => item !== code));
+        updateException(code, '', pendingSells, setPendingSells, 'pendingSells');
+        updateException(code, '', redemptionLimits, setRedemptionLimits, 'redemptionLimits');
+    };
+
+    const executionSettings = (live = false) => ({
+        rebalance_band: Number(rebalanceBand) / 100,
+        available_existing_cash: Number(availableCash),
+        redemption_limits: Object.fromEntries(Object.entries(redemptionLimits).filter(([, v]) => v !== '').map(([c, v]) => [c, Number(v)])),
+        ...(live ? {
+            pending_sale_proceeds: Number(pendingProceeds),
+            pending_sell_amounts: Object.fromEntries(Object.entries(pendingSells).filter(([, v]) => v !== '').map(([c, v]) => [c, Number(v)])),
+            planned_purchase_dates: purchaseDates.trim() ? purchaseDates.trim().split(/[，,\s]+/) : []
+        } : {})
+    });
     const [minimumCashReserve, setMinimumCashReserve] = useState(() => getStoredNumber('minimumCashReserve', 0));
     const [enableCvarConstraint, setEnableCvarConstraint] = useState(() => {
         const saved = localStorage.getItem('enableCvarConstraint');
@@ -191,9 +110,6 @@ function PortfolioOptimizer() {
         return saved === null ? true : JSON.parse(saved);
     });
     const [maxDrawdownLimit, setMaxDrawdownLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('maxDrawdownLimit', 20)); // pct
-    const [minWeight, setMinWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('minWeight', 30)); // pct
-    const [maxWeight, setMaxWeight] = useState(() => getStoredPercentWithLegacyRatioSupport('maxWeight', 80)); // pct
-    const [maWindow, setMaWindow] = useState(() => getStoredNumber('maWindow', 12));
     const [plannedPurchaseDays, setPlannedPurchaseDays] = useState(
         () => getStoredNumber('plannedPurchaseDays', 1)
     );
@@ -209,8 +125,8 @@ function PortfolioOptimizer() {
 
     const clearAnalysisOutputs = () => {
         setAnalysisResult(null);
-        setSelectedPoint(null);
         setStrategyResult(null);
+        setRecommendationResult(null);
         setRecommendationResult(null);
         setShowPortfolioDetails(false);
     };
@@ -400,11 +316,11 @@ function PortfolioOptimizer() {
 
     const handleAnalysisSubmit = async (e) => {
         e.preventDefault();
-        setLoading({ ...loading, analysis: true });
+        setLoading(prev => ({ ...prev, analysis: true }));
         setError(null);
         setAnalysisResult(null);
-        setSelectedPoint(null);
         setStrategyResult(null);
+        setRecommendationResult(null);
 
         try {
             const feesAsFloats = Object.entries(fundFees).reduce((acc, [code, fee]) => {
@@ -412,18 +328,16 @@ function PortfolioOptimizer() {
                 acc[code] = isNaN(parsedFee) ? 0 : parsedFee / 100;
                 return acc;
             }, {});
-            const parsedKellyFraction = parseFloat(kellyFraction);
             const parsedEstimationWindow = parseInt(estimationWindow, 10);
             const parsedMinimumCashReserve = parseFloat(minimumCashReserve);
             const parsedCvarConfidence = parseFloat(cvarConfidence);
             const parsedCvarLimit = parseFloat(cvarLimit);
             const parsedRiskHorizonDays = parseInt(riskHorizonDays, 10);
             const parsedMaxDrawdownLimit = parseFloat(maxDrawdownLimit);
-            const parsedMinWeight = parseFloat(minWeight);
-            const parsedMaxWeight = parseFloat(maxWeight);
-            const parsedMaWindow = parseInt(maWindow, 10);
 
             const payload = {
+                target_weights: selectedPoint?.weights && Object.keys(selectedPoint.weights).every(code => fundCodes.includes(code))
+                    ? selectedPoint.weights : undefined,
                 fund_codes: fundCodes,
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
@@ -431,8 +345,7 @@ function PortfolioOptimizer() {
                 planned_purchase_days: Number(plannedPurchaseDays) || 1,
                 start_date: startDate,
                 end_date: endDate,
-                strategy_mode: strategyMode,
-                kelly_fraction: (Number.isNaN(parsedKellyFraction) ? 50 : parsedKellyFraction) / 100,
+                strategy_mode: 'fixed_weight',
                 estimation_window: Number.isNaN(parsedEstimationWindow) ? 36 : parsedEstimationWindow,
                 minimum_cash_reserve: Number.isNaN(parsedMinimumCashReserve) ? 0 : parsedMinimumCashReserve,
                 enable_cvar_constraint: enableCvarConstraint,
@@ -441,10 +354,7 @@ function PortfolioOptimizer() {
                 risk_horizon_days: Number.isNaN(parsedRiskHorizonDays) ? 21 : parsedRiskHorizonDays,
                 enable_drawdown_constraint: enableDrawdownConstraint,
                 max_drawdown_limit: (Number.isNaN(parsedMaxDrawdownLimit) ? 20 : parsedMaxDrawdownLimit) / 100,
-                min_weight: (Number.isNaN(parsedMinWeight) ? 30 : parsedMinWeight) / 100,
-                max_weight: (Number.isNaN(parsedMaxWeight) ? 80 : parsedMaxWeight) / 100,
                 fund_investment_limits: buildFundInvestmentLimitsPayload(),
-                ma_window: Number.isNaN(parsedMaWindow) ? 12 : parsedMaWindow,
             };
 
             const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -458,14 +368,23 @@ function PortfolioOptimizer() {
                 });
             }
             setAnalysisResult(result);
-            if (result.recommended_point_index !== null && result.recommended_point_index !== undefined) {
-                setSelectedPoint(result.efficient_frontier[result.recommended_point_index] || null);
+            if (selectedPoint?.weights && Object.keys(selectedPoint.weights).every(code => fundCodes.includes(code) || code === 'RiskFree')) {
+                setSelectedPoint({ ...selectedPoint, risk: null, return: null, target_source: 'confirmed_selection' });
+            } else if (selectedPoint?.weights) {
+                setSelectedPoint(null);
+                localStorage.removeItem('confirmedTarget');
+                setError(t('target_universe_changed'));
+            } else if (result.recommended_point_index !== null && result.recommended_point_index !== undefined) {
+                const initialTarget = result.efficient_frontier[result.recommended_point_index] || null;
+                setSelectedPoint(initialTarget);
+            } else if (result.fallback_target) {
+                setSelectedPoint(result.fallback_target);
             }
             setShowPortfolioDetails(false);
         } catch (err) {
             setError(err.message);
         } finally {
-            setLoading({ ...loading, analysis: false });
+            setLoading(prev => ({ ...prev, analysis: false }));
         }
     };
 
@@ -490,18 +409,19 @@ function PortfolioOptimizer() {
             const idealHoldings = {};
             if (totalCapital > 0) {
                 Object.entries(weights).forEach(([code, weight]) => {
-                    idealHoldings[code] = totalCapital * weight;
+                    idealHoldings[code] = Math.max(0, totalCapital - totalCash) * weight;
                 });
             }
 
             // ACTUAL: User's real holdings + separate cash balance
             const actualHoldings = Object.entries(sanitizeLegacyHoldings(initialHoldings)).reduce((acc, [code, val]) => {
                 const v = parseFloat(val);
-                if (v > 0) acc[code] = v;
+                if (Number.isFinite(v)) acc[code] = v;
                 return acc;
             }, {});
 
             const basePayload = {
+                ...executionSettings(),
                 fund_codes: fundCodes,
                 weights,
                 fund_fees: feesAsFloats,
@@ -511,13 +431,7 @@ function PortfolioOptimizer() {
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
-                min_weight: parseFloat(minWeight) / 100,
-                max_weight: parseFloat(maxWeight) / 100,
-                strategy_mode: strategyMode,
-                kelly_fraction: (() => {
-                    const value = parseFloat(kellyFraction);
-                    return (Number.isNaN(value) ? 50 : value) / 100;
-                })(),
+                strategy_mode: 'fixed_weight',
                 estimation_window: (() => {
                     const value = parseInt(estimationWindow, 10);
                     return Number.isNaN(value) ? 36 : value;
@@ -547,12 +461,11 @@ function PortfolioOptimizer() {
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 fund_investment_limits: buildFundInvestmentLimitsPayload(),
-                ma_window: parseInt(maWindow)
             };
 
             // Run BOTH backtests in parallel
             const [idealRes, actualRes] = await Promise.all([
-                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings, initial_cash: 0, include_walk_forward: false }) }),
+                fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: idealHoldings, initial_cash: totalCash, include_walk_forward: false }) }),
                 fetch('/api/backtest_strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...basePayload, initial_holdings: actualHoldings, initial_cash: totalCash, include_walk_forward: true }) })
             ]);
 
@@ -565,8 +478,8 @@ function PortfolioOptimizer() {
             // Store both results - keep backward compatible structure
             setStrategyResult({
                 ...idealData,
-                ideal_kelly_dca: idealData.kelly_dca,
-                actual_kelly_dca: actualData.kelly_dca,
+                ideal_fixed_target: idealData.fixed_target,
+                actual_fixed_target: actualData.fixed_target,
                 walk_forward: actualData.walk_forward
             });
         } catch (err) {
@@ -581,7 +494,7 @@ function PortfolioOptimizer() {
         try {
             const holdingsAsFloats = Object.entries(sanitizeLegacyHoldings(initialHoldings)).reduce((acc, [code, val]) => {
                 const parsed = parseFloat(val);
-                if (!isNaN(parsed) && parsed > 0) {
+                if (!isNaN(parsed)) {
                     acc[code] = parsed;
                 }
                 return acc;
@@ -602,14 +515,9 @@ function PortfolioOptimizer() {
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
+                ...executionSettings(true),
                 monthly_budget: parseFloat(monthlyInvestment) || 0,
-                min_weight: parseFloat(minWeight) / 100,
-                max_weight: parseFloat(maxWeight) / 100,
-                strategy_mode: strategyMode,
-                kelly_fraction: (() => {
-                    const value = parseFloat(kellyFraction);
-                    return (Number.isNaN(value) ? 50 : value) / 100;
-                })(),
+                strategy_mode: 'fixed_weight',
                 estimation_window: (() => {
                     const value = parseInt(estimationWindow, 10);
                     return Number.isNaN(value) ? 36 : value;
@@ -639,14 +547,13 @@ function PortfolioOptimizer() {
                 buy_fee: Object.entries(fundBuyFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 sell_fee: Object.entries(fundSellFees).reduce((acc, [k, v]) => { acc[k] = parseFloat(v) / 100 || 0; return acc; }, {}),
                 fund_investment_limits: buildFundInvestmentLimitsPayload(),
-                ma_window: parseInt(maWindow)
             };
 
             const response = await fetch('/api/current_recommendation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) throw new Error((await response.json()).detail);
             setRecommendationResult(await response.json());
         } catch (err) {
-            console.error("Failed to get recommendation", err);
+            setError(err.message);
         } finally {
             setLoading((prev) => ({ ...prev, recommendation: false }));
         }
@@ -654,6 +561,11 @@ function PortfolioOptimizer() {
 
     const handleStrategySubmit = async () => {
         if (!selectedPoint) return;
+        if (Object.keys(selectedPoint.weights).some(code => !fundCodes.includes(code) && code !== 'RiskFree')) {
+            setError(t('target_universe_changed'));
+            return;
+        }
+        localStorage.setItem('confirmedTarget', JSON.stringify(selectedPoint));
         if (!monthlyInvestment) {
             setBudgetError(t('monthly_budget_required'));
             return;
@@ -661,7 +573,11 @@ function PortfolioOptimizer() {
         setBudgetError('');
         setStrategyResult(null);
         setRecommendationResult(null);
-        await Promise.all([runBacktests(selectedPoint.weights), getRecommendation()]);
+        if (analysisResult?.analysis_status === 'target_only_fallback') {
+            await getRecommendation();
+        } else {
+            await Promise.all([runBacktests(selectedPoint.weights), getRecommendation()]);
+        }
     };
 
     const toggleBacktestNote = () => {
@@ -678,43 +594,19 @@ function PortfolioOptimizer() {
     const onChartClick = (params) => {
         const selected = analysisResult?.efficient_frontier?.[params.dataIndex];
         if (!selected) return;
-        const { risk: chartRisk } = selected;
         setSelectedPoint(selected);
+        localStorage.setItem('confirmedTarget', JSON.stringify(selected));
         setStrategyResult(null);
         setRecommendationResult(null);
 
-        // Auto-tune parameters based on risk/return profile
-        // Find relative position in the frontier
-        if (analysisResult && analysisResult.efficient_frontier) {
-            const frontier = analysisResult.efficient_frontier;
-            const risks = frontier.map(p => p.risk);
-            const minRisk = Math.min(...risks);
-            const maxRisk = Math.max(...risks);
 
-            let newMinWeight = 30;
-            let newMaxWeight = 80;
-
-            if (maxRisk > minRisk) {
-                const riskLevel = (chartRisk - minRisk) / (maxRisk - minRisk); // 0 to 1
-                newMinWeight = 40 + (riskLevel * 50); // 40 -> 90
-                newMaxWeight = 80 + (riskLevel * 20); // 80 -> 100
-            }
-
-            // Round to nearest 5
-            newMinWeight = Math.round(newMinWeight / 5) * 5;
-            newMaxWeight = Math.round(newMaxWeight / 5) * 5;
-
-            setMinWeight(newMinWeight);
-            setMaxWeight(newMaxWeight);
-            localStorage.setItem('minWeight', newMinWeight);
-            localStorage.setItem('maxWeight', newMaxWeight);
-        }
     };
 
     const handleResetToRecommendedPoint = () => {
         const recommended = getRecommendedFrontierPoint(analysisResult);
         if (!recommended) return;
         setSelectedPoint(recommended);
+        localStorage.setItem('confirmedTarget', JSON.stringify(recommended));
         setStrategyResult(null);
         setRecommendationResult(null);
         setBudgetError('');
@@ -836,8 +728,8 @@ function PortfolioOptimizer() {
         const titleMap = {
             'lump_sum': t('strat_lump_sum'),
             'dca': t('strat_dca'),
-            'ideal_kelly_dca': t('strat_ideal_kelly'),
-            'actual_kelly_dca': t('strat_actual_kelly')
+            'ideal_fixed_target': t('strat_ideal_fixed_target'),
+            'actual_fixed_target': t('strat_actual_fixed_target')
         };
         return {
             backgroundColor: 'transparent',
@@ -1031,8 +923,16 @@ function PortfolioOptimizer() {
                                 </details>
                             )}
 
-                            <ReactECharts className="frontier-chart" option={getFrontierOptions()} style={{ height: 430 }} onEvents={{ 'click': onChartClick }} />
-                            <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
+                            {analysisResult.analysis_status === 'target_only_fallback' ? (
+                                <div role="status" className="recommendation-diagnostic diagnostic-warning">
+                                    {analysisResult.fallback_message}
+                                </div>
+                            ) : (
+                                <>
+                                    <ReactECharts className="frontier-chart" option={getFrontierOptions()} style={{ height: 430 }} onEvents={{ 'click': onChartClick }} />
+                                    <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
+                                </>
+                            )}
                             {recommendationEvidence && (
                                 <div data-testid="recommendation-evidence" className="evidence-card">
                                     <div className="evidence-card-header">
@@ -1150,11 +1050,11 @@ function PortfolioOptimizer() {
                                                     <h4>{t('selected_metrics')}</h4>
                                                     <div className="detail-row">
                                                         <span>{t('expected_return')}</span>
-                                                        <span className="metric-value metric-success">{(selectedPoint.return * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-success">{formatPercentValue(selectedPoint.return)}</span>
                                                     </div>
                                                     <div className="detail-row">
                                                         <span>{t('expected_risk')}</span>
-                                                        <span className="metric-value metric-warning">{(selectedPoint.risk * 100).toFixed(2)}%</span>
+                                                        <span className="metric-value metric-warning">{formatPercentValue(selectedPoint.risk)}</span>
                                                     </div>
                                                 </div>
                                                 <div className="detail-panel">
@@ -1203,64 +1103,90 @@ function PortfolioOptimizer() {
                                             </table>
                                         </div>
 
-                                        <button className="text-link-btn advanced-toggle" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
+                                        <button type="button" aria-expanded={showAdvancedParams} aria-controls="advanced-settings" className="text-link-btn advanced-toggle" onClick={() => setShowAdvancedParams(!showAdvancedParams)}>
                                             <Settings size={14} />
                                             {showAdvancedParams ? t('collapse_advanced') : t('expand_advanced')}
                                         </button>
 
                                         {showAdvancedParams && (
-                                            <div className="advanced-controls">
-                                                <div className="form-group col-span-2">
-                                                    <label className="form-label text-xs">{t('strategy_mode')}</label>
-                                                    <select
-                                                        className="form-input text-sm"
-                                                        value={strategyMode}
-                                                        onChange={(e) => {
-                                                            setStrategyMode(e.target.value);
-                                                            localStorage.setItem('strategyMode', e.target.value);
-                                                        }}
-                                                    >
-                                                        <option value="optimized_kelly">{t('mode_optimized_kelly')}</option>
-                                                        <option value="legacy_linear">{t('mode_legacy_linear')}</option>
-                                                    </select>
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('strategy_mode_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('planned_purchase_days')}</label>
-                                                    <input className="form-input text-sm" type="number" step="1" min="1" value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('plannedPurchaseDays', e.target.value); }} />
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('planned_purchase_days_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('min_equity_ratio')}</label>
-                                                    <input className="form-input text-sm" type="number" step="5" value={minWeight} onChange={(e) => { setMinWeight(e.target.value); localStorage.setItem('minWeight', e.target.value); }} />
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('min_equity_ratio_help')}</p>
-                                                </div>
-                                                <div className="form-group">
-                                                    <label className="form-label text-xs">{t('max_equity_ratio')}</label>
-                                                    <input className="form-input text-sm" type="number" step="5" value={maxWeight} onChange={(e) => { setMaxWeight(e.target.value); localStorage.setItem('maxWeight', e.target.value); }} />
-                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_equity_ratio_help')}</p>
-                                                </div>
-                                                {strategyMode === 'optimized_kelly' ? (
-                                                    <>
-                                                        <div className="form-group">
-                                                            <label className="form-label text-xs">{t('kelly_fraction')}</label>
-                                                            <input className="form-input text-sm" type="number" step="5" min="1" max="100" value={kellyFraction} onChange={(e) => { setKellyFraction(e.target.value); localStorage.setItem('kellyFraction', e.target.value); }} />
-                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('kelly_fraction_help')}</p>
-                                                        </div>
-                                                        <div className="form-group">
-                                                            <label className="form-label text-xs">{t('estimation_window')}</label>
-                                                            <input className="form-input text-sm" type="number" step="1" min="6" value={estimationWindow} onChange={(e) => { setEstimationWindow(e.target.value); localStorage.setItem('estimationWindow', e.target.value); }} />
-                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('estimation_window_help')}</p>
-                                                        </div>
-                                                        <div className="form-group col-span-2">
-                                                            <label className="form-label text-xs">{t('minimum_cash_reserve')}</label>
-                                                            <input className="form-input text-sm" type="number" step="100" min="0" value={minimumCashReserve} onChange={(e) => { setMinimumCashReserve(e.target.value); localStorage.setItem('minimumCashReserve', e.target.value); }} />
+                                            <div className="settings-panel" id="advanced-settings">
+                                                <p className="settings-help">{t('settings_intro')}</p>
+                                                <div className="settings-fields">
+                                                    <div className="form-group">
+                                                            <label className="form-label text-xs" htmlFor="setting-minimum_cash_reserve">{t('minimum_cash_reserve')}</label>
+                                                            <input id="setting-minimum_cash_reserve" className="form-input text-sm" type="number" step="100" min="0" value={minimumCashReserve} onChange={(e) => { setMinimumCashReserve(e.target.value); localStorage.setItem('minimumCashReserve', e.target.value); }} />
                                                             <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('minimum_cash_reserve_help')}</p>
                                                         </div>
-                                                        <div className="form-group col-span-2">
+                                                    <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="available-cash">{t('available_cash')}</label>
+                                                    <input id="available-cash" className="form-input text-sm" type="number" min="0" value={availableCash} onChange={e => { setAvailableCash(e.target.value); localStorage.setItem('availableCash', e.target.value); }} />
+                                                </div>
+                                                </div>
+                                                <details className="settings-disclosure">
+                                                    <summary>{t('settings_transactions')}<span className="settings-summary">{exceptionCodes.length || Number(pendingProceeds) ? t('settings_has_values') : t('settings_only_if_needed')}</span></summary>
+                                                    <div className="settings-body">
+                                                        <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="pending-proceeds">{t('pending_proceeds')}</label>
+                                                    <input id="pending-proceeds" className="form-input text-sm" type="number" min="0" value={pendingProceeds} onChange={e => { setPendingProceeds(e.target.value); localStorage.setItem('pendingProceeds', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400">{t('pending_proceeds_help')}</p>
+                                                </div>
+                                                        <p className="settings-help">{t('settings_exceptions_help')}</p>
+                                                        <div className="fund-exceptions">
+                                                            {exceptionCodes.map(code => (
+                                                                <div className="fund-exception-row" key={code}>
+                                                                    <div className="fund-exception-name">{fundNames[code] || code}<small>{code}</small></div>
+                                                                    <div className="form-group">
+                                                                        <label htmlFor={`pending-${code}`}>{t('settings_pending_short')}</label>
+                                                                        <input id={`pending-${code}`} className="form-input" type="number" min="0" value={pendingSells[code] ?? ''} placeholder="0" onChange={e => updateException(code, e.target.value, pendingSells, setPendingSells, 'pendingSells')} />
+                                                                    </div>
+                                                                    <div className="form-group">
+                                                                        <label htmlFor={`redeem-${code}`}>{t('settings_redemption_short')}</label>
+                                                                        <input id={`redeem-${code}`} className="form-input" type="number" min="0" value={redemptionLimits[code] ?? ''} placeholder={t('settings_unlimited')} onChange={e => updateException(code, e.target.value, redemptionLimits, setRedemptionLimits, 'redemptionLimits')} />
+                                                                    </div>
+                                                                    <button type="button" className="text-link-btn exception-remove" onClick={() => removeException(code)} aria-label={`${t('settings_remove')} ${fundNames[code] || code}`}><X size={16} /></button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        {exceptionCodes.length < fundCodes.length && <div className="exception-add">
+                                                            <label htmlFor="exception-fund">{t('settings_add_fund')}</label>
+                                                            <select id="exception-fund" className="form-input" value="" onChange={e => { if (e.target.value) setAddedExceptionCodes(previous => [...previous, e.target.value]); }}>
+                                                                <option value="">{t('settings_select_fund')}</option>
+                                                                {fundCodes.filter(code => !exceptionCodes.includes(code)).map(code => <option key={code} value={code}>{fundNames[code] || code}</option>)}
+                                                            </select>
+                                                        </div>}
+                                                    </div>
+                                                </details>
+                                                <details className="settings-disclosure">
+                                                    <summary>{t('settings_schedule')}<span className="settings-summary">{purchaseDates || Number(plannedPurchaseDays) !== 1 ? t('settings_has_values') : t('settings_single_purchase')}</span></summary>
+                                                    <div className="settings-body settings-fields">
+                                                        <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="setting-planned_purchase_days">{t('planned_purchase_days')}</label>
+                                                    <input id="setting-planned_purchase_days" className="form-input text-sm" type="number" step="1" min="1" value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('plannedPurchaseDays', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('planned_purchase_days_help')}</p>
+                                                </div>
+                                                        <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="purchase-dates">{t('purchase_dates')}</label>
+                                                    <input id="purchase-dates" className="form-input text-sm" value={purchaseDates} placeholder="2026-09-21,2026-09-22" onChange={e => setPurchaseDates(e.target.value)} />
+                                                </div>
+                                                    </div>
+                                                </details>
+                                                <details className="settings-disclosure">
+                                                    <summary>{t('settings_model')}<span className="settings-summary">{t('settings_model_summary')}</span></summary>
+                                                    <div className="settings-body settings-fields">
+                                                        <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="rebalance-band">{t('rebalance_band')}</label>
+                                                    <input id="rebalance-band" className="form-input text-sm" type="number" min="0" max="100" step="0.5" value={rebalanceBand} onChange={e => { setRebalanceBand(e.target.value); localStorage.setItem('rebalanceBand', e.target.value); }} />
+                                                    <p className="text-[11px] text-slate-400">{t('rebalance_band_help')}</p>
+                                                </div>
+                                                        <div className="form-group">
+                                                            <label className="form-label text-xs" htmlFor="setting-estimation_window">{t('estimation_window')}</label>
+                                                            <input id="setting-estimation_window" className="form-input text-sm" type="number" step="1" min="6" value={estimationWindow} onChange={(e) => { setEstimationWindow(e.target.value); localStorage.setItem('estimationWindow', e.target.value); }} />
+                                                            <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('estimation_window_help')}</p>
+                                                        </div>
+                                                        <div className="form-group">
                                                             <label className="form-label text-xs">{t('constraint_priority_note')}</label>
                                                         </div>
-                                                        <div className="form-group col-span-2">
+                                                        <div className="form-group">
                                                             <label className="form-label text-xs flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
@@ -1286,14 +1212,14 @@ function PortfolioOptimizer() {
                                                                     <input className="form-input text-sm" type="number" step="0.5" min="0.1" max="99" value={cvarLimit} onChange={(e) => { setCvarLimit(e.target.value); localStorage.setItem('cvarLimit', e.target.value); }} />
                                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('cvar_limit_help')}</p>
                                                                 </div>
-                                                                <div className="form-group col-span-2">
+                                                                <div className="form-group">
                                                                     <label className="form-label text-xs">{t('risk_horizon_days')}</label>
                                                                     <input className="form-input text-sm" type="number" step="1" min="5" max="63" value={riskHorizonDays} onChange={(e) => { setRiskHorizonDays(e.target.value); localStorage.setItem('riskHorizonDays', e.target.value); }} />
                                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('risk_horizon_days_help')}</p>
                                                                 </div>
                                                             </>
                                                         )}
-                                                        <div className="form-group col-span-2">
+                                                        <div className="form-group">
                                                             <label className="form-label text-xs flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
@@ -1308,25 +1234,21 @@ function PortfolioOptimizer() {
                                                             <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('enable_drawdown_constraint_help')}</p>
                                                         </div>
                                                         {enableDrawdownConstraint && (
-                                                            <div className="form-group col-span-2">
+                                                            <div className="form-group">
                                                                 <label className="form-label text-xs">{t('max_drawdown_limit')}</label>
                                                                 <input className="form-input text-sm" type="number" step="1" min="1" max="99" value={maxDrawdownLimit} onChange={(e) => { setMaxDrawdownLimit(e.target.value); localStorage.setItem('maxDrawdownLimit', e.target.value); }} />
                                                                 <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('max_drawdown_limit_help')}</p>
                                                             </div>
                                                         )}
-                                                    </>
-                                                ) : (
-                                                    <div className="form-group col-span-2">
-                                                        <label className="form-label text-xs">{t('ma_window')}</label>
-                                                        <input className="form-input text-sm" type="number" step="1" value={maWindow} onChange={(e) => { setMaWindow(e.target.value); localStorage.setItem('maWindow', e.target.value); }} />
-                                                        <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('ma_window_help')}</p>
+
+
                                                     </div>
-                                                )}
+                                                </details>
                                             </div>
                                         )}
 
-                                        <button className="btn btn-primary strategy-submit" onClick={handleStrategySubmit} disabled={loading.strategy || !selectedPoint}>
-                                            {loading.strategy ? t('analyzing') : t('start_analysis_btn')}
+                                        <button className="btn btn-primary strategy-submit" onClick={handleStrategySubmit} disabled={loading.strategy || loading.recommendation || !selectedPoint}>
+                                            {loading.strategy || loading.recommendation ? t('analyzing') : t('start_analysis_btn')}
                                         </button>
                                         {budgetError && (
                                             <div className="inline-alert inline-alert-danger">
@@ -1367,9 +1289,9 @@ function PortfolioOptimizer() {
                                             <div className="backtest-note-popover-title">{t('backtest_note_title')}</div>
                                             <div className="backtest-note-line">1. {t('backtest_note_lump_sum')}</div>
                                             <div className="backtest-note-line">2. {t('backtest_note_dca')}</div>
-                                            <div className="backtest-note-line">3. {t('backtest_note_kelly_theory')}</div>
-                                            {strategyResult.actual_kelly_dca && (
-                                                <div className="backtest-note-line">4. {t('backtest_note_kelly_actual')}</div>
+                                            <div className="backtest-note-line">3. {t('backtest_note_fixed_target_theory')}</div>
+                                            {strategyResult.actual_fixed_target && (
+                                                <div className="backtest-note-line">4. {t('backtest_note_fixed_target_actual')}</div>
                                             )}
                                         </div>
                                     </div>
@@ -1386,23 +1308,23 @@ function PortfolioOptimizer() {
                                         <div className="text-xs text-slate-500 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.dca, 'max_drawdown_value', 'max_drawdown')}</div>
                                     </div>
                                     <div className="stat-item border-l-4 border-emerald-500 bg-emerald-900/10">
-                                        <div className="stat-label text-emerald-400">{t('kelly_theory')}</div>
-                                        <div className="stat-value text-emerald-400">{((strategyResult.ideal_kelly_dca || strategyResult.kelly_dca).annualized_return * 100).toFixed(2)}%</div>
-                                        <div className="text-xs text-emerald-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.ideal_kelly_dca || strategyResult.kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
+                                        <div className="stat-label text-emerald-400">{t('fixed_target_theory')}</div>
+                                        <div className="stat-value text-emerald-400">{((strategyResult.ideal_fixed_target || strategyResult.fixed_target).annualized_return * 100).toFixed(2)}%</div>
+                                        <div className="text-xs text-emerald-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.ideal_fixed_target || strategyResult.fixed_target, 'max_drawdown_value', 'max_drawdown')}</div>
                                     </div>
-                                    {strategyResult.actual_kelly_dca && (
+                                    {strategyResult.actual_fixed_target && (
                                         <div className="stat-item border-l-4 border-amber-500 bg-amber-900/10">
-                                            <div className="stat-label text-amber-400">{t('kelly_actual')}</div>
-                                            <div className="stat-value text-amber-400">{(strategyResult.actual_kelly_dca.annualized_return * 100).toFixed(2)}%</div>
-                                            <div className="text-xs text-amber-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.actual_kelly_dca, 'max_drawdown_value', 'max_drawdown')}</div>
+                                            <div className="stat-label text-amber-400">{t('fixed_target_actual')}</div>
+                                            <div className="stat-value text-amber-400">{(strategyResult.actual_fixed_target.annualized_return * 100).toFixed(2)}%</div>
+                                            <div className="text-xs text-amber-600 mt-1">{t('max_drawdown')}: {formatDD(strategyResult.actual_fixed_target, 'max_drawdown_value', 'max_drawdown')}</div>
                                         </div>
                                     )}
                                 </div>
 
                                 <div className="chart-grid">
-                                    <div><ReactECharts option={getStrategyChartOptions('ideal_kelly_dca')} style={{ height: 300 }} /></div>
-                                    {strategyResult.actual_kelly_dca && (
-                                        <div><ReactECharts option={getStrategyChartOptions('actual_kelly_dca')} style={{ height: 300 }} /></div>
+                                    <div><ReactECharts option={getStrategyChartOptions('ideal_fixed_target')} style={{ height: 300 }} /></div>
+                                    {strategyResult.actual_fixed_target && (
+                                        <div><ReactECharts option={getStrategyChartOptions('actual_fixed_target')} style={{ height: 300 }} /></div>
                                     )}
                                 </div>
 
@@ -1486,11 +1408,7 @@ function PortfolioOptimizer() {
                                                                 <thead>
                                                                     <tr>
                                                                         <th>{t('wf_month')}</th>
-                                                                        <th>{t('wf_full_kelly_raw')}</th>
-                                                                        <th>{t('wf_fractional_kelly_raw')}</th>
-                                                                        <th>{t('wf_kelly_clipped')}</th>
                                                                         <th>{t('wf_actual_position')}</th>
-                                                                        <th>{t('wf_kelly_changed_trade')}</th>
                                                                         <th>{t('wf_target_weight_change')}</th>
                                                                         <th>{t('wf_actual_weight_change')}</th>
                                                                         <th>{t('wf_transmission')}</th>
@@ -1500,11 +1418,7 @@ function PortfolioOptimizer() {
                                                                     {(full.data_access_audit || []).map((month) => (
                                                                         <tr key={month.realized_date}>
                                                                             <td>{month.realized_date?.slice(0, 7)}</td>
-                                                                            <td>{formatPercentValue(month.full_kelly_raw)}</td>
-                                                                            <td>{formatPercentValue(month.fractional_kelly_raw)}</td>
-                                                                            <td>{formatPercentValue(month.kelly_clipped_target)}</td>
                                                                             <td>{formatPercentValue(month.actual_fund_position)}</td>
-                                                                            <td>{month.kelly_changed_trade ? t('wf_yes') : t('wf_no')}</td>
                                                                             <td>{formatPercentValue(month.frontier_target_weight_change)}</td>
                                                                             <td>{formatPercentValue(month.actual_basket_weight_change)}</td>
                                                                             <td>{formatPercentValue(month.frontier_change_transmission)}</td>
@@ -1517,21 +1431,6 @@ function PortfolioOptimizer() {
                                                 </>
                                             );
                                         })()}
-                                        {strategyResult.walk_forward.kelly_window_comparison?.status === 'selected' && (
-                                            <div className="diagnostic-card diagnostic-info">
-                                                <div className="diagnostic-title">
-                                                    {t('kelly_window_platform')}: {strategyResult.walk_forward.kelly_window_comparison.selected_window_months} {t('months')}
-                                                </div>
-                                                <p className="diagnostic-copy">{t('kelly_window_platform_note')}</p>
-                                                <div className="diagnostic-copy diagnostic-list">
-                                                    {strategyResult.walk_forward.kelly_window_comparison.windows.map((item) => (
-                                                        <span key={item.window_months}>
-                                                            {item.window_months}{t('month_short')}: {(item.annualized_return * 100).toFixed(1)}% / Sharpe {item.sharpe.toFixed(2)} / DD {(item.max_drawdown * 100).toFixed(1)}%
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
                                         {strategyResult.walk_forward.covariance_ablation && (
                                             <div className="diagnostic-card diagnostic-violet">
                                                 <div className="diagnostic-title">{t('complete_covariance_ablation')}</div>
@@ -1564,169 +1463,7 @@ function PortfolioOptimizer() {
                         </section>
                     )}
 
-                    {recommendationResult && (
-                        <section className="workspace-section recommendation-section">
-                            <div className="recommendation-card">
-                                <div className="card-header">
-                                    <h3 className="card-title recommendation-title"><TrendingUp size={24} /> {t('recommend_title')}</h3>
-                                    <button className="text-link-btn" onClick={handleExport} aria-label={t('export_report')}>
-                                        <Download size={16} /> {t('export_report')}
-                                    </button>
-                                </div>
-
-                                <div className="recommendation-header">
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('market_signal')}</div>
-                                        <div className="recommendation-stat-value" style={{ color: recommendationResult.market_signal === 'undervalued' ? '#34D399' : recommendationResult.market_signal === 'overvalued' ? '#F87171' : '#FBBF24' }}>
-                                            {recommendationResult.market_signal === 'undervalued' ? t('signal_under') : recommendationResult.market_signal === 'overvalued' ? t('signal_over') : t('signal_neutral')}
-                                        </div>
-                                        {recommendationResult.allocation_signal && (
-                                            <div className="text-xs text-slate-400 mt-1">
-                                                {t('allocation_signal')}: {getAllocationSignalLabel(recommendationResult.allocation_signal, t)}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('suggested_target')}</div>
-                                        <div className="recommendation-stat-value">{((recommendationResult.target_fund_ratio ?? recommendationResult.target_equity_ratio) * 100).toFixed(0)}%</div>
-                                    </div>
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('target_equity_exposure')}</div>
-                                        <div className="recommendation-stat-value">{((recommendationResult.target_equity_exposure ?? 0) * 100).toFixed(0)}%</div>
-                                    </div>
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('target_risk_exposure')}</div>
-                                        <div className="recommendation-stat-value">{((recommendationResult.target_risk_asset_exposure ?? 0) * 100).toFixed(0)}%</div>
-                                    </div>
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('suggested_buy_total')}</div>
-                                        <div className="recommendation-stat-value text-white">¥{recommendationResult.recommended_monthly_investment.toFixed(2)}</div>
-                                    </div>
-                                    <div className="recommendation-stat">
-                                        <div className="recommendation-stat-label">{t('monthly_budget_label')}</div>
-                                        <div className="recommendation-stat-value text-slate-400">¥{recommendationResult.monthly_budget}</div>
-                                    </div>
-                                </div>
-
-                                <div className={`recommendation-diagnostic ${recommendationResult.decision_readiness !== 'manual_review_required' || !recommendationResult.risk_limit_enforceable ? 'diagnostic-warning' : ''}`}>
-                                    <div className="diagnostic-title">{t('decision_readiness')}</div>
-                                    <div className="diagnostic-copy">
-                                        {t(`decision_${recommendationResult.decision_readiness || 'research_only'}`)}
-                                    </div>
-                                    <div className="diagnostic-copy">
-                                        {t('base_non_riskfree_ratio')}: {((recommendationResult.base_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
-                                        {' × '}{t('tactical_deployment_ratio')}: {((recommendationResult.tactical_deployment_ratio || 0) * 100).toFixed(1)}%
-                                        {' = '}{t('final_non_riskfree_ratio')}: {((recommendationResult.final_non_riskfree_fund_ratio || 0) * 100).toFixed(1)}%
-                                    </div>
-                                    <div className="diagnostic-copy">
-                                        {t('safe_sleeve_ratio')}: {((recommendationResult.base_safe_sleeve_ratio || 0) * 100).toFixed(1)}%
-                                        {' · '}{t('residual_cash_ratio')}: {((recommendationResult.residual_cash_ratio || 0) * 100).toFixed(1)}%
-                                        {' · '}{t('actual_risk_ratio')}: {((recommendationResult.actual_risk_ratio || 0) * 100).toFixed(1)}%
-                                    </div>
-                                    {!recommendationResult.risk_limit_enforceable && (
-                                        <div className="diagnostic-copy">
-                                            {t('risk_not_enforceable')} · {t('cash_reserve_shortfall')}: ¥{Number(recommendationResult.cash_reserve_shortfall || 0).toFixed(2)}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {recommendationResult.window_robustness && (
-                                    <div className={`recommendation-diagnostic ${recommendationResult.window_robustness.status === 'unstable' ? 'diagnostic-warning' : ''}`}>
-                                        <div className="diagnostic-title">Kelly 回看窗口稳健性（3 年基准）</div>
-                                        <div className="diagnostic-copy">{recommendationResult.window_robustness.message}</div>
-                                        {recommendationResult.window_robustness.measurements?.length > 0 && (
-                                            <div className="diagnostic-copy diagnostic-list">
-                                                {recommendationResult.window_robustness.measurements.map((item) => (
-                                                    <span key={item.window_months} className="mr-3">
-                                                        {item.window_months}月：{item.available ? `${(item.target_risky_ratio * 100).toFixed(1)}%` : '数据不足'}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                                {recommendationResult.optimizer_info?.cvar_confidence_status && (
-                                    <div className={`recommendation-diagnostic ${recommendationResult.optimizer_info.cvar_warning_only ? 'diagnostic-warning' : ''}`}>
-                                        <div className="diagnostic-title">{t('risk_diagnostics')}</div>
-                                        <div className="diagnostic-copy">
-                                            {t('risk_data_source')}: {t(`risk_source_${recommendationResult.optimizer_info.cvar_data_source}`)}
-                                            {' · '}{t('risk_horizon')}: {recommendationResult.optimizer_info.risk_horizon_days} {t('trading_days')}
-                                            {' · '}{t('risk_observations')}: {recommendationResult.optimizer_info.cvar_return_observations}
-                                            {' / '}{t('risk_effective_observations')}: {recommendationResult.optimizer_info.cvar_effective_return_observations}
-                                            {' · '}{t('risk_tail_samples')}: {recommendationResult.optimizer_info.cvar_effective_tail_count}
-                                        </div>
-                                        {recommendationResult.optimizer_info.cvar_warning_only && (
-                                            <div className="diagnostic-copy">{t('cvar_low_confidence_warning')}</div>
-                                        )}
-                                    </div>
-                                )}
-                                {recommendationResult.execution_allocation && (
-                                    <div className={`recommendation-diagnostic ${recommendationResult.execution_allocation.fallback_used ? 'diagnostic-warning' : ''}`}>
-                                        <div className="diagnostic-title">{t('execution_allocation_diagnostics')}</div>
-                                        <div className="diagnostic-copy">
-                                            {t('execution_status')}: {recommendationResult.execution_allocation.status}
-                                            {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}
-                                        </div>
-                                        {recommendationResult.execution_allocation.unspent_reason_label && (
-                                            <div className="diagnostic-copy">
-                                                {t('execution_unspent_reason')}: {recommendationResult.execution_allocation.unspent_reason_label}
-                                            </div>
-                                        )}
-                                        {recommendationResult.execution_allocation.tracking_error_before !== null && recommendationResult.execution_allocation.tracking_error_before !== undefined && (
-                                            <div className="diagnostic-copy">
-                                                {t('tracking_error')}: {formatPercentValue(recommendationResult.execution_allocation.tracking_error_before)}
-                                                {' → '}{formatPercentValue(recommendationResult.execution_allocation.tracking_error_after)}
-                                            </div>
-                                        )}
-                                        {Object.keys(recommendationResult.execution_allocation.substitute_purchases || {}).length > 0 && (
-                                            <div className="diagnostic-copy">{t('substitute_purchase_note')}</div>
-                                        )}
-                                    </div>
-                                )}
-                                {recommendationResult.fund_advice && (
-                                    <table className="recommendation-table">
-                                        <thead>
-                                            <tr>
-                                                <th>{t('table_fund')}</th>
-                                                <th>{t('table_action')}</th>
-                                                <th>{t('table_current')}</th>
-                                                <th>{t('table_amount')}</th>
-                                                <th>{t('table_gap')}</th>
-                                                <th>{t('table_target')}</th>
-                                                <th>{t('table_ideal_target')}</th>
-                                                <th>{t('table_reason')}</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {recommendationResult.fund_advice.map(advice => {
-                                                const actionMeta = getAdviceActionMeta(advice.action, t);
-                                                const currentHolding = advice.current_holding ?? 0;
-                                                const afterTrade = advice.executable_holding ?? advice.target_holding;
-                                                const executableGap = afterTrade === undefined || afterTrade === null ? null : afterTrade - currentHolding;
-                                                const idealTarget = advice.ideal_holding ?? advice.target_holding;
-                                                return (
-                                                    <tr key={advice.code}>
-                                                        <td>{advice.name}</td>
-                                                        <td>
-                                                            <span className={`action-badge ${actionMeta.badgeClass}`}>
-                                                                {actionMeta.label}
-                                                            </span>
-                                                        </td>
-                                                        <td className="font-mono">¥{advice.current_holding?.toFixed(2) ?? '--'}</td>
-                                                        <td className="font-mono">¥{advice.amount.toFixed(2)}</td>
-                                                        <td className={`font-mono ${executableGap > 0 ? 'text-emerald-400' : executableGap < 0 ? 'text-amber-400' : ''}`}>{executableGap === undefined || executableGap === null ? '--' : `¥${executableGap.toFixed(2)}`}</td>
-                                                        <td className="font-mono">¥{afterTrade?.toFixed(2) ?? '--'}</td>
-                                                        <td className="font-mono text-slate-400">¥{idealTarget?.toFixed(2) ?? '--'}</td>
-                                                        <td className="text-slate-500 text-xs">{advice.reason}</td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
-                        </section>
-                    )}
+                    <MonthlyRecommendation recommendationResult={recommendationResult} onExport={handleExport} />
                 </div>
             )}
         </div>
@@ -1734,3 +1471,5 @@ function PortfolioOptimizer() {
 }
 
 export default PortfolioOptimizer;
+
+export { sanitizeLegacyHoldings, buildAssetCategoriesPayload, buildSubstituteForPayload, getRecommendedFrontierPoint, getRecommendationEvidence } from "./portfolioViewUtils";

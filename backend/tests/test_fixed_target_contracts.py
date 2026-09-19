@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 
 from main import app
 
-from core.backtest import backtest_dca, backtest_kelly_dca, backtest_lump_sum
+from core.backtest import backtest_dca, backtest_fixed_target, backtest_lump_sum
 from core.frontier import calculate_efficient_frontier
-from core.portfolio import decompose_selected_weights, get_effective_single_weight_cap
+from core.portfolio import decompose_selected_weights, get_frontier_weight_bounds
 
 client = TestClient(app)
 
@@ -58,51 +58,29 @@ def test_riskfree_holdings_and_cash_are_tracked_separately_in_baselines():
     assert abs(dca["final_value"] - 1502.0) < 1e-9
 
 
-def test_kelly_backtest_changes_with_selected_riskfree_sleeve():
+def test_fixed_target_backtest_changes_with_selected_riskfree_sleeve():
     dates = pd.date_range(start="2023-01-31", periods=6, freq="ME")
     df_nav = pd.DataFrame(
         {"AssetA": [1.0, 1.05, 1.1, 1.0, 1.08, 1.12], "RiskFree": [1.0] * 6},
         index=dates,
     )
 
-    conservative = backtest_kelly_dca(
+    conservative = backtest_fixed_target(
         df_nav,
         {"AssetA": 0.6, "RiskFree": 0.4},
         monthly_investment=1000.0,
-        strategy_mode="legacy_linear",
-        min_weight=0.5,
-        max_weight=0.5,
+        strategy_mode="fixed_weight",
     )
-    aggressive = backtest_kelly_dca(
+    aggressive = backtest_fixed_target(
         df_nav,
         {"AssetA": 1.0},
         monthly_investment=1000.0,
-        strategy_mode="legacy_linear",
-        min_weight=0.5,
-        max_weight=0.5,
+        strategy_mode="fixed_weight",
     )
 
     assert conservative["effective_risky_weights"] == {"AssetA": 1.0}
     assert conservative["final_value"] < aggressive["final_value"]
     assert conservative["final_unit_nav"] < aggressive["final_unit_nav"]
-
-
-def test_kelly_backtest_uses_lagged_signal():
-    dates = pd.date_range(start="2023-01-31", periods=3, freq="ME")
-    df_nav = pd.DataFrame({"AssetA": [1.0, 1.0, 0.1]}, index=dates)
-
-    result = backtest_kelly_dca(
-        df_nav,
-        {"AssetA": 1.0},
-        monthly_investment=1000.0,
-        strategy_mode="legacy_linear",
-        min_weight=0.0,
-        max_weight=1.0,
-        ma_window=2,
-    )
-
-    assert result["market_signal"] == "neutral"
-    assert result["allocation_signal"] == "neutral"
 
 
 def test_current_recommendation_does_not_double_count_management_fee_by_default():
@@ -118,9 +96,7 @@ def test_current_recommendation_does_not_double_count_management_fee_by_default(
             "current_holdings": {"000001": 0},
             "current_cash": 1000.0,
             "monthly_budget": 1000,
-            "strategy_mode": "legacy_linear",
-            "min_weight": 0.0,
-            "max_weight": 1.0,
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -169,7 +145,7 @@ def test_analyze_returns_recommended_point_for_long_sample():
     assert len(selection["candidate_diagnostics"]) == len(payload["efficient_frontier"])
 
 
-def test_frontier_cleaning_does_not_break_single_asset_caps():
+def test_frontier_preserves_small_theoretical_weights():
     dates = pd.date_range(start="2023-01-31", periods=12, freq="ME")
     df_nav = pd.DataFrame(
         {
@@ -191,7 +167,7 @@ def test_frontier_cleaning_does_not_break_single_asset_caps():
 
     assert frontier
     first_point = frontier[0]["weights"]
-    cap = get_effective_single_weight_cap(len(df_nav.columns))
+    cap = get_frontier_weight_bounds(list(df_nav.columns))[0][1]
 
     assert max(first_point.values()) <= cap + 1e-9
     assert first_point["AssetC"] > 0
@@ -212,9 +188,7 @@ def test_current_recommendation_rejects_weights_for_missing_assets():
             "current_cash": 0.0,
             "monthly_budget": 1000.0,
             "risk_free_rate": None,
-            "strategy_mode": "legacy_linear",
-            "min_weight": 0.0,
-            "max_weight": 1.0,
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -238,12 +212,14 @@ def test_backtest_strategies_rejects_weights_for_missing_assets():
             "monthly_investment": 1000.0,
             "risk_free_rate": None,
             "initial_holdings": {"000001": 1000.0},
-            "strategy_mode": "legacy_linear",
-            "min_weight": 0.0,
-            "max_weight": 1.0,
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/backtest_strategies", json=request_data)
 
     assert response.status_code == 400
     assert "GhostAsset" in response.json()["detail"]
+
+
+def test_frontier_does_not_impose_unconfirmed_fifty_percent_cap():
+    assert get_frontier_weight_bounds(["A", "B", "C"]) == ((0, 1), (0, 1), (0, 1))

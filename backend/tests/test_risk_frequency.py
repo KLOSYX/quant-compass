@@ -9,7 +9,6 @@ from core.risk import (
     calculate_max_drawdown,
     calculate_rolling_horizon_returns,
 )
-from core.strategy import calculate_target_ratio_optimized
 
 
 def test_rolling_21_day_returns_keep_monthly_risk_horizon():
@@ -75,71 +74,3 @@ def test_fund_data_retains_daily_nav_alongside_monthly_analysis_data(monkeypatch
     assert list(monthly.columns) == ["A"]
     assert list(retained_daily.columns) == ["A"]
     assert len(retained_daily) > len(monthly)
-
-
-def test_low_confidence_monthly_cvar_becomes_warning_only():
-    dates = pd.date_range("2021-01-31", periods=37, freq="ME")
-    nav = pd.Series(1.0, index=dates)
-    nav.iloc[-1] = 0.5
-
-    _, _, info = calculate_target_ratio_optimized(
-        reference_portfolio_nav=nav,
-        timestamp=dates[-1],
-        min_weight=0.0,
-        max_weight=1.0,
-        kelly_fraction=0.5,
-        estimation_window=36,
-        risk_free_rate=0.0,
-        total_wealth=10000.0,
-        minimum_cash_reserve=0.0,
-        enable_cvar_constraint=True,
-        cvar_confidence=0.95,
-        cvar_limit=0.08,
-        enable_drawdown_constraint=False,
-        max_drawdown_limit=0.2,
-    )
-
-    assert info["cvar_data_source"] == "monthly_fallback"
-    assert info["cvar_effective_tail_count"] == 2
-    assert info["cvar_confidence_status"] == "low"
-    assert info["cvar_hard_constraint_requested"] is True
-    assert info["cvar_hard_constraint_effective"] is False
-    assert info["cvar_warning_only"] is True
-
-
-def test_daily_risk_pipeline_uses_rolling_horizon_and_daily_drawdown():
-    monthly_dates = pd.date_range("2023-01-31", periods=13, freq="ME")
-    monthly_nav = pd.Series(1.0, index=monthly_dates)
-    daily_dates = pd.bdate_range("2023-01-02", "2024-01-31")
-    daily_nav = pd.Series(1.0, index=daily_dates)
-    daily_nav.loc["2023-08-01":"2023-08-15"] = 0.6
-    daily_nav.loc["2023-08-16":] = 1.0
-
-    _, _, info = calculate_target_ratio_optimized(
-        reference_portfolio_nav=monthly_nav,
-        timestamp=monthly_dates[-1],
-        min_weight=0.5,
-        max_weight=1.0,
-        kelly_fraction=0.5,
-        estimation_window=36,
-        risk_free_rate=0.0,
-        total_wealth=10000.0,
-        minimum_cash_reserve=0.0,
-        enable_cvar_constraint=True,
-        cvar_confidence=0.95,
-        cvar_limit=0.08,
-        enable_drawdown_constraint=True,
-        max_drawdown_limit=0.2,
-        daily_reference_nav=daily_nav,
-        risk_horizon_days=21,
-    )
-
-    assert info["cvar_data_source"] == "daily_rolling_horizon"
-    assert info["drawdown_data_source"] == "daily_path"
-    assert info["risk_horizon_days"] == 21
-    assert info["cvar_return_observations"] > 200
-    assert info["cvar_effective_return_observations"] < 20
-    assert info["cvar_effective_tail_count"] == 1
-    assert info["cvar_hard_constraint_effective"] is False
-    assert info["max_feasible_ratio_by_drawdown"] < 1.0
-    assert info["drawdown_estimate_at_target"] <= 0.2

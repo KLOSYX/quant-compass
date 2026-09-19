@@ -8,10 +8,8 @@ from core.constants import (
     COVARIANCE_SHRINKAGE,
     DEFAULT_CVAR_CONFIDENCE,
     MIN_WALK_FORWARD_TRAIN_MONTHS,
-    MIN_WEIGHT_THRESHOLD,
 )
 from core.portfolio import (
-    get_effective_single_weight_cap,  # noqa: F401
     get_frontier_initial_guess,
     get_frontier_weight_bounds,
     get_max_return_weights,
@@ -122,20 +120,20 @@ def calculate_efficient_frontier(
     covariance_method: CovarianceMethod = "fixed_20",
 ):
     if list(df.columns) == ["RiskFree"]:
-        monthly_returns = df.pct_change().fillna(0)
+        monthly_returns = df.pct_change().dropna()
         expected_return = monthly_returns["RiskFree"].mean()
         return [
             {"risk": 0, "return": expected_return * 12, "weights": {"RiskFree": 1.0}}
         ]
 
     if len(df.columns) == 1:
-        monthly_returns = df.pct_change().fillna(0)
+        monthly_returns = df.pct_change().dropna()
         code = df.columns[0]
         expected_return = float(monthly_returns[code].mean() * 12)
         risk = float(monthly_returns[code].std(ddof=0) * np.sqrt(12))
         return [{"risk": risk, "return": expected_return, "weights": {code: 1.0}}]
 
-    monthly_returns = df.pct_change().fillna(0)
+    monthly_returns = df.pct_change().dropna()
 
     raw_expected_returns = monthly_returns.mean()
     # Simple shrinkage makes the frontier less sensitive to small-sample noise.
@@ -147,27 +145,10 @@ def calculate_efficient_frontier(
     initial_guess = get_frontier_initial_guess(columns)
 
     def clean_weights(raw_weights):
-        """Zero out tiny weights and renormalize to keep allocations executable."""
+        """Normalize numerical roundoff; preserve small theoretical positions."""
         weights = pd.Series(raw_weights, index=columns, dtype=float).clip(lower=0.0)
         total = float(weights.sum())
-        if total <= 0:
-            return pd.Series(raw_weights, index=columns, dtype=float)
-
-        weights /= total
-
-        cleaned = weights.copy()
-        cleaned[(cleaned > 0) & (cleaned < MIN_WEIGHT_THRESHOLD)] = 0.0
-        cleaned_total = float(cleaned.sum())
-        if cleaned_total <= 0:
-            return weights
-
-        cleaned /= cleaned_total
-        upper_bounds = pd.Series(
-            [upper for _, upper in bounds], index=columns, dtype=float
-        )
-        if (cleaned > upper_bounds + 1e-9).any():
-            return weights
-        return cleaned
+        return weights / total if total > 0 else weights
 
     def portfolio_variance(w):
         weights = np.asarray(w, dtype=float)
@@ -241,18 +222,38 @@ def calculate_efficient_frontier(
 
         if best_result is not None:
             current_guess = best_result.x
-            # Use raw optimizer weights for risk to keep the frontier smooth;
-            # clean_weights only for the displayed/rebalancing allocation.
-            optimized_weights = np.asarray(best_result.x, dtype=float)
+            cleaned_weights = clean_weights(best_result.x)
+            optimized_weights = cleaned_weights.to_numpy(dtype=float)
             risk = np.sqrt(
                 np.dot(optimized_weights.T, np.dot(cov_matrix, optimized_weights))
             ) * np.sqrt(12)
-            cleaned_weights = clean_weights(optimized_weights)
             ret = float(np.sum(expected_returns * cleaned_weights) * 12)
             frontier_points.append(
                 {"risk": risk, "return": ret, "weights": cleaned_weights.to_dict()}
             )
 
+    if not frontier_points:
+        # A numerical failure must not erase an otherwise feasible allocation.
+        # This is a deterministic feasible target, not a solved frontier point.
+        if (
+            not np.isfinite(expected_returns).all()
+            or not np.isfinite(cov_matrix).all().all()
+        ):
+            raise ValueError(
+                "Insufficient finite observations for frontier risk estimates"
+            )
+        weights = clean_weights(initial_guess)
+        frontier_points.append(
+            {
+                "risk": float(
+                    np.sqrt(max(0.0, portfolio_variance(weights))) * np.sqrt(12)
+                ),
+                "return": float(np.sum(expected_returns * weights) * 12),
+                "weights": weights.to_dict(),
+                "solver_fallback_used": True,
+                "solver_status": "no_converged_frontier_point",
+            }
+        )
     return frontier_points
 
 

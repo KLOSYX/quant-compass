@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.backtest import backtest_dca, backtest_kelly_dca, backtest_lump_sum
+from core.backtest import backtest_dca, backtest_fixed_target, backtest_lump_sum
 
 
 def _manual_drawdown(values):
@@ -87,25 +87,22 @@ def test_dca_matches_independent_unitized_cashflow_ledger():
     )
 
 
-def test_kelly_dca_uses_only_new_cash_for_underweight_assets():
+def test_fixed_target_uses_only_new_cash_for_underweight_assets():
     dates = pd.date_range("2024-01-31", periods=3, freq="ME")
     nav = pd.DataFrame(
         {"A": [1.0, 2.0, 2.0], "B": [1.0, 1.0, 1.0]},
         index=dates,
     )
 
-    actual = backtest_kelly_dca(
+    actual = backtest_fixed_target(
         nav,
         {"A": 0.5, "B": 0.5},
         100.0,
         initial_holdings={"A": 500.0, "B": 500.0},
-        max_buy_multiplier=10.0,
-        sell_threshold=0.05,
-        min_weight=1.0,
-        max_weight=1.0,
         buy_fee={},
         sell_fee={},
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
+        rebalance_enabled=False,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )
@@ -117,25 +114,22 @@ def test_kelly_dca_uses_only_new_cash_for_underweight_assets():
     assert february["A"] > february["B"]  # DCA does not force a sell-side rebalance
 
 
-def test_kelly_dca_independent_fee_ledger_uses_fixed_budget_without_sales():
+def test_fixed_target_independent_fee_ledger_uses_fixed_budget_without_sales():
     dates = pd.date_range("2024-01-31", periods=2, freq="ME")
     nav = pd.DataFrame(
         {"A": [1.0, 2.0], "B": [1.0, 1.0]},
         index=dates,
     )
 
-    actual = backtest_kelly_dca(
+    actual = backtest_fixed_target(
         nav,
         {"A": 0.5, "B": 0.5},
         100.0,
         initial_holdings={"A": 500.0, "B": 500.0},
-        max_buy_multiplier=10.0,
-        sell_threshold=0.05,
-        min_weight=1.0,
-        max_weight=1.0,
         buy_fee={"B": 0.02},
         sell_fee={"A": 0.01},
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
+        rebalance_enabled=False,
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )
@@ -145,60 +139,13 @@ def test_kelly_dca_independent_fee_ledger_uses_fixed_budget_without_sales():
     # slightly larger gross allocation than A under the fixed gross budget.
     # In February A is overweight after doubling, so the entire 100 budget goes
     # to B; no A sale and no use of the sell fee is permitted.
-    january_net_each = 100.0 / (1.0 + 1.02)
-    january_a = 500.0 + january_net_each
-    january_b = 500.0 + january_net_each
+    # Executable gross orders are rounded down to cents; 0.01 stays in Cash.
+    january_a = 500.0 + 49.50
+    january_b = 500.0 + 50.49 / 1.02
     expected_a = january_a * 2.0
     expected_b = january_b + 100.0 / 1.02
 
     assert february["A"] == pytest.approx(expected_a)
     assert february["B"] == pytest.approx(expected_b)
-    assert february["Cash"] == pytest.approx(0.0)
-    assert actual["final_value"] == pytest.approx(expected_a + expected_b)
-
-
-def test_window_robustness_uses_fixed_windows_without_proxy_history():
-    from core.strategy import assess_kelly_window_robustness
-
-    short_nav = pd.Series(
-        [1.0] * 37, index=pd.date_range("2022-01-31", periods=37, freq="ME")
-    )
-    short_result = assess_kelly_window_robustness(
-        reference_portfolio_nav=short_nav,
-        min_weight=0.3,
-        max_weight=0.8,
-        kelly_fraction=0.5,
-        risk_free_rate=0.0,
-        total_wealth=10000.0,
-        minimum_cash_reserve=0.0,
-        enable_cvar_constraint=False,
-        cvar_confidence=0.95,
-        cvar_limit=0.08,
-        enable_drawdown_constraint=False,
-        max_drawdown_limit=0.2,
-    )
-    assert short_result["status"] == "insufficient_data"
-    assert any(
-        item["window_months"] == 48 and not item["available"]
-        for item in short_result["measurements"]
-    )
-
-    long_nav = pd.Series(
-        [1.0] * 61, index=pd.date_range("2020-01-31", periods=61, freq="ME")
-    )
-    long_result = assess_kelly_window_robustness(
-        reference_portfolio_nav=long_nav,
-        min_weight=0.3,
-        max_weight=0.8,
-        kelly_fraction=0.5,
-        risk_free_rate=0.0,
-        total_wealth=10000.0,
-        minimum_cash_reserve=0.0,
-        enable_cvar_constraint=False,
-        cvar_confidence=0.95,
-        cvar_limit=0.08,
-        enable_drawdown_constraint=False,
-        max_drawdown_limit=0.2,
-    )
-    assert long_result["status"] == "stable"
-    assert long_result["target_ratio_spread"] == pytest.approx(0.0)
+    assert february["Cash"] == pytest.approx(0.01)
+    assert actual["final_value"] == pytest.approx(expected_a + expected_b + 0.01)

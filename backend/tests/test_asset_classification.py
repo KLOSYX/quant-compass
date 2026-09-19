@@ -10,7 +10,7 @@ from api.models import (
     StrategyBacktestRequest,
 )
 from api.routes import get_current_recommendation
-from core.backtest import backtest_kelly_dca
+from core.backtest import backtest_fixed_target
 from core.classification import (
     aggregate_category_values,
     calculate_exposure_metrics,
@@ -69,8 +69,8 @@ def test_category_metadata_outside_universe_is_rejected():
 )
 def test_dead_execution_parameters_are_deprecated_in_api_schema(request_model):
     properties = request_model.model_json_schema()["properties"]
-    assert properties["max_buy_multiplier"]["deprecated"] is True
-    assert properties["sell_threshold"]["deprecated"] is True
+    assert "max_buy_multiplier" not in properties
+    assert "sell_threshold" not in properties
 
 
 def test_recommendation_reports_fund_equity_risk_and_category_exposures():
@@ -84,9 +84,7 @@ def test_recommendation_reports_fund_equity_risk_and_category_exposures():
         current_holdings={"E": 400.0, "M": 200.0},
         current_cash=400.0,
         monthly_budget=1000.0,
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
     )
 
     with patch(
@@ -95,13 +93,13 @@ def test_recommendation_reports_fund_equity_risk_and_category_exposures():
     ):
         result = asyncio.run(get_current_recommendation(request))
 
-    assert result["target_fund_ratio"] == pytest.approx(1.0)
-    assert result["target_equity_exposure"] == pytest.approx(0.5)
-    assert result["target_risk_asset_exposure"] == pytest.approx(0.8)
+    assert result["target_fund_ratio"] == pytest.approx(0.8)
+    assert result["target_equity_exposure"] == pytest.approx(0.4)
+    assert result["target_risk_asset_exposure"] == pytest.approx(0.64)
     assert result["target_category_exposures"] == {
-        "equity": pytest.approx(0.5),
-        "bond": pytest.approx(0.3),
-        "money_market": pytest.approx(0.2),
+        "equity": pytest.approx(0.4),
+        "bond": pytest.approx(0.24),
+        "money_market": pytest.approx(0.16),
     }
     assert result["current_fund_ratio"] == pytest.approx(0.6)
     assert result["current_equity_exposure"] == pytest.approx(0.4)
@@ -118,9 +116,7 @@ def test_fund_ratio_includes_risk_free_asset_but_not_cash():
         current_cash=400.0,
         monthly_budget=1000.0,
         risk_free_rate=0.02,
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
     )
 
     with patch(
@@ -129,9 +125,9 @@ def test_fund_ratio_includes_risk_free_asset_but_not_cash():
     ):
         result = asyncio.run(get_current_recommendation(request))
 
-    assert result["target_fund_ratio"] == pytest.approx(1.0)
-    assert result["target_equity_ratio"] == pytest.approx(0.5)
-    assert result["target_category_exposures"]["cash_equivalent"] == pytest.approx(0.5)
+    assert result["target_fund_ratio"] == pytest.approx(0.8)
+    assert result["target_equity_ratio"] == pytest.approx(0.4)
+    assert result["target_category_exposures"]["cash_equivalent"] == pytest.approx(0.4)
     assert result["current_fund_ratio"] == pytest.approx(0.6)
 
 
@@ -139,13 +135,11 @@ def test_backtest_records_category_attribution_separately_from_cash():
     dates = pd.date_range("2024-01-31", periods=2, freq="ME")
     nav = pd.DataFrame({"E": [1.0, 1.0], "M": [1.0, 1.0]}, index=dates)
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         nav,
         {"E": 0.5, "M": 0.5},
         monthly_investment=100.0,
-        min_weight=1.0,
-        max_weight=1.0,
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
         asset_categories={"E": "equity", "M": "money_market"},
     )
 

@@ -1,0 +1,103 @@
+{
+  "protocol_id": "household-monthly-review-proposal-v1",
+  "status": "proposal_requires_owner_preferences",
+  "enable_production_strategy": false,
+  "review_date": "2026-09-19",
+  "historical_data_cutoff": "2026-09-19",
+  "latest_complete_signal_month": "2026-08",
+  "timezone": "Asia/Shanghai",
+  "decision_availability_rule": "available_at <= decision_at; execute only on a later permitted dealing event",
+  "universe_rule": "freeze owner-approved fund classes, share classes, substitutes and point-in-time eligibility",
+  "evidence_rule": "previously inspected history is development evidence, never a new independent holdout",
+  "required_inputs_before_acceptance": [
+    "confirmed strategic class weights, target basis and policy version",
+    "investment horizon and primary objective",
+    "risk deterioration tolerances",
+    "starting positions, settled cash and receivables with separate contributions and withdrawals",
+    "dated dealing eligibility, lot fees, cash reservations and settlement assumptions",
+    "experiment log and frozen code/data hashes",
+    "incremental maintenance hours, value of time and execution cost uncertainty",
+    "common inflation series and purchasing-power base; otherwise nominal-only results"
+  ],
+  "chronological_splits": {
+    "initial_training_monthly_returns": 36,
+    "rolling_selection_months": 24,
+    "untouched_final_evaluation_months": 36,
+    "requires_all_96_months": true,
+    "minimum_total_months_formula": "max(36, longest_compared_estimation_window) + 24 + 36",
+    "window_comparison_rule": "same longest-window warmup and identical evaluation dates for every compared configuration",
+    "interpretation": "governance screening minimum, not statistical power or future-return assurance",
+    "short_history_action": "development_only_and_prospective_paper_run",
+    "candidate_parameter_refitting": "fixed algorithm may re-estimate on prior data only; no final-period policy tuning"
+  },
+  "baselines": [
+    {"id": "B0", "rule": "fixed approved class weights, contributions by class weight, no timing"},
+    {"id": "B1", "rule": "same target, buy-only contribution allocation by class gaps"},
+    {"id": "B2", "rule": "same target, new-money-first allocation plus approved fee-aware rebalancing", "primary_comparator": true},
+    {"id": "B3", "rule": "equal weights between approved classes, then approved within-class fund allocation", "diagnostic_only": true}
+  ],
+  "candidate": {
+    "maximum_frozen_finalists": 1,
+    "rule": "research-only Kelly candidate with corrected account/benchmark semantics",
+    "separate_ablation": "fix targets to isolate timing; fix timing to isolate target estimation"
+  },
+  "primary_metric_proposal": {
+    "id": "fee_after_real_terminal_wealth_difference_vs_B2",
+    "unit": "CNY_at_initial_purchasing_power",
+    "requires_owner_acceptance": true,
+    "alternative_if_goal_is_confirmed": "precommit shortfall loss as the primary metric before seeing test results",
+    "includes": ["all holdings", "RiskFree", "zero-yield Cash", "receivables", "all applicable costs"],
+    "withdrawals": "identical dated withdrawals for every strategy; an unmet withdrawal is a recorded failure",
+    "hurdle_formula": "test_years * (extra_hours_per_year * real_CNY_per_hour + annual_execution_cost_uncertainty_CNY)",
+    "illustrative_36_month_hurdle_CNY": 2100,
+    "illustrative_hurdle_is_not_approved": true
+  },
+  "secondary_metrics": [
+    "fee-after TWR and signed-cash-flow XIRR",
+    "daily account unit-NAV drawdown where evidence permits",
+    "21-dealing-day CVaR at 95 percent with overlap diagnostics",
+    "real terminal wealth and dated withdrawal fulfillment",
+    "class deviations, turnover, fees and discretionary cash-day balance",
+    "order count, manual minutes, fallback counts and outstanding receivables"
+  ],
+  "uncertainty_diagnostics": {
+    "method": "paired moving-block bootstrap of realized net account return vectors, rebuild terminal wealth with identical frozen external flows",
+    "flow_timing": "monthly recursion is valid only for beginning-month contributions and end-month withdrawals; otherwise use event-subperiod returns",
+    "block_lengths_months": [3, 6, 12],
+    "resamples": 2000,
+    "seed": 20260919,
+    "one_sided_alpha": 0.05,
+    "multiplicity": "alpha / K for K tested final candidates; unknown trial history invalidates a corrected-significance claim",
+    "scope": "conditional on observed return paths and dependence assumptions; not new independent markets or a full policy replay on resampled markets"
+  },
+  "sensitivity_development_only": {
+    "estimation_window_months": [24, 36, 48, 60],
+    "kelly_fraction": [0.25, 0.5, 0.75],
+    "execution_fee_multipliers": [1, 2],
+    "settlement_delay_extra_permitted_days": [0, 2, 5],
+    "joint_shocks": [
+      "equity decline, bond decline and low-volatility sleeve loss together",
+      "all purchases suspended with same dated contributions",
+      "income interruption and known withdrawal",
+      "high redemption fee and unsettled proceeds",
+      "data outage, solver failure and stale confirmed target"
+    ],
+    "rule": "report every configuration, including unavailable or failed runs; stress scenarios receive no invented probabilities"
+  },
+  "acceptance_proposal": {
+    "engineering": "no cent-ledger imbalance, overspend, unmodeled dealing rule or worsening avoidable reserve shortfall",
+    "economic": "observed primary wealth improvement exceeds the owner-approved hurdle",
+    "uncertainty": "one-sided lower diagnostic bound exceeds that hurdle for all declared block lengths; otherwise remain experimental",
+    "illustrative_drawdown_deterioration_max_percentage_points": 2,
+    "illustrative_cvar_deterioration_max_percentage_points": 1,
+    "risk_margins_require_owner_confirmation": true,
+    "insufficient_risk_evidence": "remain experimental; never convert unavailable estimates to zero or remove a gate after seeing results",
+    "risk_margin_failure_action": "do not promote candidate; still produce a feasible monthly baseline plan",
+    "manual_operations_check_after_paper_months": 3,
+    "initial_prospective_review_after_months": 12,
+    "paper_check_is_not_alpha_validation": true,
+    "promotion": "requires all gates and explicit owner acceptance of the policy change",
+    "retention": "freeze version, retain logging, review operating quality quarterly and economic evidence on predeclared dates",
+    "retirement": "remove research candidate from active comparison after one completed final evaluation fails the agreed hurdle; archive code and results"
+  }
+}

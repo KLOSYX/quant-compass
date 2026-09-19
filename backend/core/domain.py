@@ -211,37 +211,6 @@ class MarketSnapshot:
 
 
 @dataclass(frozen=True)
-class FundDealingTimeline:
-    asset_code: str
-    valuation_date: pd.Timestamp
-    available_at: pd.Timestamp
-    decision_at: pd.Timestamp
-    order_cutoff_at: pd.Timestamp
-    dealing_date: pd.Timestamp
-    confirmation_date: pd.Timestamp
-    availability_quality: AvailabilityQuality = "inferred"
-
-    def __post_init__(self) -> None:
-        for name in (
-            "valuation_date",
-            "available_at",
-            "decision_at",
-            "order_cutoff_at",
-            "dealing_date",
-            "confirmation_date",
-        ):
-            object.__setattr__(self, name, pd.Timestamp(getattr(self, name)))
-        if self.available_at > self.decision_at:
-            raise ValueError("available_at must not be after decision_at")
-        if self.decision_at >= self.dealing_date:
-            raise ValueError("decision_at must be before dealing_date")
-        if self.dealing_date > self.confirmation_date:
-            raise ValueError("dealing_date must not be after confirmation_date")
-        if self.availability_quality not in {"observed", "inferred"}:
-            raise ValueError("invalid availability_quality")
-
-
-@dataclass(frozen=True)
 class ExecutionAmount:
     gross_cash_out: float
     net_asset_add: float

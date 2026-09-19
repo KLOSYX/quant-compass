@@ -27,15 +27,11 @@ def test_riskfree_post_trade_calculation():
 
         request = CurrentRecommendationRequest(
             fund_codes=["FundA"],
-            weights={"FundA": 0.5},
+            weights={"FundA": 1.0},
             current_holdings={"FundA": 0.0, "RiskFree": 1000.0},
             current_cash=0.0,
             monthly_budget=100.0,
-            max_buy_multiplier=1.0,
-            sell_threshold=0.05,
-            min_weight=0.5,
-            max_weight=0.5,
-            ma_window=5,
+            rebalance_enabled=False,
             risk_free_rate=0.03,
         )
 
@@ -55,4 +51,4 @@ def test_riskfree_post_trade_calculation():
         assert riskfree_advice["action"] == "Hold"
         assert riskfree_advice["executable_holding"] == 1000.0
         assert riskfree_advice["amount"] == 0.0
-        assert cash_advice["target_holding"] == 550.0
+        assert cash_advice["target_holding"] == 0.0

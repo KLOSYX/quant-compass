@@ -35,7 +35,7 @@ def test_recommendation_zero_investment():
         assert response.status_code == 200
         data = response.json()
         assert data["recommended_monthly_investment"] == 0.0
-        assert data["strategy_mode"] == "optimized_kelly"
+        assert data["strategy_mode"] == "fixed_weight"
 
 
 def test_single_asset_100_percent():
@@ -89,9 +89,7 @@ def test_recommendation_sells_explicit_exit_even_when_other_assets_need_buys():
             "current_cash": 0.0,
             "monthly_budget": 1000.0,
             "exit_fund_codes": ["000002"],
-            "strategy_mode": "legacy_linear",
-            "min_weight": 1.0,
-            "max_weight": 1.0,
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)

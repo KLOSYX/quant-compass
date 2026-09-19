@@ -1,5 +1,5 @@
 import pandas as pd
-from core.backtest import backtest_dca, backtest_kelly_dca, backtest_lump_sum
+from core.backtest import backtest_dca, backtest_fixed_target, backtest_lump_sum
 
 
 def test_va_short_selling_prevention():
@@ -17,15 +17,14 @@ def test_va_short_selling_prevention():
 
     # Force a sell signal by having current price high above MA
     # MA will be lagging
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         weights,
         monthly_investment,
         initial_holdings=initial_holdings,
-        sell_threshold=0.0,  # Immediate sell
-        min_weight=0.0,  # Target 0% equity
-        max_weight=0.8,
-        strategy_mode="legacy_linear",
+        # Immediate sell
+        # Target 0% equity
+        strategy_mode="fixed_weight",
     )
 
     # Check that in every month, attribution for 000001 is NOT negative
@@ -46,7 +45,7 @@ def test_strategy_consistency_initial_holdings():
     dca = backtest_dca(
         df_nav, weights, monthly_investment, initial_holdings=initial_holdings
     )
-    va = backtest_kelly_dca(
+    va = backtest_fixed_target(
         df_nav, weights, monthly_investment, initial_holdings=initial_holdings
     )
 

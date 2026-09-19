@@ -53,7 +53,7 @@ def test_frontier_does_not_shrink_riskfree_expected_return():
     )
 
     frontier = calculate_efficient_frontier(df, {})
-    expected_risk_free_return = df.pct_change().fillna(0)["RiskFree"].mean() * 12
+    expected_risk_free_return = df.pct_change().dropna()["RiskFree"].mean() * 12
 
     assert frontier
     assert frontier[0]["weights"]["RiskFree"] > 0.99

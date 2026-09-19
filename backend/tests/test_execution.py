@@ -8,7 +8,7 @@ import pytest
 
 from api.models import CurrentRecommendationRequest
 from api.routes import get_current_recommendation
-from core.backtest import backtest_kelly_dca
+from core.backtest import backtest_fixed_target
 from core.execution import execute_monthly_plan
 
 
@@ -268,9 +268,7 @@ def test_current_recommendation_reports_limit_substitute_purchase():
         weights={"A": 1.0, "B": 0.0},
         current_holdings={},
         monthly_budget=500.0,
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
         fund_investment_limits={"A": {"monthly_limit": 100.0}},
         substitute_for={"B": "A"},
     )
@@ -298,9 +296,7 @@ def test_current_recommendation_exposes_per_fund_unspent_reason():
         current_holdings={"B": 50.0},
         current_cash=100.0,
         monthly_budget=100.0,
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
     )
 
     with patch(
@@ -314,16 +310,11 @@ def test_current_recommendation_exposes_per_fund_unspent_reason():
         for item in recommendation["fund_advice"]
         if item["code"] in {"A", "B"}
     }
-    assert all(
-        item["unspent_reason"] == "monthly_budget_exhausted" for item in advice.values()
-    )
+    assert all(item["unspent_reason"] is None for item in advice.values())
     assert all("低位观察不额外定投" not in item["reason"] for item in advice.values())
     diagnostics = recommendation["execution_allocation"]
     assert diagnostics["unspent_reason"] is None
-    assert diagnostics["unspent_reason_labels"] == {
-        "A": "月度 DCA 预算已分配完",
-        "B": "月度 DCA 预算已分配完",
-    }
+    assert diagnostics["unspent_reason_labels"] == {}
 
 
 def test_backtest_only_uses_substitute_after_lagged_covariance_is_available():
@@ -340,13 +331,11 @@ def test_backtest_only_uses_substitute_after_lagged_covariance_is_available():
         index=dates,
     )
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         nav,
         {"A": 1.0, "B": 0.0},
         monthly_investment=500.0,
-        min_weight=1.0,
-        max_weight=1.0,
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
         fund_investment_limits={"A": {"monthly_limit": 100.0}},
         substitute_for={"B": "A"},
         execution_allocation_method="constrained_tracking",
@@ -389,9 +378,7 @@ def test_recommendation_and_backtest_share_first_month_execution_vector():
         sell_fee={"B": 0.01},
         exit_fund_codes=["B"],
         reuse_settled_sale_proceeds=True,
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
     )
 
     with patch(
@@ -400,15 +387,13 @@ def test_recommendation_and_backtest_share_first_month_execution_vector():
     ):
         recommendation = asyncio.run(get_current_recommendation(request))
 
-    backtest = backtest_kelly_dca(
+    backtest = backtest_fixed_target(
         nav.iloc[:1],
         {"A": 1.0, "B": 0.0},
         monthly_investment=100.0,
         initial_holdings={"B": 1000.0},
-        min_weight=1.0,
-        max_weight=1.0,
         sell_fee={"B": 0.01},
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
         exit_fund_codes=["B"],
         reuse_settled_sale_proceeds=True,
     )

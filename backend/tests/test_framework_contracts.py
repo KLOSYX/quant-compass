@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from api.models import CurrentRecommendationRequest
 from core.audit_store import AuditStore, SCHEMA_VERSION
-from core.backtest import backtest_kelly_dca
+from core.backtest import backtest_fixed_target
 from core.decision import (
     DecisionInput,
     ExecutionContext,
@@ -300,7 +300,6 @@ def test_same_decision_input_produces_identical_decision_result(tmp_path):
         strategy_spec=StrategySpec(
             policy_id="fixed-weight-v1",
             target_weights={"A": 1.0},
-            tactical_deployment_ratio=1.0,
         ),
         execution_context=ExecutionContext(monthly_budget=100.0),
     )
@@ -319,27 +318,27 @@ def test_same_decision_input_produces_identical_decision_result(tmp_path):
             {"fills": {"A": 100.0}, "fees": {"A": 0.0}},
             observed + pd.Timedelta(days=1),
         )
-        assert store.connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[
-            0
-        ] == 1
-        assert store.connection.execute(
-            "SELECT COUNT(*) FROM actual_fills"
-        ).fetchone()[0] == 1
+        assert (
+            store.connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+            == 1
+        )
+        assert (
+            store.connection.execute("SELECT COUNT(*) FROM actual_fills").fetchone()[0]
+            == 1
+        )
 
 
 def test_last_period_fee_is_in_final_unit_nav_twr_and_drawdown():
     dates = pd.to_datetime(["2026-01-31", "2026-02-28"])
     nav = pd.DataFrame({"A": [1.0, 1.0]}, index=dates)
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         nav,
         {"A": 1.0},
         monthly_investment=100.0,
         initial_holdings={"A": 100.0},
         buy_fee={"A": 0.1},
-        strategy_mode="legacy_linear",
-        min_weight=1.0,
-        max_weight=1.0,
+        strategy_mode="fixed_weight",
         enable_cvar_constraint=False,
         enable_drawdown_constraint=False,
     )

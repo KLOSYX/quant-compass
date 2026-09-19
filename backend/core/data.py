@@ -1,4 +1,5 @@
 import math
+import re
 import time
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -203,6 +204,33 @@ def _build_money_fund_nav(fund_history: pd.DataFrame) -> pd.Series:
     return nav
 
 
+def _distribution_per_share(row) -> float:
+    """Normalize provider units explicitly; never interpret a ten-share payout as one."""
+    for field, divisor in (
+        ("每份分红", 1),
+        ("每10份分红", 10),
+        ("分红", 1),
+        ("分红方案", 1),
+    ):
+        value = row.get(field)
+        if value is None or pd.isna(value):
+            continue
+        amount = pd.to_numeric(value, errors="coerce")
+        if pd.isna(amount):
+            match = re.fullmatch(
+                r"\s*每\s*(\d+(?:\.\d+)?)\s*份派现金\s*(\d+(?:\.\d+)?)\s*元\s*",
+                str(value),
+            )
+            if not match or float(match[1]) <= 0:
+                raise ValueError(f"无法解析分红字段 {field}: {value}")
+            amount, divisor = float(match[2]), float(match[1])
+        amount = float(amount) / divisor
+        if not np.isfinite(amount) or amount < 0:
+            raise ValueError(f"无效分红金额: {value}")
+        return amount
+    raise ValueError("缺少每份或每10份分红金额")
+
+
 def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
     if "货币" in fund_type:
         cached = MONEY_FUND_NAV_CACHE.get(code)
@@ -239,6 +267,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
     actions: list[CorporateAction] = []
     raw_action_responses: dict[str, list[dict[str, Any]]] = {}
     coverage_complete = True
+    quality_warnings = []
     observed_at = datetime.now(timezone.utc)
     for indicator, kind in (
         ("分红送配详情", "cash_distribution"),
@@ -260,6 +289,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                         "除息日",
                         "权益登记日",
                         "红利发放日",
+                        "分红发放日",
                         "拆分折算日",
                         "年份",
                     )
@@ -270,14 +300,10 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                     pd.NaT,
                 )
                 if pd.isna(event_date):
+                    coverage_complete = False
                     continue
                 if kind == "cash_distribution":
-                    amount = pd.to_numeric(
-                        row.get("每份分红", row.get("分红", row.get("分红方案"))),
-                        errors="coerce",
-                    )
-                    if pd.isna(amount):
-                        continue
+                    amount = _distribution_per_share(row)
                     actions.append(
                         CorporateAction(
                             asset_code=code,
@@ -289,7 +315,10 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                                 row.get("除息日", event_date), errors="coerce"
                             ),
                             payment_date=pd.to_datetime(
-                                row.get("红利发放日", event_date), errors="coerce"
+                                row.get(
+                                    "分红发放日", row.get("红利发放日", event_date)
+                                ),
+                                errors="coerce",
                             ),
                             cash_per_share=float(amount),
                             source="akshare:eastmoney",
@@ -301,6 +330,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                         row.get("拆分比例", row.get("折算比例")), errors="coerce"
                     )
                     if pd.isna(ratio) or float(ratio) <= 0:
+                        coverage_complete = False
                         continue
                     actions.append(
                         CorporateAction(
@@ -312,8 +342,9 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                             observed_at=observed_at,
                         )
                     )
-        except Exception:
+        except Exception as exc:
             coverage_complete = False
+            quality_warnings.append(f"{indicator}: {type(exc).__name__}: {exc}")
 
     reconciliation_error = None
     reconciliation_tolerance = None
@@ -331,14 +362,28 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
                 pd.to_numeric(cumulative_frame["累计净值"], errors="coerce").values,
                 index=pd.to_datetime(cumulative_frame["净值日期"], errors="coerce"),
             ).dropna()
-            reconstructed = reconstruct_total_return_index(nav, actions)
+            # Cumulative NAV adds cash distributions; it is not a reinvested
+            # total-return index. Split-adjusted vendor conventions require a
+            # separate reference and must not be silently guessed here.
+            if any(action.kind == "split" for action in actions):
+                coverage_complete = False
+            reconstructed = nav.copy()
+            for action in actions:
+                if action.kind == "cash_distribution" and action.ex_date is not None:
+                    reconstructed.loc[reconstructed.index >= action.ex_date] += (
+                        action.cash_per_share
+                    )
             aligned = pd.concat(
                 [reconstructed.rename("rebuilt"), cumulative.rename("vendor")],
                 axis=1,
                 join="inner",
             ).dropna()
             if len(aligned) >= 2 and (aligned["vendor"] > 0).all():
-                aligned = aligned / aligned.iloc[0]
+                # Align the historical dividend offset before the first
+                # available observation without altering return conventions.
+                aligned["rebuilt"] += (
+                    aligned["vendor"].iloc[0] - aligned["rebuilt"].iloc[0]
+                )
                 relative_error = (
                     aligned["rebuilt"] - aligned["vendor"]
                 ).abs() / aligned["vendor"]
@@ -376,6 +421,7 @@ def _get_fund_nav(code: str, fund_type: str) -> pd.Series:
         reconciliation_error=reconciliation_error,
         reconciliation_tolerance=reconciliation_tolerance,
         availability_quality="observed",
+        warnings=tuple(quality_warnings),
     )
     return nav
 
@@ -579,7 +625,7 @@ def estimation_total_return_nav(
     )
     if degraded and not allow_degraded_research:
         raise ValueError(
-            "total-return data quality blocks frontier and Kelly: "
+            "total-return data quality blocks frontier and historical estimates: "
             + ", ".join(degraded)
         )
     warnings = []
@@ -587,7 +633,11 @@ def estimation_total_return_nav(
         warnings.append(
             "降级研究结果：以下基金的公司行为数据不完整：" + ", ".join(degraded)
         )
-    result = monthly_total_return.reindex(columns=df_nav.columns).dropna()
+    # A partial current month is labeled with a future month-end by resample.
+    # Estimate only on the same completed periods available to execution.
+    result = monthly_total_return.reindex(
+        index=df_nav.index, columns=df_nav.columns
+    ).dropna()
     if result.empty:
         raise ValueError("total-return series is empty after alignment")
     return result, warnings

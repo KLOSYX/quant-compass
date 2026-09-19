@@ -1501,3 +1501,30 @@ input[type='date']::-webkit-calendar-picker-indicator {
         position: relative;
     }
 }
+
+/* Monthly settings use the existing warm dark tokens and quiet disclosures. */
+.settings-panel { margin: 12px 0 20px; }
+.settings-help { color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6; margin-bottom: 16px; }
+.settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+.settings-panel .form-group { min-width: 0; margin-bottom: 0; }
+.settings-panel label { display: block; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.5; margin-bottom: 6px; }
+.settings-panel .form-input { min-height: 40px; }
+.settings-panel .form-input::placeholder { color: var(--text-secondary); opacity: 1; }
+.settings-panel .form-group p { color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.5; margin-top: 6px; }
+.settings-disclosure { border-top: 1px solid var(--border-color); margin-top: 16px; }
+.settings-disclosure > summary { cursor: pointer; padding: 16px 0; color: var(--text-primary); font-size: 0.9375rem; }
+.settings-summary { color: var(--text-secondary); font-size: 0.8125rem; margin-left: 16px; }
+.settings-body { padding: 0 0 8px; }
+.settings-body > .settings-help { margin: 18px 0 8px; }
+.fund-exception-row { display: grid; grid-template-columns: minmax(160px, 2fr) repeat(2, minmax(120px, 1fr)) 36px; gap: 16px; align-items: end; padding: 12px 0; }
+.fund-exception-name { align-self: center; font-size: 0.875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.fund-exception-name small { display: block; color: var(--text-secondary); font-size: 0.75rem; }
+.exception-remove { min-width: 36px; min-height: 40px; justify-content: center; color: var(--text-secondary); }
+.exception-add { max-width: 440px; margin-top: 14px; }
+.settings-panel :is(summary, button, select, input):focus-visible { outline: 2px solid var(--accent-secondary); outline-offset: 3px; }
+@media (max-width: 767px) {
+    .settings-fields { grid-template-columns: minmax(0, 1fr); }
+    .settings-summary { display: block; margin: 6px 0 0 18px; }
+    .fund-exception-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; gap: 12px; }
+    .fund-exception-name { grid-column: 1 / -1; }
+}

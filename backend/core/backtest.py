@@ -11,12 +11,13 @@ from core.constants import (
     DEFAULT_CVAR_CONFIDENCE,
     DEFAULT_CVAR_LIMIT,
     DEFAULT_ESTIMATION_WINDOW,
-    DEFAULT_KELLY_FRACTION,
     DEFAULT_MAX_DRAWDOWN_LIMIT,
     DEFAULT_RISK_HORIZON_DAYS,
     DEFAULT_STRATEGY_MODE,
 )
-from core.execution import execute_monthly_plan
+from core.decision import ExecutionContext, PortfolioState, StrategySpec, plan_month
+from core.domain import SubstitutionGroup
+from core.ledger import AccountUnitLedger
 from core.execution_optimizer import build_execution_covariance
 from core.portfolio import (
     decompose_selected_weights,
@@ -25,11 +26,7 @@ from core.portfolio import (
 )
 from core.performance import performance_summary
 from core.risk import calculate_max_drawdown
-from core.reference import build_reference_basket
 from core.strategy import (
-    calculate_target_ratio,
-    calculate_target_ratio_optimized,
-    infer_valuation_signal,
     validate_strategy_params,
 )
 
@@ -213,21 +210,15 @@ def backtest_dca(
     }
 
 
-def backtest_kelly_dca(
+def backtest_fixed_target(
     df_nav,
     weights_dict,
     monthly_investment,
     initial_holdings=None,
-    max_buy_multiplier=3.0,
-    sell_threshold=0.05,
-    min_weight=0.3,
-    max_weight=0.8,
     buy_fee: Dict[str, float] = None,
     sell_fee: Dict[str, float] = None,
-    ma_window: int = 12,
     risk_free_rate: float = 0.0,
     strategy_mode: str = DEFAULT_STRATEGY_MODE,
-    kelly_fraction: float = DEFAULT_KELLY_FRACTION,
     estimation_window: int = DEFAULT_ESTIMATION_WINDOW,
     minimum_cash_reserve: float = 0.0,
     enable_cvar_constraint: bool = True,
@@ -247,18 +238,19 @@ def backtest_kelly_dca(
     planned_purchase_days: int = None,
     estimation_nav: pd.DataFrame = None,
     daily_estimation_nav: pd.DataFrame = None,
+    corporate_actions=(),
+    account_distribution_policy="cash",
+    contributions=None,
+    rebalance_enabled=True,
+    rebalance_band=0.02,
+    available_existing_cash=0.0,
+    redemption_limits=None,
+    min_purchase_amount=0.0,
+    amount_step=0.01,
 ):
-    """Kelly-guided DCA strategy.
-
-    Every period adds the fixed external contribution. Kelly determines the
-    target risk mix and directs that contribution to underweight funds; it does
-    not increase the contribution or force sales to close a target-value gap.
-    """
+    """Fixed-target allocation with the same execution rules as recommendations."""
     validate_strategy_params(
         strategy_mode=strategy_mode,
-        min_weight=min_weight,
-        max_weight=max_weight,
-        kelly_fraction=kelly_fraction,
         estimation_window=estimation_window,
         minimum_cash_reserve=minimum_cash_reserve,
         enable_cvar_constraint=enable_cvar_constraint,
@@ -281,16 +273,11 @@ def backtest_kelly_dca(
         list(df_nav.columns), asset_categories
     )
     risky_weights = selected["risky_weights"]
-    base_risky_ratio = float(selected["base_risky_ratio"])
     base_risk_free_ratio = float(selected["base_risk_free_ratio"])
     risky_columns = list(risky_weights.index)
-    has_risky_assets = base_risky_ratio > 0 and float(risky_weights.sum()) > 0
 
     can_use_risk_free_asset = "RiskFree" in df_nav.columns and (
         base_risk_free_ratio > 0 or initial_holdings.get("RiskFree", 0.0) > 0
-    )
-    target_has_risk_free_asset = (
-        "RiskFree" in df_nav.columns and base_risk_free_ratio > 0
     )
 
     initial_nav = df_nav.iloc[0]
@@ -306,6 +293,7 @@ def backtest_kelly_dca(
         risk_free_shares = initial_holdings["RiskFree"] / initial_nav["RiskFree"]
 
     cash_balance = initial_cash
+    pending_sale_proceeds = 0.0
 
     initial_value = sum(initial_holdings.values()) + cash_balance
     accumulated_investment = initial_value  # Total external money put in (principal)
@@ -317,32 +305,16 @@ def backtest_kelly_dca(
     invested_history = {}
 
     signal_nav = estimation_nav if estimation_nav is not None else df_nav
-    signal_daily_nav = (
-        daily_estimation_nav if daily_estimation_nav is not None else daily_nav
+    ledger = AccountUnitLedger.initialize(
+        {
+            **total_shares.to_dict(),
+            **({"RiskFree": risk_free_shares} if can_use_risk_free_asset else {}),
+        },
+        cash_balance,
+        initial_nav.to_dict(),
     )
-    if has_risky_assets:
-        reference_portfolio_nav = build_reference_basket(
-            signal_nav[risky_columns], risky_weights
-        )
-        daily_reference_portfolio_nav = (
-            build_reference_basket(signal_daily_nav[risky_columns], risky_weights)
-            if signal_daily_nav is not None
-            and set(risky_columns).issubset(signal_daily_nav.columns)
-            else None
-        )
-        ma_series = reference_portfolio_nav.rolling(
-            window=ma_window, min_periods=1
-        ).mean()
-    else:
-        reference_portfolio_nav = pd.Series(1.0, index=df_nav.index, dtype=float)
-        daily_reference_portfolio_nav = None
-        ma_series = reference_portfolio_nav.copy()
-
-    # Unit NAV Accounting
-    total_units = 0.0
-    if accumulated_investment > 0:
-        total_units = accumulated_investment  # Initial units at 1.0
-
+    regular_contribution = monthly_investment
+    reusable_cash_remaining = available_existing_cash
     unit_nav_history = {}
     external_contributions = []
     if accumulated_investment > 0:
@@ -352,178 +324,110 @@ def backtest_kelly_dca(
     optimizer_info_current = None
 
     for idx, (timestamp, nav_row) in enumerate(df_nav.iterrows()):
-        # --- Unit NAV Calculation Start ---
-        # Calculate Wealth BEFORE new external inflow (income)
-        current_equity_val_pre = (total_shares * nav_row[total_shares.index]).sum()
-        current_risk_free_val_pre = (
-            risk_free_shares * nav_row["RiskFree"] if can_use_risk_free_asset else 0.0
+        monthly_investment = (
+            regular_contribution
+            if contributions is None
+            else float(contributions.get(timestamp, 0.0))
         )
-        wealth_pre = current_equity_val_pre + current_risk_free_val_pre + cash_balance
-
-        if total_units > 0:
-            unit_nav = wealth_pre / total_units
-        else:
-            unit_nav = 1.0
-
-        # The pre-flow NAV prices newly issued strategy units. Performance is
-        # recorded only after this period's trades and fees have settled.
-        # --- Unit NAV Calculation End ---
-
-        # 1. Income Step (External Inflow)
+        settled_sales = ledger.receivables.pop("sale_proceeds", 0.0)
+        ledger.cash += settled_sales
+        reusable_cash_remaining += settled_sales
+        if idx > 0:
+            ledger.process_actions(
+                corporate_actions,
+                df_nav.index[idx - 1],
+                timestamp,
+                daily_nav if daily_nav is not None else df_nav,
+                account_distribution_policy,
+            )
+        total_shares = pd.Series(
+            {code: ledger.shares.get(code, 0.0) for code in risky_columns}, dtype=float
+        )
+        risk_free_shares = ledger.shares.get("RiskFree", 0.0)
+        cash_balance = ledger.cash
+        current_risk_free_value = risk_free_shares * nav_row.get("RiskFree", 0.0)
+        ledger.contribute(timestamp, monthly_investment, nav_row.to_dict())
         accumulated_investment += monthly_investment
         if monthly_investment > 0:
             external_contributions.append((timestamp, monthly_investment))
 
-        # Buy Strategy Units
-        if unit_nav > 0:
-            total_units += monthly_investment / unit_nav
+        market_signal_current = allocation_signal_current = "neutral"
+        optimizer_info_current = {"policy": "fixed_weight"}
 
-        # 2. Valuation Step (Post Income)
-        current_equity_value = (total_shares * nav_row[total_shares.index]).sum()
-        current_risk_free_value = (
-            risk_free_shares * nav_row["RiskFree"] if can_use_risk_free_asset else 0.0
-        )
-        total_wealth = (
-            current_equity_value
-            + current_risk_free_value
-            + cash_balance
-            + monthly_investment
-        )
-
-        # 3. Target Ratio
-        if not has_risky_assets:
-            tactical_ratio = 0.0
-            market_signal_current = "neutral"
-            allocation_signal_current = "neutral"
-            optimizer_info_current = {
-                "cash_cap_ratio": 1.0,
-                "cash_constrained": False,
-                "max_feasible_ratio_by_cvar": 0.0,
-                "max_feasible_ratio_by_drawdown": 0.0,
-                "max_feasible_ratio_by_risk": 0.0,
-                "constraint_applied": False,
-                "constraint_binding": "cash",
-            }
-        elif idx == 0:
-            cash_cap_ratio = (
-                float(
-                    np.clip(
-                        (total_wealth - minimum_cash_reserve) / total_wealth,
-                        0.0,
-                        1.0,
-                    )
-                )
-                if total_wealth > 0
-                else 0.0
-            )
-            tactical_ratio = float(min(min_weight, max_weight, cash_cap_ratio))
-            market_signal_current = "neutral"
-            allocation_signal_current = "neutral"
-            optimizer_info_current = None
-        else:
-            signal_timestamp = reference_portfolio_nav.index[idx - 1]
-            current_price = reference_portfolio_nav.loc[signal_timestamp]
-            current_ma = ma_series.loc[signal_timestamp]
-            market_signal_current = infer_valuation_signal(current_price, current_ma)
-            if strategy_mode == "legacy_linear":
-                tactical_ratio, allocation_signal_current = calculate_target_ratio(
-                    current_price, current_ma, min_weight, max_weight
-                )
-                optimizer_info_current = None
-            else:
-                (
-                    tactical_ratio,
-                    allocation_signal_current,
-                    optimizer_info_current,
-                ) = calculate_target_ratio_optimized(
-                    reference_portfolio_nav=reference_portfolio_nav,
-                    timestamp=signal_timestamp,
-                    min_weight=min_weight,
-                    max_weight=max_weight,
-                    kelly_fraction=kelly_fraction,
-                    estimation_window=estimation_window,
-                    risk_free_rate=risk_free_rate,
-                    total_wealth=total_wealth,
-                    minimum_cash_reserve=minimum_cash_reserve,
-                    enable_cvar_constraint=enable_cvar_constraint,
-                    cvar_confidence=cvar_confidence,
-                    cvar_limit=cvar_limit,
-                    enable_drawdown_constraint=enable_drawdown_constraint,
-                    max_drawdown_limit=max_drawdown_limit,
-                    daily_reference_nav=daily_reference_portfolio_nav,
-                    risk_horizon_days=risk_horizon_days,
-                )
-
-        # 4. DCA execution: this month's external contribution is the only
-        # risky-asset purchase budget. Kelly chooses the target mix; it does
-        # not create a VA-style catch-up contribution or forced rebalancing.
-        cash_hard_cap_ratio = max(
-            0.0,
-            1.0
-            - base_risk_free_ratio
-            - (minimum_cash_reserve / total_wealth if total_wealth > 0 else 0.0),
-        )
-        final_target_risky_ratio = float(
-            np.clip(
-                min(base_risky_ratio * tactical_ratio, cash_hard_cap_ratio),
-                0.0,
-                1.0,
-            )
-        )
-        target_equity_value = total_wealth * final_target_risky_ratio
-        current_asset_values = total_shares * nav_row[total_shares.index]
-        target_asset_values = risky_weights * target_equity_value
-        non_risky_target_value = max(0.0, total_wealth - target_equity_value)
-        if target_has_risk_free_asset:
-            target_risk_free_value = total_wealth * base_risk_free_ratio
-            target_cash_balance = max(
-                0.0, non_risky_target_value - target_risk_free_value
-            )
-        else:
-            target_cash_balance = non_risky_target_value
-            target_risk_free_value = 0.0
-
-        execution = execute_monthly_plan(
-            fund_codes=risky_columns,
-            current_holdings=current_asset_values.to_dict(),
-            target_holdings=target_asset_values.to_dict(),
-            target_weights=risky_weights.to_dict(),
-            current_cash=cash_balance,
-            monthly_budget=monthly_investment,
-            buy_fees=buy_fee or {},
-            sell_fees=sell_fee or {},
-            investment_limits=fund_investment_limits,
-            timestamp=timestamp,
-            minimum_cash_reserve=minimum_cash_reserve,
-            exit_fund_codes=exit_fund_codes,
-            reuse_settled_sale_proceeds=reuse_settled_sale_proceeds,
-            current_risk_free=current_risk_free_value,
-            target_risk_free=target_risk_free_value,
-            target_cash=target_cash_balance,
-            # Default household mode never redeems RiskFree automatically.
-            can_manage_risk_free=False,
-            target_has_risk_free=target_has_risk_free_asset,
-            allocation_method=execution_allocation_method,
-            execution_covariance=build_execution_covariance(
-                signal_nav.loc[:timestamp],
-                risky_columns,
-                estimation_window=estimation_window,
+        execution = plan_month(
+            columns=list(df_nav.columns),
+            state=PortfolioState(
+                holdings={
+                    **(total_shares * nav_row[total_shares.index]).to_dict(),
+                    "RiskFree": current_risk_free_value,
+                },
+                cash=cash_balance,
             ),
-            substitute_for=substitute_for,
-            planned_purchase_days=planned_purchase_days,
+            strategy=StrategySpec("fixed-weight", weights_dict),
+            context=ExecutionContext(
+                monthly_budget=monthly_investment,
+                rebalance_enabled=rebalance_enabled,
+                rebalance_band=rebalance_band,
+                available_existing_cash=min(reusable_cash_remaining, cash_balance),
+                redemption_limits=redemption_limits or {},
+                buy_fees=buy_fee or {},
+                sell_fees=sell_fee or {},
+                investment_limits=fund_investment_limits or {},
+                minimum_cash_reserve=minimum_cash_reserve,
+                allow_sales=bool(exit_fund_codes),
+                exit_fund_codes=tuple(exit_fund_codes or ()),
+                reuse_settled_sale_proceeds=reuse_settled_sale_proceeds,
+                allocation_method=execution_allocation_method,
+                execution_covariance=build_execution_covariance(
+                    signal_nav.iloc[:idx],
+                    risky_columns,
+                    estimation_window=estimation_window,
+                ),
+                substitution_groups=tuple(
+                    SubstitutionGroup(
+                        primary,
+                        primary,
+                        tuple(
+                            code
+                            for code, owner in (substitute_for or {}).items()
+                            if owner == primary
+                        ),
+                    )
+                    for primary in sorted(set((substitute_for or {}).values()))
+                    if primary
+                ),
+                planned_purchase_days=planned_purchase_days,
+                min_purchase_amount=min_purchase_amount,
+                amount_step=amount_step,
+            ),
+            as_of=timestamp,
         )
 
-        for code, fund_execution in execution.funds.items():
-            total_shares[code] = fund_execution.executable_holding / nav_row[code]
-        if can_use_risk_free_asset:
-            risk_free_shares = execution.risk_free_after / nav_row["RiskFree"]
-        cash_balance = execution.cash_after
+        ledger.apply_execution(execution, nav_row.to_dict())
+        reusable_cash_remaining = max(
+            0.0,
+            reusable_cash_remaining
+            - max(
+                0.0,
+                execution.total_gross_buy
+                + execution.risk_free_gross_buy
+                - monthly_investment
+                - execution.reused_sale_proceeds,
+            ),
+        )
+        total_shares = pd.Series(
+            {code: ledger.shares.get(code, 0.0) for code in risky_columns}, dtype=float
+        )
+        risk_free_shares = ledger.shares.get("RiskFree", 0.0)
+        cash_balance = ledger.cash
+        pending_sale_proceeds = sum(ledger.receivables.values())
         execution_history[timestamp] = {
             "total_gross_buy": execution.total_gross_buy,
             "total_gross_sell": execution.total_gross_sell,
             "total_net_sell_proceeds": execution.total_net_sell_proceeds,
             "reused_sale_proceeds": execution.reused_sale_proceeds,
             "cash_after": execution.cash_after,
+            "pending_sale_proceeds": pending_sale_proceeds,
             "risk_free_after": execution.risk_free_after,
             "accounting_error": execution.accounting_error,
             "allocation_diagnostics": dict(execution.allocation_diagnostics),
@@ -550,19 +454,16 @@ def backtest_kelly_dca(
         if can_use_risk_free_asset:
             attribution_dict["RiskFree"] = risk_free_shares * nav_row["RiskFree"]
         attribution_dict["Cash"] = cash_balance
+        attribution_dict["PendingCash"] = pending_sale_proceeds
         attribution_history[timestamp] = attribution_dict
 
-        total_portfolio_value = (
-            current_asset_values.sum()
-            + (
-                risk_free_shares * nav_row["RiskFree"]
-                if can_use_risk_free_asset
-                else 0.0
-            )
-            + cash_balance
-        )
+        total_portfolio_value = ledger.wealth(nav_row.to_dict())
         category_metrics = calculate_exposure_metrics(
-            {code: value for code, value in attribution_dict.items() if code != "Cash"},
+            {
+                code: value
+                for code, value in attribution_dict.items()
+                if code not in {"Cash", "PendingCash"}
+            },
             total_wealth=total_portfolio_value,
             asset_categories=normalized_asset_categories,
         )
@@ -576,9 +477,7 @@ def backtest_kelly_dca(
             ),
         }
         portfolio_history[timestamp] = total_portfolio_value
-        unit_nav_history[timestamp] = (
-            total_portfolio_value / total_units if total_units > 0 else 1.0
-        )
+        unit_nav_history[timestamp] = ledger.record(timestamp, nav_row.to_dict())
         invested_history[timestamp] = accumulated_investment
 
     portfolio_series = pd.Series(portfolio_history)
@@ -650,13 +549,9 @@ def simulate_strategy_frontier(
     start_date,
     end_date,
     risk_free_rate,
-    ma_window=12,
     buy_fee=None,
     sell_fee=None,
-    user_min_weight=None,
-    user_max_weight=None,
     strategy_mode=DEFAULT_STRATEGY_MODE,
-    kelly_fraction=DEFAULT_KELLY_FRACTION,
     estimation_window=DEFAULT_ESTIMATION_WINDOW,
     minimum_cash_reserve=0.0,
     enable_cvar_constraint=True,
@@ -674,58 +569,26 @@ def simulate_strategy_frontier(
     execution_allocation_method="proportional_gap",
     planned_purchase_days=None,
 ):
-    """
-    Simulate the Kelly-guided DCA strategy for each frontier point.
-    If user_min_weight / user_max_weight are provided, use them (Manual Mode).
-    Otherwise, use auto-tuning logic (Auto Mode).
-    """
+    """Replay each selected fixed target through the shared executor."""
     strategy_points = []
-    risks = [p["risk"] for p in frontier_points]
-    if not risks:
-        return []
-    min_risk = min(risks)
-    max_risk = max(risks)
-
-    # Prepare backtest common params
-    # We use user provided params to match scale
-
     for pt in frontier_points:
         risk = pt["risk"]
         weights = pt["weights"]
 
-        if user_min_weight is not None and user_max_weight is not None:
-            # Use user provided fixed params (Align with detailed backtest)
-            min_weight = user_min_weight
-            max_weight = user_max_weight
-        else:
-            # Auto-tune Params Logic (Aggressive)
-            if max_risk > min_risk:
-                risk_level = (risk - min_risk) / (max_risk - min_risk)
-            else:
-                risk_level = 0.5  # Default middle
-
-            # Interpolate: Min 40->90, Max 80->100
-            min_weight = 0.4 + (risk_level * 0.5)
-            max_weight = 0.8 + (risk_level * 0.2)
-
         # Run Backtest
         # Note: nav_adjusted ALREADY has fees subtracted in analyze_portfolio
         # so we pass buy_fee/sell_fee as 0 to keep it pure to the strategy logic impact
-        result = backtest_kelly_dca(
+        result = backtest_fixed_target(
             nav_adjusted,
             weights,
             monthly_investment,
             initial_holdings={
                 code: initial_lump_sum * w for code, w in weights.items() if w > 0
             },
-            min_weight=min_weight,
-            max_weight=max_weight,
             buy_fee=buy_fee or {},
             sell_fee=sell_fee or {},
-            ma_window=ma_window,
             risk_free_rate=risk_free_rate or 0.0,
             strategy_mode=strategy_mode,
-            kelly_fraction=kelly_fraction,
             estimation_window=estimation_window,
             minimum_cash_reserve=minimum_cash_reserve,
             enable_cvar_constraint=enable_cvar_constraint,
@@ -783,7 +646,7 @@ def simulate_strategy_frontier(
                 "original_risk": risk,  # Link back to original point
                 "weights": weights,
                 "effective_risky_weights": result.get("effective_risky_weights", {}),
-                "auto_params": {"min_weight": min_weight, "max_weight": max_weight},
+                "policy": "fixed_weight",
             }
         )
 

@@ -1,0 +1,62 @@
+{
+  "006662": {
+    "source": "akshare:eastmoney",
+    "captured": "2026-09-19",
+    "first": "2018-12-05 00:00:00",
+    "last": "2026-09-18 00:00:00",
+    "rows": 1883,
+    "quality": {
+      "status": "reconciled",
+      "corporate_action_coverage_complete": true,
+      "reconciliation_error": 1.1359717168743074e-15,
+      "reconciliation_tolerance": 0.008972633467922835,
+      "availability_quality": "observed",
+      "warnings": []
+    }
+  },
+  "012643": {
+    "source": "akshare:eastmoney",
+    "captured": "2026-09-19",
+    "first": "2022-02-23 00:00:00",
+    "last": "2026-09-18 00:00:00",
+    "rows": 1114,
+    "quality": {
+      "status": "reconciled",
+      "corporate_action_coverage_complete": true,
+      "reconciliation_error": 9.070449547591148e-16,
+      "reconciliation_tolerance": 0.009084302325581396,
+      "availability_quality": "observed",
+      "warnings": []
+    }
+  },
+  "270023": {
+    "source": "akshare:eastmoney",
+    "captured": "2026-09-19",
+    "first": "2010-08-18 00:00:00",
+    "last": "2026-09-17 00:00:00",
+    "rows": 3872,
+    "quality": {
+      "status": "reconciled",
+      "corporate_action_coverage_complete": true,
+      "reconciliation_error": 2.2169543461551185e-16,
+      "reconciliation_tolerance": 0.05128205128205129,
+      "availability_quality": "observed",
+      "warnings": []
+    }
+  },
+  "457001": {
+    "source": "akshare:eastmoney",
+    "captured": "2026-09-19",
+    "first": "2012-02-22 00:00:00",
+    "last": "2026-09-17 00:00:00",
+    "rows": 3518,
+    "quality": {
+      "status": "reconciled",
+      "corporate_action_coverage_complete": true,
+      "reconciliation_error": 2.2193363810597832e-16,
+      "reconciliation_tolerance": 0.08912655971479501,
+      "availability_quality": "observed",
+      "warnings": []
+    }
+  }
+}

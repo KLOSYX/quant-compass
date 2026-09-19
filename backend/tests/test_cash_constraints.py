@@ -33,8 +33,8 @@ def test_recommendation_insufficient_cash():
             "current_holdings": {"000001": 1000, "000002": 500},  # ¥1500 total
             "current_cash": 500.0,  # Only ¥500 cash
             "monthly_budget": 1000,  # ¥1000 budget
-            "max_buy_multiplier": 3.0,  # Would allow ¥3000 theoretically
-            "strategy_mode": "legacy_linear",
+            # Would allow ¥3000 theoretically
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -70,7 +70,7 @@ def test_recommendation_zero_cash():
             "current_holdings": {"000001": 5000},
             "current_cash": 0.0,  # No cash
             "monthly_budget": 0,  # No budget
-            "strategy_mode": "legacy_linear",
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -102,7 +102,6 @@ def test_recommendation_respects_minimum_cash_reserve():
             "current_cash": 0.0,
             "monthly_budget": 1000,
             "minimum_cash_reserve": 900,
-            "max_weight": 1.0,
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -141,7 +140,7 @@ def test_recommendation_zero_target_when_reserve_exceeds_wealth():
         assert data["recommended_monthly_investment"] == 0.0
 
 
-def test_cvar_constraint_caps_target_ratio():
+def test_cvar_warning_preserves_fixed_target():
     dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
     nav_values = [
         1.0,
@@ -171,8 +170,6 @@ def test_cvar_constraint_caps_target_ratio():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "min_weight": 0.0,
-            "max_weight": 1.0,
             "enable_cvar_constraint": True,
             "cvar_confidence": 0.95,
             "cvar_limit": 0.03,
@@ -181,12 +178,12 @@ def test_cvar_constraint_caps_target_ratio():
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         data = response.json()
-        info = data["optimizer_info"]
-        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_cvar"] + 1e-9
-        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+        assert data["optimizer_info"]["policy"] == "fixed_weight"
+        assert data["recommended_monthly_investment"] == pytest.approx(1000)
+        assert data["target_equity_ratio"] == pytest.approx(1.0)
 
 
-def test_drawdown_constraint_caps_target_ratio():
+def test_drawdown_warning_preserves_fixed_target():
     dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
     nav_values = [
         1.0,
@@ -216,8 +213,6 @@ def test_drawdown_constraint_caps_target_ratio():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "min_weight": 0.0,
-            "max_weight": 1.0,
             "enable_cvar_constraint": False,
             "enable_drawdown_constraint": True,
             "max_drawdown_limit": 0.05,
@@ -225,14 +220,12 @@ def test_drawdown_constraint_caps_target_ratio():
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         data = response.json()
-        info = data["optimizer_info"]
-        assert (
-            data["target_equity_ratio"] <= info["max_feasible_ratio_by_drawdown"] + 1e-9
-        )
-        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+        assert data["optimizer_info"]["policy"] == "fixed_weight"
+        assert data["recommended_monthly_investment"] == pytest.approx(1000)
+        assert data["target_equity_ratio"] == pytest.approx(1.0)
 
 
-def test_combined_constraints_use_tighter_cap():
+def test_combined_risk_warnings_preserve_fixed_target():
     dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
     nav_values = [
         1.0,
@@ -262,8 +255,6 @@ def test_combined_constraints_use_tighter_cap():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "min_weight": 0.0,
-            "max_weight": 1.0,
             "enable_cvar_constraint": True,
             "cvar_limit": 0.04,
             "enable_drawdown_constraint": True,
@@ -272,15 +263,12 @@ def test_combined_constraints_use_tighter_cap():
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         data = response.json()
-        info = data["optimizer_info"]
-        tighter = min(
-            info["max_feasible_ratio_by_cvar"], info["max_feasible_ratio_by_drawdown"]
-        )
-        assert info["max_feasible_ratio_by_risk"] <= tighter + 1e-9
-        assert data["target_equity_ratio"] <= info["max_feasible_ratio_by_risk"] + 1e-9
+        assert data["optimizer_info"]["policy"] == "fixed_weight"
+        assert data["recommended_monthly_investment"] == pytest.approx(1000)
+        assert data["target_equity_ratio"] == pytest.approx(1.0)
 
 
-def test_hard_constraints_override_min_weight():
+def test_soft_risk_preferences_do_not_cancel_minimum_allocation():
     dates = pd.date_range(start="2023-01-01", periods=36, freq="ME")
     nav_values = [
         1.0,
@@ -310,8 +298,6 @@ def test_hard_constraints_override_min_weight():
             "current_holdings": {"000001": 0},
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "min_weight": 0.9,
-            "max_weight": 1.0,
             "enable_cvar_constraint": True,
             "cvar_limit": 0.02,
             "enable_drawdown_constraint": True,
@@ -320,16 +306,14 @@ def test_hard_constraints_override_min_weight():
         response = client.post("/api/current_recommendation", json=request_data)
         assert response.status_code == 200
         data = response.json()
-        assert data["target_equity_ratio"] < 0.9
-        assert (
-            data["target_equity_ratio"]
-            <= data["optimizer_info"]["max_feasible_ratio_by_risk"] + 1e-9
-        )
+        assert data["optimizer_info"]["policy"] == "fixed_weight"
+        assert data["recommended_monthly_investment"] == pytest.approx(1000)
+        assert data["target_equity_ratio"] == pytest.approx(1.0)
 
 
 def test_backtest_fee_no_overdraft():
     """Test that buy fees don't cause cash overdraft in backtest."""
-    from core.backtest import backtest_kelly_dca
+    from core.backtest import backtest_fixed_target
 
     # Create simple NAV data
     dates = pd.date_range(start="2023-01-31", end="2023-06-30", freq="ME")
@@ -344,18 +328,13 @@ def test_backtest_fee_no_overdraft():
     buy_fee = {"000001": 0.015, "000002": 0.015}  # 1.5% buy fee
     sell_fee = {"000001": 0.005, "000002": 0.005}
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         weights,
         monthly_investment,
         initial_holdings={},
-        max_buy_multiplier=3.0,
-        sell_threshold=0.05,
-        min_weight=0.3,
-        max_weight=0.8,
         buy_fee=buy_fee,
         sell_fee=sell_fee,
-        ma_window=12,
     )
 
     # Check that backtest completed successfully
@@ -370,18 +349,17 @@ def test_backtest_fee_no_overdraft():
 
 
 def test_backtest_respects_minimum_cash_reserve_floor():
-    from core.backtest import backtest_kelly_dca
+    from core.backtest import backtest_fixed_target
 
     dates = pd.date_range(start="2023-01-31", end="2023-06-30", freq="ME")
     nav_data = {"000001": [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]}
     df_nav = pd.DataFrame(nav_data, index=dates)
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         {"000001": 1.0},
         1000.0,
         initial_holdings={"RiskFree": 800.0},
-        max_buy_multiplier=5.0,
         minimum_cash_reserve=500.0,
     )
 
@@ -390,7 +368,7 @@ def test_backtest_respects_minimum_cash_reserve_floor():
 
 
 def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
-    from core.backtest import backtest_kelly_dca
+    from core.backtest import backtest_fixed_target
 
     dates = pd.date_range(start="2023-01-31", periods=3, freq="ME")
     df_nav = pd.DataFrame(
@@ -401,23 +379,20 @@ def test_backtest_parks_uninvested_capital_in_riskfree_when_available():
         index=dates,
     )
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         {"000001": 0.4, "RiskFree": 0.6},
         monthly_investment=100.0,
         initial_holdings={},
         initial_cash=1000.0,
-        max_buy_multiplier=1.0,
-        min_weight=1.0,
-        max_weight=1.0,
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
     )
 
     first_month = result["attribution"][dates[0].strftime("%Y-%m")]
-    assert first_month["000001"] == 100.0
+    assert first_month["000001"] == 40.0
     # The base 60% safe sleeve remains distinct from residual cash.
-    assert first_month["Cash"] == pytest.approx(340.0)
-    assert first_month["RiskFree"] == pytest.approx(660.0)
+    assert first_month["Cash"] == pytest.approx(1000.0)
+    assert first_month["RiskFree"] == pytest.approx(60.0)
 
 
 def test_fee_calculation_accuracy():
@@ -441,7 +416,7 @@ def test_fee_calculation_accuracy():
             "current_cash": 0.0,
             "monthly_budget": 1000,
             "buy_fee": {"000001": 0.015},  # 1.5% buy fee
-            "strategy_mode": "legacy_linear",
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -497,10 +472,7 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
                 "current_holdings": {},
                 "current_cash": 0.0,
                 "monthly_budget": 10000,
-                "max_buy_multiplier": 10.0,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 0.8,
-                "max_weight": 0.8,
+                "strategy_mode": "fixed_weight",
                 "fund_investment_limits": {
                     "000001": {"monthly_limit": 500.0},
                 },
@@ -514,14 +486,14 @@ def test_recommendation_respects_fund_monthly_buy_limits_and_redistributes():
     assert advice["000001"]["action"] == "Buy"
     assert advice["000001"]["amount"] == pytest.approx(500.0)
     assert advice["000001"]["limit_applied"] is True
-    assert advice["000001"]["target_holding"] == pytest.approx(4000.0)
+    assert advice["000001"]["target_holding"] == pytest.approx(5000.0)
     assert advice["000001"]["executable_holding"] == pytest.approx(500.0)
-    assert advice["000001"]["ideal_holding"] == pytest.approx(4000.0)
+    assert advice["000001"]["ideal_holding"] == pytest.approx(5000.0)
 
     assert advice["000002"]["action"] == "Buy"
-    assert advice["000002"]["amount"] == pytest.approx(4000.0)
-    assert data["recommended_monthly_investment"] == pytest.approx(4500.0)
-    assert advice["Cash"]["executable_holding"] == pytest.approx(5500.0)
+    assert advice["000002"]["amount"] == pytest.approx(5000.0)
+    assert data["recommended_monthly_investment"] == pytest.approx(5500.0)
+    assert advice["Cash"]["executable_holding"] == pytest.approx(4500.0)
 
 
 def test_daily_limit_uses_explicit_planned_purchase_days():
@@ -536,9 +508,7 @@ def test_daily_limit_uses_explicit_planned_purchase_days():
                 "fund_codes": ["000001"],
                 "weights": {"000001": 1.0},
                 "monthly_budget": 10000.0,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 1.0,
-                "max_weight": 1.0,
+                "strategy_mode": "fixed_weight",
                 "fund_investment_limits": {"000001": {"daily_limit": 2000.0}},
                 "planned_purchase_days": 1,
             },
@@ -566,9 +536,7 @@ def test_recommendation_does_not_blame_limit_when_only_dca_budget_is_partial():
                 "current_holdings": {},
                 "current_cash": 9000.0,
                 "monthly_budget": 1000.0,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 1.0,
-                "max_weight": 1.0,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -580,7 +548,7 @@ def test_recommendation_does_not_blame_limit_when_only_dca_budget_is_partial():
     assert advice["amount"] == pytest.approx(1000.0)
     assert advice["monthly_buy_limit"] is None
     assert advice["limit_applied"] is False
-    assert advice["amount"] < advice["gap"]
+    assert advice["amount"] == advice["gap"]
     assert "DCA" in advice["reason"]
 
 
@@ -604,12 +572,9 @@ def test_recommendation_does_not_sell_overweight_fund_while_net_buy_is_capped():
                 "weights": {"000001": 0.5, "000002": 0.5},
                 "current_holdings": {"000001": 10000.0},
                 "current_cash": 1000.0,
+                "rebalance_enabled": False,
                 "monthly_budget": 100.0,
-                "max_buy_multiplier": 10.0,
-                "min_weight": 1.0,
-                "max_weight": 1.0,
-                "sell_threshold": 0.01,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
                 "fund_investment_limits": {"000002": {"monthly_limit": 500.0}},
             },
         )
@@ -624,7 +589,7 @@ def test_recommendation_does_not_sell_overweight_fund_while_net_buy_is_capped():
     assert advice["000001"]["action"] == "Hold"
     assert advice["000001"]["amount"] == 0.0
     assert advice["000001"]["executable_holding"] == pytest.approx(10000.0)
-    assert "DCA 不因短期偏离卖出" in advice["000001"]["reason"]
+    assert "偏差在容忍范围内" in advice["000001"]["reason"]
     assert advice["Cash"]["executable_holding"] == pytest.approx(1000.0)
 
 
@@ -647,10 +612,9 @@ def test_zero_target_is_no_new_buy_unless_exit_is_explicit():
                 "fund_codes": ["000001", "000002"],
                 "weights": {"000001": 1.0, "000002": 0.0},
                 "current_holdings": {"000002": 1000.0},
+                "rebalance_enabled": False,
                 "monthly_budget": 100.0,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 1.0,
-                "max_weight": 1.0,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -687,9 +651,7 @@ def test_explicit_exit_can_reuse_net_sale_proceeds_for_second_buy_round():
                 "sell_fee": {"000002": 0.01},
                 "exit_fund_codes": ["000002"],
                 "reuse_settled_sale_proceeds": True,
-                "strategy_mode": "legacy_linear",
-                "min_weight": 1.0,
-                "max_weight": 1.0,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -730,9 +692,7 @@ def test_explicit_exit_must_be_in_universe_with_zero_target(exit_code, expected_
                 "current_holdings": {"000001": 1000.0},
                 "monthly_budget": 100.0,
                 "exit_fund_codes": [exit_code],
-                "strategy_mode": "legacy_linear",
-                "min_weight": 1.0,
-                "max_weight": 1.0,
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -741,21 +701,18 @@ def test_explicit_exit_must_be_in_universe_with_zero_target(exit_code, expected_
 
 
 def test_backtest_respects_fund_monthly_buy_limits():
-    from core.backtest import backtest_kelly_dca
+    from core.backtest import backtest_fixed_target
 
     dates = pd.date_range(start="2023-01-31", periods=4, freq="ME")
     df_nav = pd.DataFrame({"000001": [1.0, 1.0, 1.0, 1.0]}, index=dates)
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         {"000001": 1.0},
         monthly_investment=1000.0,
         initial_holdings={},
         initial_cash=0.0,
-        max_buy_multiplier=10.0,
-        min_weight=1.0,
-        max_weight=1.0,
-        strategy_mode="legacy_linear",
+        strategy_mode="fixed_weight",
         fund_investment_limits={"000001": {"monthly_limit": 100.0}},
     )
 
@@ -786,8 +743,8 @@ def test_sell_threshold_boundary():
             "current_holdings": {"000001": 8000},  # Large holding
             "current_cash": 0.0,
             "monthly_budget": 1000,
-            "sell_threshold": 0.05,  # 5% threshold
-            "strategy_mode": "legacy_linear",
+            # 5% threshold
+            "strategy_mode": "fixed_weight",
         }
 
         response = client.post("/api/current_recommendation", json=request_data)
@@ -832,10 +789,7 @@ def test_recommendation_hold_reason_distinguishes_small_overweight():
                 "current_holdings": {"000001": 5200},
                 "current_cash": 0.0,
                 "monthly_budget": 0,
-                "min_weight": 0.98,
-                "max_weight": 0.98,
-                "sell_threshold": 0.1,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
 
@@ -844,16 +798,16 @@ def test_recommendation_hold_reason_distinguishes_small_overweight():
     fund_action = next(item for item in data["fund_advice"] if item["code"] == "000001")
     assert fund_action["action"] == "Hold"
     assert fund_action["amount"] == 0.0
-    assert fund_action["gap"] < 0
+    assert fund_action["gap"] == 0
     assert fund_action["executable_holding"] == pytest.approx(
         fund_action["current_holding"]
     )
-    assert "DCA 不因短期偏离卖出" in fund_action["reason"]
+    assert "仓位已达标" in fund_action["reason"]
 
 
 def test_extreme_fee_handling():
     """Test handling of extreme fee rates."""
-    from core.backtest import backtest_kelly_dca
+    from core.backtest import backtest_fixed_target
 
     dates = pd.date_range(start="2023-01-31", end="2023-03-31", freq="ME")
     nav_data = {"000001": [1.0, 0.9, 0.8]}
@@ -864,7 +818,7 @@ def test_extreme_fee_handling():
     buy_fee = {"000001": 0.5}  # Extreme 50% fee
     sell_fee = {"000001": 0.1}
 
-    result = backtest_kelly_dca(
+    result = backtest_fixed_target(
         df_nav,
         weights,
         monthly_investment,
@@ -904,10 +858,7 @@ def test_recommendation_sell_proceeds_not_double_counted():
             "current_holdings": {"000001": 10000},  # Value = 10000
             "current_cash": 0.0,
             "monthly_budget": 0,  # No new budget for simplicity
-            "sell_threshold": 0.01,
-            "min_weight": 0.3,
-            "max_weight": 0.8,
-            "strategy_mode": "legacy_linear",
+            "strategy_mode": "fixed_weight",
             "sell_fee": {"000001": 0.01},  # 1% sell fee
         }
 
@@ -951,13 +902,13 @@ def test_backtests_do_not_label_cash_as_risk_free_without_risk_free_asset():
                 "monthly_investment": 100.0,
                 "initial_holdings": {},
                 "initial_cash": 50.0,
-                "strategy_mode": "legacy_linear",
+                "strategy_mode": "fixed_weight",
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    for result_name in ["lump_sum", "dca", "kelly_dca"]:
+    for result_name in ["lump_sum", "dca", "fixed_target"]:
         first_attr = next(iter(payload[result_name]["attribution"].values()))
         assert "Cash" in first_attr
         assert "RiskFree" not in first_attr

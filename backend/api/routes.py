@@ -1,10 +1,12 @@
 import traceback
+from dataclasses import asdict
 from datetime import date
 
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
+from api.presentation import build_fund_advice, _unspent_reason_label
 from api.models import (
     ActualFillRequest,
     AnalysisRequest,
@@ -18,9 +20,7 @@ from core.classification import (
     normalize_asset_categories,
 )
 from core.backtest import (
-    backtest_dca,
-    backtest_kelly_dca,
-    backtest_lump_sum,
+    backtest_fixed_target,
     simulate_strategy_frontier,
 )
 from core.data import (
@@ -56,13 +56,9 @@ from core.portfolio import (
     decompose_selected_weights,
     normalize_risky_weights,
 )
-from core.risk import calculate_asset_diagnostics
+from core.risk import calculate_asset_diagnostics, estimate_account_risk
 from core.reference import build_reference_basket
 from core.strategy import (
-    assess_kelly_window_robustness,
-    calculate_target_ratio,
-    calculate_target_ratio_optimized,
-    infer_valuation_signal,
     validate_strategy_params,
 )
 from core.walk_forward import evaluate_executable_walk_forward
@@ -80,26 +76,6 @@ def _execution_allocation_method(substitute_for: dict[str, str]) -> str:
         str(primary or "").strip() for primary in substitute_for.values()
     )
     return "constrained_tracking" if has_relationship else "proportional_gap"
-
-
-_UNSPENT_REASON_LABELS = {
-    "monthly_limit_zero": "申购限额为0，本月无法买入",
-    "monthly_limit_reached": "已达到本月申购限额",
-    "monthly_budget_exhausted": "月度 DCA 预算已分配完",
-    "investment_limits_blocked": "所有正向目标缺口均受申购限额约束",
-    "no_eligible_substitute": "主基金限购且没有可用替代基金",
-    "aggregate_target_reached": "组合目标缺口已填满",
-    "optimizer_preferred_cash": "跟踪优化器选择保留现金",
-    "allocation_fallback": "执行优化器不可用，已按比例和限额分配",
-    "allocation_priority": "预算已优先分配给其他低配基金",
-    "no_positive_target_capacity": "没有可继续买入的正向目标缺口",
-}
-
-
-def _unspent_reason_label(reason: str | None) -> str | None:
-    if not reason:
-        return None
-    return _UNSPENT_REASON_LABELS.get(reason, reason)
 
 
 def _select_recommended_frontier_point(
@@ -121,6 +97,8 @@ def _select_recommended_frontier_point(
         stability = point.get("frontier_walk_forward_weight_stability")
         sharpe = point.get("frontier_walk_forward_sharpe")
 
+        if point.get("solver_fallback_used"):
+            rejection_reasons.append("frontier_solver_failed")
         if observations < minimum_observations:
             rejection_reasons.append("insufficient_observations")
         if max_drawdown is None or max_drawdown > maximum_drawdown:
@@ -145,7 +123,10 @@ def _select_recommended_frontier_point(
         if eligible:
             eligible_candidates.append((index, point))
 
+    # Evidence gates remain diagnostics. They may lower confidence, but never
+    # eliminate every feasible allocation. Prefer low risk when evidence is thin.
     recommended_index = None
+    fallback_used = not eligible_candidates
     if eligible_candidates:
         recommended_index = max(
             eligible_candidates,
@@ -155,6 +136,11 @@ def _select_recommended_frontier_point(
                 -item[1]["risk"],
             ),
         )[0]
+    elif frontier_points:
+        recommended_index = min(
+            range(len(frontier_points)),
+            key=lambda index: (frontier_points[index]["risk"], index),
+        )
 
     selected_point = (
         frontier_points[recommended_index] if recommended_index is not None else None
@@ -165,6 +151,8 @@ def _select_recommended_frontier_point(
         else 0
     )
     return recommended_index, {
+        "fallback_used": fallback_used,
+        "selection_evidence": "historical_selection_not_independent_validation",
         "minimum_observations": minimum_observations,
         "maximum_drawdown": maximum_drawdown,
         "cvar_enabled": cvar_enabled,
@@ -182,7 +170,7 @@ def _select_recommended_frontier_point(
             "none"
             if selected_point is None
             else "limited"
-            if selected_observations < 24
+            if fallback_used or selected_observations < 24
             else "normal"
         ),
         "candidate_diagnostics": candidate_diagnostics,
@@ -211,6 +199,10 @@ def _reject_implicit_legacy_risk_free(
     holdings: dict[str, float],
     risk_free_rate: float | None,
 ) -> None:
+    if risk_free_rate is not None and risk_free_rate <= -1:
+        raise HTTPException(
+            status_code=400, detail="risk_free_rate must be greater than -1"
+        )
     legacy_holding = float(holdings.get("RiskFree", 0.0))
     explicit_weight = float(weights.get("RiskFree", 0.0))
     if legacy_holding > 1e-12 and explicit_weight <= 1e-12 and risk_free_rate is None:
@@ -229,9 +221,6 @@ async def analyze_portfolio(request: AnalysisRequest):
     try:
         validate_strategy_params(
             strategy_mode=request.strategy_mode,
-            min_weight=request.min_weight,
-            max_weight=request.max_weight,
-            kelly_fraction=request.kelly_fraction,
             estimation_window=request.estimation_window,
             minimum_cash_reserve=request.minimum_cash_reserve,
             enable_cvar_constraint=request.enable_cvar_constraint,
@@ -239,7 +228,6 @@ async def analyze_portfolio(request: AnalysisRequest):
             cvar_limit=request.cvar_limit,
             enable_drawdown_constraint=request.enable_drawdown_constraint,
             max_drawdown_limit=request.max_drawdown_limit,
-            allow_auto_bounds=True,
             risk_horizon_days=request.risk_horizon_days,
         )
 
@@ -250,16 +238,86 @@ async def analyze_portfolio(request: AnalysisRequest):
             request.risk_free_rate,
         )
         daily_nav = fund_df.attrs.get("daily_nav")
-        estimation_nav, quality_warnings = estimation_total_return_nav(
-            fund_df,
-            allow_degraded_research=request.allow_partial_return_data_for_research,
-        )
-        warnings.extend(quality_warnings)
         append_fee_warnings(
             warnings,
             request.fund_fees,
             apply_fund_fees_to_history=request.apply_fund_fees_to_history,
         )
+        quality = fund_df.attrs.get("return_quality", {})
+        blocked_codes = sorted(
+            code
+            for code, item in quality.items()
+            if item.status not in {"verified", "reconciled"}
+        )
+        if request.target_weights is not None:
+            decompose_selected_weights(request.target_weights, list(fund_df.columns))
+        insufficient_months = len(fund_df) < 3 and any(
+            code != "RiskFree" for code in fund_df.columns
+        )
+        if (
+            blocked_codes and not request.allow_partial_return_data_for_research
+        ) or insufficient_months:
+            categories = normalize_asset_categories(
+                list(fund_df.columns), request.asset_categories
+            )
+            substitutes = normalize_substitute_for(
+                list(fund_df.columns), request.substitute_for
+            )
+            primary_codes = strategic_fund_codes(list(fund_df.columns), substitutes)
+            if not primary_codes:
+                raise ValueError("at least one strategic fund is required")
+            weights = request.target_weights
+            if weights is None:
+                weights = {code: 1.0 / len(primary_codes) for code in primary_codes}
+            message = (
+                (
+                    "完整月度净值观测不足3期，无法估计组合协方差"
+                    if insufficient_months
+                    else "以下基金的总收益数据尚未通过核验：" + ", ".join(blocked_codes)
+                )
+                + "。已暂停前沿和历史绩效估计；"
+                + (
+                    "沿用上次选定目标。"
+                    if request.target_weights is not None
+                    else "暂无已选目标，提供所选主标的等权备用配置，供本月执行前复核。"
+                )
+                + "该配置不代表收益或风险最优，仍可按真实持仓、现金底线和限额生成月度资金安排。"
+            )
+            return {
+                "analysis_status": "target_only_fallback",
+                "fallback_message": message,
+                "fallback_target": {
+                    "weights": weights,
+                    "risk": None,
+                    "return": None,
+                    "target_source": "previous_selection"
+                    if request.target_weights is not None
+                    else "equal_weight_fallback",
+                },
+                "return_quality": {
+                    code: asdict(item) for code, item in quality.items()
+                },
+                "blocked_fund_codes": blocked_codes,
+                "efficient_frontier": [],
+                "strategy_frontier": [],
+                "recommended_point_index": None,
+                "recommended_point_selection": None,
+                "fund_names": fund_names,
+                "asset_categories": categories,
+                "substitute_for": substitutes,
+                "asset_diagnostics": None,
+                "covariance_ablation": None,
+                "backtest_period": {
+                    "start_date": fund_df.index.min().strftime("%Y-%m-%d"),
+                    "end_date": fund_df.index.max().strftime("%Y-%m-%d"),
+                },
+                "warnings": [*warnings, message],
+            }
+        estimation_nav, quality_warnings = estimation_total_return_nav(
+            fund_df,
+            allow_degraded_research=request.allow_partial_return_data_for_research,
+        )
+        warnings.extend(quality_warnings)
         nav_adjusted = prepare_nav_for_analysis(
             estimation_nav,
             request.fund_fees,
@@ -316,9 +374,9 @@ async def analyze_portfolio(request: AnalysisRequest):
                 "annual_risk_free_rate": _benchmark_rate(request),
             }
         )
-        if recommended_point_index is None:
+        if recommended_point_selection["fallback_used"]:
             warnings.append(
-                "没有基础前沿点同时满足样本外观察数、最大回撤、CVaR 和权重稳定性要求；本次不自动选择推荐点。"
+                "研究筛选证据不足，已选择可行组合中风险较低的备用目标；历史选择表现不是独立验证。"
             )
 
         # --- Simulate Strategy Frontier ---
@@ -334,13 +392,9 @@ async def analyze_portfolio(request: AnalysisRequest):
                 start_date_str,
                 end_date_str,
                 request.risk_free_rate,
-                ma_window=request.ma_window,
                 buy_fee=request.buy_fee,
                 sell_fee=request.sell_fee,
-                user_min_weight=request.min_weight,
-                user_max_weight=request.max_weight,
                 strategy_mode=request.strategy_mode,
-                kelly_fraction=request.kelly_fraction,
                 estimation_window=request.estimation_window,
                 minimum_cash_reserve=request.minimum_cash_reserve,
                 enable_cvar_constraint=request.enable_cvar_constraint,
@@ -397,9 +451,6 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         )
         validate_strategy_params(
             strategy_mode=request.strategy_mode,
-            min_weight=request.min_weight,
-            max_weight=request.max_weight,
-            kelly_fraction=request.kelly_fraction,
             estimation_window=request.estimation_window,
             minimum_cash_reserve=request.minimum_cash_reserve,
             enable_cvar_constraint=request.enable_cvar_constraint,
@@ -410,15 +461,51 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             risk_horizon_days=request.risk_horizon_days,
         )
 
-        # Fetch enough history for 60-month Kelly and non-overlapping CVaR diagnostics.
+        # Fetch sufficient history for non-overlapping CVaR diagnostics.
         end_date_obj = date.today()
         start_date_obj = (pd.Timestamp(end_date_obj) - pd.DateOffset(years=10)).date()
 
-        fund_df, fund_names, _ = get_fund_data(
-            request.fund_codes,
-            start_date_obj,
-            end_date_obj,
-            request.risk_free_rate,
+        universe = list(
+            dict.fromkeys(
+                [
+                    *request.fund_codes,
+                    *(
+                        ["RiskFree"]
+                        if request.risk_free_rate is not None
+                        or request.current_holdings.get("RiskFree", 0) > 0
+                        or request.weights.get("RiskFree", 0) > 0
+                        else []
+                    ),
+                ]
+            )
+        )
+        decompose_selected_weights(request.weights, universe)
+        data_unavailable = False
+        try:
+            fund_df, fund_names, data_warnings = get_fund_data(
+                request.fund_codes, start_date_obj, end_date_obj, request.risk_free_rate
+            )
+        except (HTTPException, ValueError, RuntimeError, OSError) as exc:
+            # Input/universe validation is above. A provider outage must not erase
+            # a user's valid monetary target, holdings, or reserve instructions.
+            data_unavailable = True
+            fund_df = pd.DataFrame(
+                1.0, index=[pd.Timestamp(end_date_obj)], columns=universe
+            )
+            fund_names = {code: code for code in universe}
+            data_warnings = [
+                "行情不可用；按已确认目标安排资金，未使用行情预测：" + str(exc)
+            ]
+            fund_df.attrs["return_quality"] = {
+                code: ReturnQuality(
+                    status="partial", corporate_action_coverage_complete=False
+                )
+                for code in universe
+            }
+        data_quality = fund_df.attrs.get("return_quality", {})
+        target_only_fallback = data_unavailable or any(
+            item.status not in {"verified", "reconciled"}
+            for item in data_quality.values()
         )
         daily_total_return_nav = fund_df.attrs.get("daily_total_return")
         fund_df, fund_names = ensure_risk_free_column(
@@ -433,10 +520,17 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         selected = decompose_selected_weights(request.weights, list(fund_df.columns))
         risky_weights = selected["risky_weights"]
         base_risky_ratio = float(selected["base_risky_ratio"])
-        estimation_nav, quality_warnings = estimation_total_return_nav(
-            fund_df,
-            allow_degraded_research=request.allow_partial_return_data_for_research,
-        )
+        if target_only_fallback:
+            estimation_nav = fund_df.copy()
+            quality_warnings = [
+                *data_warnings,
+                "收益证据不足，本月沿用已确认目标，不依赖收益预测；补齐数据或下月更新时重算。",
+            ]
+        else:
+            estimation_nav, quality_warnings = estimation_total_return_nav(
+                fund_df,
+                allow_degraded_research=request.allow_partial_return_data_for_research,
+            )
         adjusted_fund_df = prepare_nav_for_analysis(
             estimation_nav,
             request.fund_fees,
@@ -444,25 +538,16 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         )
         has_risky_assets = base_risky_ratio > 0 and float(risky_weights.sum()) > 0
 
-        # Kelly+DCA strategy treats cash as the risk-free sleeve outside the risky basket.
+        # Reference basket is a historical illustration, never the account Cash sleeve.
         if has_risky_assets:
             reference_portfolio_nav = build_reference_basket(
                 adjusted_fund_df[risky_weights.index], risky_weights
             )
-            daily_reference_portfolio_nav = (
-                build_reference_basket(
-                    daily_total_return_nav[risky_weights.index], risky_weights
-                )
-                if daily_total_return_nav is not None
-                and set(risky_weights.index).issubset(daily_total_return_nav.columns)
-                else None
-            )
         else:
             reference_portfolio_nav = pd.Series(1.0, index=fund_df.index, dtype=float)
-            daily_reference_portfolio_nav = None
 
         # Calculate moving average based on ma_window
-        ma_window = request.ma_window
+        ma_window = 12
         ma_series = reference_portfolio_nav.rolling(
             window=ma_window, min_periods=1
         ).mean()
@@ -516,144 +601,28 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             + risk_free_balance
             + current_cash
             + request.monthly_budget
+            + request.pending_sale_proceeds
         )
 
-        market_signal = infer_valuation_signal(current_price, current_ma)
-        if not has_risky_assets:
-            tactical_ratio = 0.0
-            allocation_signal = "neutral"
-            optimizer_info = {
-                "cash_cap_ratio": 1.0,
-                "cash_constrained": False,
-                "max_feasible_ratio_by_cvar": 0.0,
-                "max_feasible_ratio_by_drawdown": 0.0,
-                "max_feasible_ratio_by_risk": 0.0,
-                "constraint_applied": False,
-                "constraint_binding": "cash",
-            }
-            market_signal = "neutral"
-        elif request.strategy_mode == "legacy_linear":
-            tactical_ratio, allocation_signal = calculate_target_ratio(
-                current_price, current_ma, request.min_weight, request.max_weight
-            )
-            optimizer_info = None
-        else:
-            (
-                tactical_ratio,
-                allocation_signal,
-                optimizer_info,
-            ) = calculate_target_ratio_optimized(
-                reference_portfolio_nav=reference_portfolio_nav,
-                timestamp=reference_portfolio_nav.index[-1],
-                min_weight=request.min_weight,
-                max_weight=request.max_weight,
-                kelly_fraction=request.kelly_fraction,
-                estimation_window=request.estimation_window,
-                risk_free_rate=_benchmark_rate(request),
-                total_wealth=total_wealth_projected,
-                minimum_cash_reserve=request.minimum_cash_reserve,
-                enable_cvar_constraint=request.enable_cvar_constraint,
-                cvar_confidence=request.cvar_confidence,
-                cvar_limit=request.cvar_limit,
-                enable_drawdown_constraint=request.enable_drawdown_constraint,
-                max_drawdown_limit=request.max_drawdown_limit,
-                daily_reference_nav=daily_reference_portfolio_nav,
-                risk_horizon_days=request.risk_horizon_days,
-            )
-
-        if has_risky_assets and request.strategy_mode != "legacy_linear":
-            window_robustness = assess_kelly_window_robustness(
-                reference_portfolio_nav=reference_portfolio_nav,
-                min_weight=request.min_weight,
-                max_weight=request.max_weight,
-                kelly_fraction=request.kelly_fraction,
-                risk_free_rate=_benchmark_rate(request),
-                total_wealth=total_wealth_projected,
-                minimum_cash_reserve=request.minimum_cash_reserve,
-                enable_cvar_constraint=request.enable_cvar_constraint,
-                cvar_confidence=request.cvar_confidence,
-                cvar_limit=request.cvar_limit,
-                enable_drawdown_constraint=request.enable_drawdown_constraint,
-                max_drawdown_limit=request.max_drawdown_limit,
-                daily_reference_nav=daily_reference_portfolio_nav,
-                risk_horizon_days=request.risk_horizon_days,
-            )
-        else:
-            window_robustness = {
-                "status": "not_applicable",
-                "base_window_months": 36,
-                "measurements": [],
-                "message": "窗口稳健性评估仅适用于优化 Kelly 模式。",
-            }
-        # Calculate target equity value
-        cash_hard_cap_ratio = max(
-            0.0,
-            1.0
-            - base_risk_free_ratio
-            - (
-                request.minimum_cash_reserve / total_wealth_projected
-                if total_wealth_projected > 0
-                else 0.0
-            ),
-        )
-        target_equity_ratio = float(
-            np.clip(
-                min(base_risky_ratio * tactical_ratio, cash_hard_cap_ratio),
-                0.0,
-                1.0,
-            )
-        )
-        target_equity_value = total_wealth_projected * target_equity_ratio
-        non_risky_target_value = max(0.0, total_wealth_projected - target_equity_value)
-        if target_has_risk_free_asset:
-            target_risk_free_value = total_wealth_projected * base_risk_free_ratio
-            target_cash_value = max(
-                0.0, non_risky_target_value - target_risk_free_value
-            )
-        else:
-            target_cash_value = non_risky_target_value
-            target_risk_free_value = 0.0
-
-        # Calculate gap
-        gap = target_equity_value - current_equity_value
-
-        # Kelly selects the target mix, while DCA fixes this period's external
-        # contribution. Existing Cash and RiskFree are not consumed to chase a
-        # target, and max_buy_multiplier is retained only for API compatibility.
-        # Calculate Detailed Fund Advice
-        fund_advice = []
-        total_weight = risky_weights.sum()
-        positive_gap_sum = 0
-        fund_gaps = {}
-
-        # 1. Distribute Gap Calculation
-        # Use a list of dict keys to ensure uniqueness if codes were somehow repeated
+        market_signal = "neutral"
+        allocation_signal = "neutral"
+        optimizer_info = {"policy": "fixed_weight"}
         unique_fund_codes = list(dict.fromkeys(request.fund_codes))
-        target_holdings = {}
-        for code in unique_fund_codes:
-            w = risky_weights.get(code, 0.0) / total_weight if total_weight > 0 else 0
-            current_val = equity_holdings.get(code, 0)
-            target_val = target_equity_value * w
-            target_holdings[code] = target_val
-            gap_val = target_val - current_val
-            fund_gaps[code] = gap_val
-            if gap_val > 0:
-                positive_gap_sum += gap_val
-
         fund_monthly_limits = get_monthly_investment_limits(
             unique_fund_codes,
             request.fund_investment_limits,
             end_date_obj,
-            planned_purchase_days=request.planned_purchase_days,
+            planned_purchase_days=len(request.planned_purchase_dates)
+            or request.planned_purchase_days,
         )
         decision_snapshot = fund_df.attrs.get("market_snapshot")
         decision_as_of = pd.Timestamp.now(tz="UTC")
         if decision_snapshot is None:
             synthetic_quality = {
                 code: ReturnQuality(
-                    status="verified",
-                    corporate_action_coverage_complete=True,
-                    availability_quality="observed",
+                    status="partial" if target_only_fallback else "verified",
+                    corporate_action_coverage_complete=not target_only_fallback,
+                    availability_quality="inferred",
                 )
                 for code in fund_df.columns
             }
@@ -679,10 +648,16 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             strategy_spec=StrategySpec(
                 policy_id=f"fixed-weight:{request.strategy_mode}:v2",
                 target_weights=request.weights,
-                tactical_deployment_ratio=tactical_ratio,
             ),
             execution_context=ExecutionContext(
                 monthly_budget=request.monthly_budget,
+                rebalance_enabled=request.rebalance_enabled,
+                rebalance_band=request.rebalance_band,
+                available_existing_cash=request.available_existing_cash,
+                pending_sale_proceeds=request.pending_sale_proceeds,
+                pending_sell_amounts=request.pending_sell_amounts,
+                redemption_limits=request.redemption_limits,
+                planned_purchase_dates=tuple(request.planned_purchase_dates),
                 buy_fees=request.buy_fee,
                 sell_fees=request.sell_fee,
                 investment_limits=request.fund_investment_limits,
@@ -699,6 +674,8 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 exit_fund_codes=tuple(request.exit_fund_codes),
                 reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
                 planned_purchase_days=request.planned_purchase_days,
+                min_purchase_amount=request.min_purchase_amount,
+                amount_step=request.amount_step,
                 allocation_method=_execution_allocation_method(request.substitute_for),
                 execution_covariance=build_execution_covariance(
                     adjusted_fund_df,
@@ -715,7 +692,18 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             )
         execution = decision_result.execution_plan
         target_holdings = dict(decision_result.target_allocation)
-        recommended_monthly_investment = execution.total_gross_buy
+        target_equity_value = sum(target_holdings.values())
+        target_equity_ratio = (
+            target_equity_value / total_wealth_projected
+            if total_wealth_projected > 0
+            else 0.0
+        )
+        target_risk_free_value = execution.target_risk_free
+        target_cash_value = execution.target_cash
+        gap = target_equity_value - current_equity_value
+        recommended_monthly_investment = (
+            execution.total_gross_buy + execution.risk_free_gross_buy
+        )
         allocation_diagnostics = dict(execution.allocation_diagnostics)
         # The optimizer reports a portfolio-level reason as well as precise
         # per-fund reasons.  Keep both machine-readable fields in the API and
@@ -735,108 +723,14 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             allocation_diagnostics.get("unspent_reason")
         )
 
-        # 2. Determine Actions
-        for code in unique_fund_codes:
-            fund_execution = execution.funds[code]
-            current_val = fund_execution.current_holding
-            gap_val = fund_execution.gap
-            ideal_target_val = fund_execution.target_holding
-            buy_fee = fund_execution.buy_fee_rate
-            gross_gap = max(0.0, gap_val) * (1 + buy_fee)
-            monthly_buy_limit = fund_monthly_limits.get(code, float("inf"))
-            allocation_state = fund_execution.allocation_state
-
-            # Reset action and amount for each fund to prevent leakage
-            # Using a more robust if-elif-else structure
-            action = fund_execution.action
-            amount = (
-                fund_execution.gross_sell
-                if action == "Sell"
-                else fund_execution.gross_buy
-            )
-            reason = "持有"
-            unspent_reason = allocation_unspent_reasons.get(code)
-            gross_gap_remaining = max(0.0, gross_gap - fund_execution.gross_buy)
-            if gap_val > 1e-9 and gross_gap_remaining > 1e-7 and not unspent_reason:
-                if monthly_buy_limit <= 1e-9:
-                    unspent_reason = "monthly_limit_zero"
-                elif (
-                    np.isfinite(monthly_buy_limit)
-                    and fund_execution.gross_buy + 1e-7 >= monthly_buy_limit
-                ):
-                    unspent_reason = "monthly_limit_reached"
-                elif allocation_diagnostics.get("unspent_budget", 0.0) <= 1e-7:
-                    unspent_reason = "monthly_budget_exhausted"
-                elif allocation_diagnostics.get("unspent_reason"):
-                    unspent_reason = str(allocation_diagnostics.get("unspent_reason"))
-                else:
-                    unspent_reason = "allocation_priority"
-            unspent_reason_label = _unspent_reason_label(unspent_reason)
-
-            if allocation_state == "EXIT":
-                if amount > 1e-9:
-                    reason = "资产已被显式标记为退出，建议卖出"
-                else:
-                    reason = "资产已标记退出，但当前没有可卖持仓"
-            elif allocation_state == "ACTIVE_SUBSTITUTE":
-                reason = "主基金申购额度成为约束，作为其明确指定的替代基金买入以降低目标跟踪误差"
-            elif gap_val < 0:
-                if allocation_state == "NO_NEW_BUY":
-                    reason = "目标权重为数值零，暂停新增买入但不自动卖出"
-                else:
-                    reason = "DCA 不因短期偏离卖出；后续新增资金将优先投向低配资产"
-            elif gap_val > 0:
-                limit_applied = bool(
-                    np.isfinite(monthly_buy_limit)
-                    and gross_gap > monthly_buy_limit + 1e-9
-                    and fund_execution.gross_buy + 1e-9 >= monthly_buy_limit
-                )
-                if fund_execution.gross_buy > 0 and positive_gap_sum > 0:
-                    if limit_applied:
-                        reason = "受申购限额约束，先买入可执行额度"
-                    else:
-                        reason = f"按 DCA 预算向低配资产投入 (Gap: {gap_val:.1f})"
-                else:
-                    action = "Hold"
-                    reason = unspent_reason_label or "当前没有可执行买入额度"
-
-                # Preserve the useful action text while making a partial buy's
-                # remaining gap explicit instead of silently implying that it
-                # was merely being observed.
-                if fund_execution.gross_buy > 0 and unspent_reason_label:
-                    reason = f"{reason}；未完全执行：{unspent_reason_label}"
-            else:
-                action = "Hold"
-                reason = "仓位已达标"
-
-            if gap_val <= 0:
-                limit_applied = False
-
-            # target_val is already calculated as the ideal target (current + gap)
-
-            fund_advice.append(
-                {
-                    "code": code,
-                    "name": fund_names.get(code, code),
-                    "current_holding": current_val,
-                    "target_holding": ideal_target_val,
-                    "executable_holding": fund_execution.executable_holding,
-                    "ideal_holding": ideal_target_val,
-                    "gap": gap_val,
-                    "action": action,
-                    "amount": amount,
-                    "monthly_buy_limit": (
-                        monthly_buy_limit if np.isfinite(monthly_buy_limit) else None
-                    ),
-                    "limit_applied": limit_applied,
-                    "allocation_state": allocation_state,
-                    "execution_role": fund_execution.execution_role,
-                    "buy_source": fund_execution.buy_source,
-                    "unspent_reason": unspent_reason,
-                    "unspent_reason_label": unspent_reason_label,
-                    "reason": reason,
-                }
-            )
+        fund_advice = build_fund_advice(
+            execution,
+            unique_fund_codes,
+            fund_names,
+            fund_monthly_limits,
+            allocation_unspent_reasons,
+            allocation_diagnostics,
+        )
 
         # 3. Simulate non-risky sleeve after risky-fund trades.
         total_sell_net_proceeds = execution.total_net_sell_proceeds
@@ -845,7 +739,9 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         risk_free_after_trades = execution.risk_free_after
 
         if can_use_risk_free_asset:
-            risk_free_trade_amount = abs(risk_free_after_trades - risk_free_balance)
+            risk_free_trade_amount = (
+                execution.risk_free_gross_sell or execution.risk_free_gross_buy
+            )
             if risk_free_after_trades > risk_free_balance + 1e-9:
                 risk_free_action = "Buy"
                 risk_free_reason = "剩余流动性转入货基"
@@ -874,7 +770,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
         cash_trade_amount = abs(cash_after_risky - current_cash)
         if cash_after_risky > current_cash + 1e-9:
             cash_action = "存入"
-            cash_reason = "保留调仓现金"
+            cash_reason = "保留现金；额度恢复、卖出款到账或下月新增资金时重新计算"
         elif cash_after_risky + 1e-9 < current_cash:
             cash_action = "取用"
             cash_reason = "调仓使用现金"
@@ -897,10 +793,30 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             }
         )
 
+        if execution.pending_sale_proceeds > 0:
+            fund_advice.append(
+                {
+                    "code": "PendingCash",
+                    "name": "待到账卖出款",
+                    "current_holding": 0.0,
+                    "target_holding": 0.0,
+                    "executable_holding": execution.pending_sale_proceeds,
+                    "ideal_holding": 0.0,
+                    "gap": 0.0,
+                    "action": "Hold",
+                    "amount": execution.pending_sale_proceeds,
+                    "reason": "到账后更新现金余额并重新计算；不计入本次可用现金或现金底线",
+                }
+            )
         current_asset_values = dict(equity_holdings)
         if can_use_risk_free_asset and risk_free_balance > 0:
             current_asset_values["RiskFree"] = risk_free_balance
-        current_total_wealth = current_equity_value + risk_free_balance + current_cash
+        current_total_wealth = (
+            current_equity_value
+            + risk_free_balance
+            + current_cash
+            + request.pending_sale_proceeds
+        )
         current_exposures = calculate_exposure_metrics(
             current_asset_values,
             total_wealth=current_total_wealth,
@@ -930,28 +846,75 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             if current_total_wealth > 0
             else 0.0
         )
-        cash_reserve_shortfall = max(
-            0.0, request.minimum_cash_reserve - cash_after_risky
+        cash_reserve_shortfall = execution.cash_reserve_shortfall
+        projected_assets = {
+            code: item.executable_holding for code, item in execution.funds.items()
+        }
+        if "RiskFree" in fund_df.columns:
+            projected_assets["RiskFree"] = execution.risk_free_after
+        projected_wealth = (
+            sum(projected_assets.values())
+            + execution.cash_after
+            + execution.pending_sale_proceeds
         )
-        risk_limit_enforceable = bool(
-            actual_non_riskfree_fund_ratio <= target_equity_ratio + 1e-9
-            and cash_reserve_shortfall <= 1e-9
+        projected_exposures = calculate_exposure_metrics(
+            projected_assets,
+            total_wealth=projected_wealth,
+            asset_categories=asset_categories,
         )
-        residual_cash_ratio = max(0.0, 1.0 - target_equity_ratio - base_risk_free_ratio)
+        # Target attainment is an execution fact, never a future-risk guarantee.
+        target_deviations = {
+            code: projected_assets.get(code, 0.0) - value
+            for code, value in target_asset_values.items()
+        }
+        target_reached = (
+            all(abs(value) <= 0.01 for value in target_deviations.values())
+            and cash_reserve_shortfall <= 0.01
+        )
+        projected_risk = estimate_account_risk(
+            daily_total_return_nav,
+            projected_assets,
+            projected_wealth,
+            confidence=request.cvar_confidence,
+            horizon=request.risk_horizon_days,
+            data_verified=not target_only_fallback,
+        )
+        optimizer_info = {
+            "policy": "fixed_weight",
+            "risk_estimate_basis": "projected_account_frozen_exposures",
+            "cvar_preference_exceeded": bool(
+                request.enable_cvar_constraint
+                and projected_risk.get("cvar_loss") is not None
+                and projected_risk["cvar_loss"] > request.cvar_limit
+            ),
+            "drawdown_preference_exceeded": bool(
+                request.enable_drawdown_constraint
+                and projected_risk.get("max_drawdown") is not None
+                and projected_risk["max_drawdown"] > request.max_drawdown_limit
+            ),
+        }
+        residual_cash_ratio = (
+            execution.cash_after / projected_wealth if projected_wealth else 0.0
+        )
 
         return {
+            "projected_account_risk": projected_risk,
+            "projected_category_exposures": projected_exposures["category_exposures"],
+            "projected_total_wealth": projected_wealth,
+            "projected_cash": execution.cash_after,
+            "rebalancing": execution.allocation_diagnostics.get("rebalancing"),
             "market_signal": market_signal,
             "allocation_signal": allocation_signal,
             "target_fund_ratio": target_fund_ratio,
             "target_equity_ratio": target_equity_ratio,
             "base_non_riskfree_fund_ratio": base_risky_ratio,
-            "tactical_deployment_ratio": tactical_ratio,
             "final_non_riskfree_fund_ratio": target_equity_ratio,
             "base_safe_sleeve_ratio": base_risk_free_ratio,
             "residual_cash_ratio": residual_cash_ratio,
             "actual_risk_ratio": actual_non_riskfree_fund_ratio,
             "cash_reserve_shortfall": cash_reserve_shortfall,
-            "risk_limit_enforceable": risk_limit_enforceable,
+            "target_reached": target_reached,
+            "target_deviations": target_deviations,
             "target_equity_exposure": target_exposures["equity_exposure"],
             "target_risk_asset_exposure": target_exposures["risk_asset_exposure"],
             "target_category_values": target_exposures["category_values"],
@@ -974,9 +937,10 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "total_sell_net_proceeds": total_sell_net_proceeds,
             "reused_sale_proceeds": reusable_sale_proceeds,
             "monthly_budget": request.monthly_budget,
-            "latest_nav": latest_nav,
-            "ma_value": float(current_ma),
-            "current_price": float(current_price),
+            "latest_nav": None if data_unavailable else latest_nav,
+            "fallback_used": target_only_fallback,
+            "ma_value": None if data_unavailable else float(current_ma),
+            "current_price": None if data_unavailable else float(current_price),
             "strategy_mode": request.strategy_mode,
             "strategy_policy_id": decision_result.strategy_policy_id,
             "strategy_spec_hash": decision_result.strategy_spec_hash,
@@ -987,9 +951,10 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
             "solver_version": decision_result.solver_version,
             "signal_cutoff": str(decision_result.signal_cutoff),
             "constraint_residuals": decision_result.constraint_residuals,
-            "decision_readiness": "research_only",
+            "decision_readiness": decision_result.decision_readiness,
+            "pending_sale_proceeds": execution.pending_sale_proceeds,
+            "transaction_fees": execution.transaction_fees,
             "optimizer_info": optimizer_info,
-            "window_robustness": window_robustness,
             "effective_risky_weights": risky_weights.to_dict(),
             "warnings": quality_warnings
             + (
@@ -1026,9 +991,6 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
 
         validate_strategy_params(
             strategy_mode=request.strategy_mode,
-            min_weight=request.min_weight,
-            max_weight=request.max_weight,
-            kelly_fraction=request.kelly_fraction,
             estimation_window=request.estimation_window,
             minimum_cash_reserve=request.minimum_cash_reserve,
             enable_cvar_constraint=request.enable_cvar_constraint,
@@ -1046,11 +1008,6 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             request.risk_free_rate,
         )
         account_actions = tuple(fund_df.attrs.get("corporate_actions", ()))
-        if account_actions:
-            raise ValueError(
-                "account corporate-action replay is not yet wired into every "
-                "backtest path; refusing to produce a silently incorrect account result"
-            )
         daily_nav = fund_df.attrs.get("daily_nav")
         daily_total_return_nav = fund_df.attrs.get("daily_total_return")
         fund_df, _ = ensure_risk_free_column(
@@ -1073,58 +1030,62 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             apply_fund_fees_to_history=request.apply_fund_fees_to_history,
         )
 
-        num_months = len(fund_df)
-        total_lump_sum_investment = request.monthly_investment * num_months
-        lump_sum_results = backtest_lump_sum(
-            fund_df,
-            request.weights,
-            total_lump_sum_investment,
+        common = dict(
             initial_holdings=request.initial_holdings,
             initial_cash=request.initial_cash,
-        )
-
-        dca_results = backtest_dca(
-            fund_df,
-            request.weights,
-            request.monthly_investment,
-            initial_holdings=request.initial_holdings,
-            initial_cash=request.initial_cash,
-        )
-
-        kelly_results = backtest_kelly_dca(
-            fund_df,
-            request.weights,
-            request.monthly_investment,
-            initial_holdings=request.initial_holdings,
-            min_weight=request.min_weight,
-            max_weight=request.max_weight,
+            available_existing_cash=request.available_existing_cash,
+            rebalance_band=request.rebalance_band,
+            redemption_limits=request.redemption_limits,
             buy_fee=request.buy_fee,
             sell_fee=request.sell_fee,
-            ma_window=request.ma_window,
-            risk_free_rate=_benchmark_rate(request),
-            strategy_mode=request.strategy_mode,
-            kelly_fraction=request.kelly_fraction,
-            estimation_window=request.estimation_window,
             minimum_cash_reserve=request.minimum_cash_reserve,
-            enable_cvar_constraint=request.enable_cvar_constraint,
-            cvar_confidence=request.cvar_confidence,
-            cvar_limit=request.cvar_limit,
-            enable_drawdown_constraint=request.enable_drawdown_constraint,
-            max_drawdown_limit=request.max_drawdown_limit,
-            initial_cash=request.initial_cash,
             fund_investment_limits=request.fund_investment_limits,
             exit_fund_codes=request.exit_fund_codes,
             reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
             asset_categories=asset_categories,
             daily_nav=daily_nav,
-            risk_horizon_days=request.risk_horizon_days,
             substitute_for=request.substitute_for,
             execution_allocation_method=_execution_allocation_method(
                 request.substitute_for
             ),
             planned_purchase_days=request.planned_purchase_days,
+            min_purchase_amount=request.min_purchase_amount,
+            amount_step=request.amount_step,
             estimation_nav=nav_adjusted,
             daily_estimation_nav=daily_total_return_nav,
+            corporate_actions=account_actions,
+            account_distribution_policy=request.account_distribution_policy,
+        )
+        baseline = dict(
+            common,
+            strategy_mode="fixed_weight",
+            rebalance_enabled=False,
+        )
+        dca_results = backtest_fixed_target(
+            fund_df, request.weights, request.monthly_investment, **baseline
+        )
+        lump_sum_results = backtest_fixed_target(
+            fund_df,
+            request.weights,
+            request.monthly_investment,
+            **baseline,
+            contributions={fund_df.index[0]: request.monthly_investment * len(fund_df)},
+        )
+        fixed_target_results = backtest_fixed_target(
+            fund_df,
+            request.weights,
+            request.monthly_investment,
+            **common,
+            rebalance_enabled=request.rebalance_enabled,
+            risk_free_rate=_benchmark_rate(request),
+            strategy_mode=request.strategy_mode,
+            estimation_window=request.estimation_window,
+            enable_cvar_constraint=request.enable_cvar_constraint,
+            cvar_confidence=request.cvar_confidence,
+            cvar_limit=request.cvar_limit,
+            enable_drawdown_constraint=request.enable_drawdown_constraint,
+            max_drawdown_limit=request.max_drawdown_limit,
+            risk_horizon_days=request.risk_horizon_days,
         )
         walk_forward = (
             evaluate_executable_walk_forward(
@@ -1133,12 +1094,13 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 monthly_investment=request.monthly_investment,
                 initial_holdings=request.initial_holdings,
                 initial_cash=request.initial_cash,
+                rebalance_enabled=request.rebalance_enabled,
+                rebalance_band=request.rebalance_band,
+                available_existing_cash=request.available_existing_cash,
+                redemption_limits=request.redemption_limits,
                 buy_fees=request.buy_fee,
                 sell_fees=request.sell_fee,
                 fund_investment_limits=request.fund_investment_limits,
-                min_weight=request.min_weight,
-                max_weight=request.max_weight,
-                kelly_fraction=request.kelly_fraction,
                 estimation_window=request.estimation_window,
                 risk_free_rate=_benchmark_rate(request),
                 minimum_cash_reserve=request.minimum_cash_reserve,
@@ -1156,6 +1118,11 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                     request.substitute_for
                 ),
                 planned_purchase_days=request.planned_purchase_days,
+                execution_nav=fund_df,
+                corporate_actions=account_actions,
+                account_distribution_policy=request.account_distribution_policy,
+                min_purchase_amount=request.min_purchase_amount,
+                amount_step=request.amount_step,
             )
             if request.include_walk_forward
             else None
@@ -1164,7 +1131,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
         return {
             "lump_sum": lump_sum_results,
             "dca": dca_results,
-            "kelly_dca": kelly_results,
+            "fixed_target": fixed_target_results,
             "asset_categories": asset_categories,
             "walk_forward": walk_forward,
             "warnings": quality_warnings,

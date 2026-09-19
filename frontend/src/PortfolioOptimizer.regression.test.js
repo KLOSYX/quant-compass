@@ -25,9 +25,9 @@ beforeEach(() => {
     jest.restoreAllMocks();
 });
 
-test('removes the retired synthetic RiskFree holding from persisted state', () => {
+test('preserves legacy holdings for explicit migration rather than silently dropping wealth', () => {
     expect(sanitizeLegacyHoldings({ '000001': '1200', RiskFree: '300' })).toEqual({
-        '000001': '1200'
+        '000001': '1200', RiskFree: '300'
     });
 });
 
@@ -163,8 +163,8 @@ test('keeps analysis warnings in a compact expandable methodology section', asyn
 });
 
 test('distinguishes fund portfolio ratio from equity exposure in copy', () => {
-    expect(translations.zh.min_equity_ratio).toContain('基金组合');
-    expect(translations.en.min_equity_ratio).toContain('Fund Portfolio');
+    expect(translations.zh.suggested_target).toContain('基金');
+    expect(translations.en.suggested_target).toContain('Fund');
     expect(translations.zh.target_equity_exposure).toContain('股票权益');
     expect(translations.en.target_equity_exposure).toContain('Equity Exposure');
 });
@@ -173,7 +173,7 @@ test('explains the executable walk-forward comparison separately from the fronti
     expect(translations.zh.executable_walk_forward_title).toContain('可执行策略');
     expect(translations.zh.executable_walk_forward_note).toContain('只使用当时可见数据');
     expect(translations.zh.wf_low_evidence).toContain('不足以支持策略切换');
-    expect(translations.en.wf_full_strategy).toContain('Kelly');
+    expect(translations.en.wf_full_strategy).not.toContain('Kelly');
 });
 
 test('states that covariance ablation does not auto-switch the production model', () => {
@@ -209,18 +209,120 @@ test('resolves and persists missing fund names before analysis', async () => {
     expect(global.fetch).toHaveBeenCalledWith('/api/fund_names', expect.objectContaining({ method: 'POST' }));
 });
 
-test('labels Kelly DCA backtests without legacy VA terminology', () => {
+test('labels fixed-target backtests without retired strategy terminology', () => {
     const keys = [
         'title_suffix_actual', 'chart_strategy_suffix', 'chart_tooltip_strategy',
-        'tooltip_strategy_title', 'strat_ideal_kelly', 'strat_actual_kelly',
-        'backtest_note_kelly_theory', 'backtest_note_kelly_actual',
-        'kelly_theory', 'kelly_actual'
+        'tooltip_strategy_title', 'strat_ideal_fixed_target', 'strat_actual_fixed_target',
+        'backtest_note_fixed_target_theory', 'backtest_note_fixed_target_actual',
+        'fixed_target_theory', 'fixed_target_actual'
     ];
     ['zh', 'en'].forEach((language) => {
         keys.forEach((key) => {
-            expect(translations[language][key]).toContain('Kelly');
-            expect(translations[language][key]).toContain('DCA');
+            expect(translations[language][key]).not.toContain('Kelly');
+            expect(translations[language][key]).toBeTruthy();
             expect(translations[language][key]).not.toMatch(/\bVA\b/);
         });
     });
+});
+
+test('partial return data exposes a monthly plan without requesting blocked backtests', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['006662']));
+    localStorage.setItem('fundNames', JSON.stringify({ '006662': 'Fund A' }));
+    localStorage.setItem('monthlyInvestment', '1000');
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (url) => ({
+        ok: true,
+        json: async () => url === '/api/analyze' ? {
+            analysis_status: 'target_only_fallback', fallback_message: '总收益未核验，使用备用配置',
+            fallback_target: { weights: { '006662': 1 }, risk: null, return: null },
+            efficient_frontier: [], recommended_point_index: null,
+            fund_names: { '006662': 'Fund A' }, warnings: [],
+            backtest_period: { start_date: '2026-01-01', end_date: '2026-08-31' }
+        } : { monthly_budget: 1000, fund_advice: [], fallback_used: true }
+    }));
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+    expect(await screen.findByRole('status')).toHaveTextContent('总收益未核验');
+    expect(screen.queryByTestId('mock-frontier-chart')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: translations.zh.start_analysis_btn }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/current_recommendation')).toBe(true));
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/backtest_strategies')).toBe(false);
+});
+
+test('keeps a confirmed target across reanalysis and reload and sends pending execution inputs', async () => {
+    const target = { weights: { A: 0.7, B: 0.3 }, risk: 0.1, return: 0.05 };
+    localStorage.setItem('fundCodes', JSON.stringify(['A', 'B']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A', B: 'Fund B' }));
+    localStorage.setItem('confirmedTarget', JSON.stringify(target));
+    localStorage.setItem('monthlyInvestment', '1000');
+    localStorage.setItem('pendingProceeds', '500');
+    localStorage.setItem('pendingSells', JSON.stringify({ A: '200' }));
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (url) => ({
+        ok: true,
+        json: async () => url === '/api/analyze' ? {
+            analysis_status: 'target_only_fallback', fallback_message: 'Target only',
+            fallback_target: { weights: { A: 0.5, B: 0.5 }, risk: null, return: null },
+            efficient_frontier: [], recommended_point_index: null,
+            fund_names: { A: 'Fund A', B: 'Fund B' }, warnings: [],
+            backtest_period: { start_date: '2026-01-01', end_date: '2026-08-31' }
+        } : { monthly_budget: 1000, recommended_monthly_investment: 1000, fund_advice: [] }
+    }));
+    const first = render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    for (let i = 0; i < 2; i++) {
+        fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+        await waitFor(() => expect(screen.getByRole('button', { name: translations.zh.analyze_btn })).toBeEnabled());
+        fireEvent.click(await screen.findByRole('button', { name: translations.zh.start_analysis_btn }));
+        await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/current_recommendation')).toHaveLength(i + 1));
+    }
+    first.unmount();
+    render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+    await screen.findByRole('status');
+    const analysisRequests = fetchMock.mock.calls.filter(([url]) => url === '/api/analyze');
+    expect(analysisRequests).toHaveLength(3);
+    analysisRequests.forEach(([, options]) => expect(JSON.parse(options.body).target_weights).toEqual(target.weights));
+    fetchMock.mock.calls.filter(([url]) => url === '/api/current_recommendation').forEach(([, options]) => {
+        const body = JSON.parse(options.body);
+        expect(body.weights).toEqual(target.weights);
+        expect(body.pending_sale_proceeds).toBe(500);
+        expect(body.pending_sell_amounts).toEqual({ A: 200 });
+        expect(body.strategy_mode).toBe('fixed_weight');
+    });
+});
+
+test('advanced settings show cash first and add fund exceptions only when needed', async () => {
+    localStorage.setItem('fundCodes', JSON.stringify(['A', 'B', 'C']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A', B: 'Fund B', C: 'Fund C' }));
+    localStorage.setItem('redemptionLimits', JSON.stringify({ A: '0' }));
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({
+        analysis_status: 'target_only_fallback', fallback_message: 'Target only',
+        fallback_target: { weights: { A: 0.5, B: 0.3, C: 0.2 }, risk: null, return: null },
+        efficient_frontier: [], recommended_point_index: null,
+        fund_names: { A: 'Fund A', B: 'Fund B', C: 'Fund C' }, warnings: [],
+        backtest_period: { start_date: '2026-01-01', end_date: '2026-08-31' }
+    }) });
+    const { container } = render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
+    fireEvent.click(await screen.findByRole('button', { name: translations.zh.expand_advanced }));
+    expect(screen.getByLabelText(translations.zh.minimum_cash_reserve)).toBeVisible();
+    expect(screen.getByLabelText(translations.zh.available_cash)).toBeVisible();
+    const details = screen.getByText(translations.zh.settings_transactions).closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(translations.zh.settings_has_values);
+    expect(container.querySelector('#redeem-A')).toHaveValue(0);
+    expect(container.querySelector('#pending-B')).toBeNull();
+    expect(container.querySelector('#pending-C')).toBeNull();
+    fireEvent.click(details.querySelector('summary'));
+    fireEvent.change(screen.getByLabelText(translations.zh.settings_add_fund), { target: { value: 'B' } });
+    fireEvent.change(container.querySelector('#pending-B'), { target: { value: '200' } });
+    fireEvent.change(container.querySelector('#redeem-B'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.collapse_advanced }));
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.expand_advanced }));
+    expect(container.querySelector('#pending-B')).toHaveValue(200);
+    expect(container.querySelector('#redeem-B')).toHaveValue(0);
+    const reopened = screen.getByText(translations.zh.settings_transactions).closest('details');
+    fireEvent.click(reopened.querySelector('summary'));
+    fireEvent.click(screen.getByRole('button', { name: `${translations.zh.settings_remove} Fund B` }));
+    expect(container.querySelector('#pending-B')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('pendingSells')).B).toBe('');
+    expect(JSON.parse(localStorage.getItem('redemptionLimits')).A).toBe('0');
 });

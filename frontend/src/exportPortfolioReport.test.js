@@ -46,3 +46,16 @@ test('creates self-contained escaped report with category exposures', () => {
 test('projection compounds contributions', () => {
     expect(buildProjection({ initialCapital: 1000, monthlyInvestment: 100, annualReturn: 0.12, years: 1 }).at(-1).value).toBeGreaterThan(2200);
 });
+
+
+test('exports settlement conditions and does not present unavailable risk as zero', () => {
+    const html = createPortfolioReportHtml({ ...options,
+        selectedPoint: { ...options.selectedPoint, return: null, risk: null },
+        recommendationResult: { ...options.recommendationResult, rebalancing: { conditional_buys_after_settlement: { A: 2000 } } }
+    });
+    expect(html).toContain('到账后条件买入');
+    expect(html).toContain('不计入本次可用现金');
+    expect(html).toContain('收益数据不可估计');
+    expect(html).not.toContain('<svg');
+    expect(html).toContain('— / —');
+});

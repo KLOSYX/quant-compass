@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-from core.constants import MAX_SINGLE_WEIGHT, RETURN_SHRINKAGE
+from core.constants import RETURN_SHRINKAGE
 from core.validation import finite_number
 
 
@@ -38,11 +38,11 @@ def normalize_risky_weights(
 def validate_weight_universe(
     weights_dict: Dict[str, float], columns: List[str]
 ) -> None:
-    unknown_positive_assets = sorted(
-        code
-        for code, weight in weights_dict.items()
-        if code not in columns and finite_number(weight, f"weight {code}") > 1e-12
-    )
+    parsed = {
+        code: finite_number(value, f"weight {code}")
+        for code, value in weights_dict.items()
+    }
+    unknown_positive_assets = sorted(set(parsed) - set(columns))
     if unknown_positive_assets:
         raise HTTPException(
             status_code=400,
@@ -52,14 +52,18 @@ def validate_weight_universe(
             ),
         )
 
-    available_positive_weight = sum(
-        max(finite_number(weights_dict.get(code, 0.0), f"weight {code}"), 0.0)
-        for code in columns
-    )
+    if any(value < 0 for value in parsed.values()):
+        raise HTTPException(status_code=400, detail="weights must be non-negative")
+    available_positive_weight = sum(parsed.values())
     if available_positive_weight <= 1e-12:
         raise HTTPException(
             status_code=400,
             detail="weights must allocate positive weight to at least one available asset",
+        )
+    if abs(available_positive_weight - 1.0) > 1e-6:
+        raise HTTPException(
+            status_code=400,
+            detail=f"weights must sum to 1 (received {available_positive_weight:.8f})",
         )
 
 
@@ -84,22 +88,10 @@ def decompose_selected_weights(
     }
 
 
-def get_effective_single_weight_cap(num_assets: int) -> float:
-    if num_assets <= 1:
-        return 1.0
-    return max(MAX_SINGLE_WEIGHT, 1.0 / num_assets)
-
-
 def get_frontier_weight_bounds(columns: List[str]) -> tuple[tuple[float, float], ...]:
-    num_assets = len(columns)
-    max_single_weight = get_effective_single_weight_cap(num_assets)
-    bounds = []
-    for code in columns:
-        if code == "RiskFree":
-            bounds.append((0.0, 1.0))
-        else:
-            bounds.append((0.0, max_single_weight))
-    return tuple(bounds)
+    # Long-only, unlevered targets. Concentration is reported, not capped by an
+    # unconfirmed universal fund-count heuristic.
+    return tuple((0.0, 1.0) for _ in columns)
 
 
 def get_frontier_initial_guess(columns: List[str]) -> np.ndarray:
