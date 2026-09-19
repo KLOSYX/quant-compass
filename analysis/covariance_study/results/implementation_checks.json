@@ -1,0 +1,50 @@
+[
+  {
+    "case": "normal",
+    "max_covariance_error": 0.0,
+    "shrinkage_error": 0.0
+  },
+  {
+    "case": "mixed_scale",
+    "max_covariance_error": 1.734723475976807e-18,
+    "shrinkage_error": 4.163336342344337e-17
+  },
+  {
+    "case": "one_asset",
+    "max_covariance_error": 0.0,
+    "shrinkage_error": 0.0
+  },
+  {
+    "case": "constant",
+    "max_covariance_error": 0.0,
+    "shrinkage_error": 0.0
+  },
+  {
+    "case": "high_dimension",
+    "max_covariance_error": 1.1102230246251565e-16,
+    "shrinkage_error": 0.0
+  },
+  {
+    "case": "solver_unit_invariance",
+    "production_weights_decimal": [
+      0.338050555853449,
+      0.33903268791793256,
+      0.3091552107078931,
+      0.013761545520725331
+    ],
+    "production_weights_percent": [
+      0.864534269993846,
+      0.12772785291884892,
+      0.004689854962499043,
+      0.0030480221248060553
+    ],
+    "scaled_solver_weights": [
+      0.86452899579533,
+      0.12773938135642351,
+      0.00468332685089458,
+      0.0030482959973519527
+    ],
+    "scaled_solver_max_unit_error": 5.551115123125783e-17,
+    "production_variance_over_verified_optimum": 13.239673804605735
+  }
+]

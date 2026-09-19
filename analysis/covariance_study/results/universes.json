@@ -1,0 +1,475 @@
+{
+  "us_industry49": {
+    "assets": [
+      "Agric",
+      "Food",
+      "Soda",
+      "Beer",
+      "Smoke",
+      "Toys",
+      "Fun",
+      "Books",
+      "Hshld",
+      "Clths",
+      "Hlth",
+      "MedEq",
+      "Drugs",
+      "Chems",
+      "Rubbr",
+      "Txtls",
+      "BldMt",
+      "Cnstr",
+      "Steel",
+      "FabPr",
+      "Mach",
+      "ElcEq",
+      "Autos",
+      "Aero",
+      "Ships",
+      "Guns",
+      "Gold",
+      "Mines",
+      "Coal",
+      "Oil",
+      "Util",
+      "Telcm",
+      "PerSv",
+      "BusSv",
+      "Hardw",
+      "Softw",
+      "Chips",
+      "LabEq",
+      "Paper",
+      "Boxes",
+      "Trans",
+      "Whlsl",
+      "Rtail",
+      "Meals",
+      "Banks",
+      "Insur",
+      "RlEst",
+      "Fin",
+      "Other"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_size_value25": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "ME1 BM3",
+      "ME1 BM4",
+      "SMALL HiBM",
+      "ME2 BM1",
+      "ME2 BM2",
+      "ME2 BM3",
+      "ME2 BM4",
+      "ME2 BM5",
+      "ME3 BM1",
+      "ME3 BM2",
+      "ME3 BM3",
+      "ME3 BM4",
+      "ME3 BM5",
+      "ME4 BM1",
+      "ME4 BM2",
+      "ME4 BM3",
+      "ME4 BM4",
+      "ME4 BM5",
+      "BIG LoBM",
+      "ME5 BM2",
+      "ME5 BM3",
+      "ME5 BM4",
+      "BIG HiBM"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "europe6": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "SMALL HiBM",
+      "BIG LoBM",
+      "ME2 BM2",
+      "BIG HiBM"
+    ],
+    "rows": 426,
+    "first": "1990-07-31",
+    "last": "2025-12-31"
+  },
+  "japan6": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "SMALL HiBM",
+      "BIG LoBM",
+      "ME2 BM2",
+      "BIG HiBM"
+    ],
+    "rows": 426,
+    "first": "1990-07-31",
+    "last": "2025-12-31"
+  },
+  "asia_ex_japan6": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "SMALL HiBM",
+      "BIG LoBM",
+      "ME2 BM2",
+      "BIG HiBM"
+    ],
+    "rows": 426,
+    "first": "1990-07-31",
+    "last": "2025-12-31"
+  },
+  "north_america6": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "SMALL HiBM",
+      "BIG LoBM",
+      "ME2 BM2",
+      "BIG HiBM"
+    ],
+    "rows": 426,
+    "first": "1990-07-31",
+    "last": "2025-12-31"
+  },
+  "emerging6": {
+    "assets": [
+      "SMALL LoBM",
+      "ME1 BM2",
+      "SMALL HiBM",
+      "BIG LoBM",
+      "ME2 BM2",
+      "BIG HiBM"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "cn_all": {
+    "assets": [
+      "000051",
+      "110003",
+      "110020",
+      "160119",
+      "000968",
+      "110017",
+      "110018",
+      "000171",
+      "000216",
+      "000217",
+      "000311",
+      "000478",
+      "000071",
+      "000614"
+    ],
+    "rows": 130,
+    "first": "2015-03-31",
+    "last": "2025-12-31"
+  },
+  "cn_bond": {
+    "assets": [
+      "110017",
+      "110018",
+      "000171"
+    ],
+    "rows": 148,
+    "first": "2013-09-30",
+    "last": "2025-12-31"
+  },
+  "cn_equity": {
+    "assets": [
+      "000051",
+      "110003",
+      "110020",
+      "160119",
+      "000968",
+      "000311",
+      "000478"
+    ],
+    "rows": 130,
+    "first": "2015-03-31",
+    "last": "2025-12-31"
+  },
+  "cn_overseas_gold": {
+    "assets": [
+      "000216",
+      "000217",
+      "000071",
+      "000614"
+    ],
+    "rows": 136,
+    "first": "2014-09-30",
+    "last": "2025-12-31"
+  },
+  "cn_distinct": {
+    "assets": [
+      "000051",
+      "110003",
+      "110020",
+      "160119",
+      "000968",
+      "110017",
+      "000171",
+      "000216",
+      "000311",
+      "000478",
+      "000071",
+      "000614"
+    ],
+    "rows": 130,
+    "first": "2015-03-31",
+    "last": "2025-12-31"
+  },
+  "us_sub4_0": {
+    "assets": [
+      "Clths",
+      "Hlth",
+      "Paper",
+      "Rtail"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub4_1": {
+    "assets": [
+      "Chips",
+      "Fin",
+      "Food",
+      "Ships"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub4_2": {
+    "assets": [
+      "FabPr",
+      "Fin",
+      "Rtail",
+      "Whlsl"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub4_3": {
+    "assets": [
+      "Books",
+      "MedEq",
+      "Paper",
+      "Toys"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub4_4": {
+    "assets": [
+      "ElcEq",
+      "Fin",
+      "Food",
+      "Mach"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub8_0": {
+    "assets": [
+      "Aero",
+      "Chips",
+      "Mach",
+      "Mines",
+      "Other",
+      "Paper",
+      "Toys",
+      "Whlsl"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub8_1": {
+    "assets": [
+      "Agric",
+      "BldMt",
+      "Hlth",
+      "Meals",
+      "MedEq",
+      "Rubbr",
+      "Toys",
+      "Trans"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub8_2": {
+    "assets": [
+      "BldMt",
+      "BusSv",
+      "Clths",
+      "Guns",
+      "Hshld",
+      "Meals",
+      "Mines",
+      "Txtls"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub8_3": {
+    "assets": [
+      "Beer",
+      "BldMt",
+      "Boxes",
+      "Fin",
+      "LabEq",
+      "Oil",
+      "Rubbr",
+      "Smoke"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub8_4": {
+    "assets": [
+      "Chips",
+      "Hlth",
+      "Meals",
+      "MedEq",
+      "Other",
+      "PerSv",
+      "Ships",
+      "Toys"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub16_0": {
+    "assets": [
+      "Boxes",
+      "Clths",
+      "Cnstr",
+      "Coal",
+      "Drugs",
+      "ElcEq",
+      "Gold",
+      "Insur",
+      "Mines",
+      "Other",
+      "Paper",
+      "RlEst",
+      "Smoke",
+      "Soda",
+      "Softw",
+      "Trans"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub16_1": {
+    "assets": [
+      "Agric",
+      "BusSv",
+      "Chems",
+      "Cnstr",
+      "Coal",
+      "Food",
+      "Gold",
+      "Guns",
+      "Insur",
+      "Oil",
+      "Paper",
+      "PerSv",
+      "Steel",
+      "Telcm",
+      "Txtls",
+      "Whlsl"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub16_2": {
+    "assets": [
+      "Aero",
+      "Agric",
+      "Boxes",
+      "Chems",
+      "Clths",
+      "Drugs",
+      "ElcEq",
+      "Hardw",
+      "Hlth",
+      "MedEq",
+      "Other",
+      "PerSv",
+      "RlEst",
+      "Rubbr",
+      "Smoke",
+      "Txtls"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub16_3": {
+    "assets": [
+      "Agric",
+      "Autos",
+      "Banks",
+      "Beer",
+      "BusSv",
+      "Clths",
+      "Coal",
+      "FabPr",
+      "Fin",
+      "Meals",
+      "MedEq",
+      "Paper",
+      "PerSv",
+      "Rubbr",
+      "Ships",
+      "Toys"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  },
+  "us_sub16_4": {
+    "assets": [
+      "BldMt",
+      "Boxes",
+      "Chems",
+      "ElcEq",
+      "Fin",
+      "Food",
+      "Mach",
+      "MedEq",
+      "Mines",
+      "Oil",
+      "Other",
+      "Ships",
+      "Soda",
+      "Softw",
+      "Telcm",
+      "Trans"
+    ],
+    "rows": 432,
+    "first": "1990-01-31",
+    "last": "2025-12-31"
+  }
+}

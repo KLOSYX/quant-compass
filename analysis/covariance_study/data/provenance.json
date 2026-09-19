@@ -1,0 +1,500 @@
+{
+  "captured_at": "2026-09-19T06:48:45.380835+00:00",
+  "french": {
+    "us_industry49": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_CSV.zip",
+      "sha256": "b197eab1059757f3cfa2b92fd520197372237104d3d46a3000c8061e5066a302",
+      "rows": 432,
+      "columns": [
+        "Agric",
+        "Food",
+        "Soda",
+        "Beer",
+        "Smoke",
+        "Toys",
+        "Fun",
+        "Books",
+        "Hshld",
+        "Clths",
+        "Hlth",
+        "MedEq",
+        "Drugs",
+        "Chems",
+        "Rubbr",
+        "Txtls",
+        "BldMt",
+        "Cnstr",
+        "Steel",
+        "FabPr",
+        "Mach",
+        "ElcEq",
+        "Autos",
+        "Aero",
+        "Ships",
+        "Guns",
+        "Gold",
+        "Mines",
+        "Coal",
+        "Oil",
+        "Util",
+        "Telcm",
+        "PerSv",
+        "BusSv",
+        "Hardw",
+        "Softw",
+        "Chips",
+        "LabEq",
+        "Paper",
+        "Boxes",
+        "Trans",
+        "Whlsl",
+        "Rtail",
+        "Meals",
+        "Banks",
+        "Insur",
+        "RlEst",
+        "Fin",
+        "Other"
+      ],
+      "missing": 0,
+      "first": "1990-01-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",Agric,Food ,Soda ,Beer ,Smoke,Toys ,Fun  ,Books,Hshld,Clths,Hlth ,MedEq,Drugs,Chems,Rubbr,Txtls,BldMt,Cnstr,Steel,FabPr,Mach ,ElcEq,Autos,Aero ,Ships,Guns ,Gold ,Mines,Coal ,Oil  ,Util ,Telcm,PerSv,BusSv,Hardw,Softw,Chips,LabEq,Paper,Boxes,Trans,Whlsl,Rtail,Meals,Banks,Insur,RlEst,Fin  ,Other"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "us_size_value25": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/25_Portfolios_5x5_CSV.zip",
+      "sha256": "a6522ad4ea890fafb3971938292844e256128de0e2f6929166ff2f0f7d0d573a",
+      "rows": 432,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "ME1 BM3",
+        "ME1 BM4",
+        "SMALL HiBM",
+        "ME2 BM1",
+        "ME2 BM2",
+        "ME2 BM3",
+        "ME2 BM4",
+        "ME2 BM5",
+        "ME3 BM1",
+        "ME3 BM2",
+        "ME3 BM3",
+        "ME3 BM4",
+        "ME3 BM5",
+        "ME4 BM1",
+        "ME4 BM2",
+        "ME4 BM3",
+        "ME4 BM4",
+        "ME4 BM5",
+        "BIG LoBM",
+        "ME5 BM2",
+        "ME5 BM3",
+        "ME5 BM4",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-01-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,ME1 BM3,ME1 BM4,SMALL HiBM,ME2 BM1,ME2 BM2,ME2 BM3,ME2 BM4,ME2 BM5,ME3 BM1,ME3 BM2,ME3 BM3,ME3 BM4,ME3 BM5,ME4 BM1,ME4 BM2,ME4 BM3,ME4 BM4,ME4 BM5,BIG LoBM,ME5 BM2,ME5 BM3,ME5 BM4,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "europe6": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Europe_6_Portfolios_ME_BE-ME_CSV.zip",
+      "sha256": "82495351fb3b7e0dbab0b752837e76df53a3dd09a171e3edb695d4fb07d68935",
+      "rows": 426,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "SMALL HiBM",
+        "BIG LoBM",
+        "ME2 BM2",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-07-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,SMALL HiBM,BIG LoBM,ME2 BM2,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "japan6": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Japan_6_Portfolios_ME_BE-ME_CSV.zip",
+      "sha256": "1f157154ffe5707838859cc16b5c734efab106f93cf3ae79b78fccd279da438c",
+      "rows": 426,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "SMALL HiBM",
+        "BIG LoBM",
+        "ME2 BM2",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-07-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,SMALL HiBM,BIG LoBM,ME2 BM2,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "asia_ex_japan6": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Asia_Pacific_ex_Japan_6_Portfolios_ME_BE-ME_CSV.zip",
+      "sha256": "98b7ce8fe05f9b396fdb978b258f6d0355b3312d8f7ea427c433aee06de0e1d6",
+      "rows": 426,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "SMALL HiBM",
+        "BIG LoBM",
+        "ME2 BM2",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-07-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,SMALL HiBM,BIG LoBM,ME2 BM2,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "north_america6": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/North_America_6_Portfolios_ME_BE-ME_CSV.zip",
+      "sha256": "623d9dfb95701683fd23f20b47e79dd3e40f0f0ffd140b6d512d56ed4b23168b",
+      "rows": 426,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "SMALL HiBM",
+        "BIG LoBM",
+        "ME2 BM2",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-07-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,SMALL HiBM,BIG LoBM,ME2 BM2,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    },
+    "emerging6": {
+      "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Emerging_Markets_6_Portfolios_ME_BE-ME_CSV.zip",
+      "sha256": "76c5322bc5c62f38533b650d37db8318ad1a2a12af6d1a2b2aeec531a38af627",
+      "rows": 432,
+      "columns": [
+        "SMALL LoBM",
+        "ME1 BM2",
+        "SMALL HiBM",
+        "BIG LoBM",
+        "ME2 BM2",
+        "BIG HiBM"
+      ],
+      "missing": 0,
+      "first": "1990-01-31",
+      "last": "2025-12-31",
+      "section_header": [
+        "  Average Value Weighted Returns -- Monthly",
+        ",SMALL LoBM,ME1 BM2,SMALL HiBM,BIG LoBM,ME2 BM2,BIG HiBM"
+      ],
+      "currency": "USD",
+      "return_basis": "first monthly value-weighted total-return section"
+    }
+  },
+  "china": {
+    "000051": {
+      "code": "000051",
+      "name": "华夏沪深300ETF联接A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.08286377195889957,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "d43cd76f190022e4a0f1809045d626f5735839d9c805473b6d30976ab09107f9",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 197,
+      "first": "2009-07-31",
+      "last": "2025-12-31"
+    },
+    "110003": {
+      "code": "110003",
+      "name": "易方达上证50增强A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 4.375047631644378e-16,
+        "reconciliation_tolerance": 0.034522042324023894,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "87659fa539b6086aa1766f211df0d1dab07ec20ed4df4783c644a1c200cd116f",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 261,
+      "first": "2004-03-31",
+      "last": "2025-12-31"
+    },
+    "110020": {
+      "code": "110020",
+      "name": "易方达沪深300ETF联接A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.07895775759968418,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "f19190fd42ea69a2423892695536f1496bd895013de0ba691d3bc02c9832f44a",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 196,
+      "first": "2009-08-31",
+      "last": "2025-12-31"
+    },
+    "161725": {
+      "code": "161725",
+      "name": "招商中证白酒指数(LOF)A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "partial",
+        "corporate_action_coverage_complete": false,
+        "reconciliation_error": 0.737386980108499,
+        "reconciliation_tolerance": 0.042015041384815766,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "78e925fec2b7ffe6aba574533dc681edfadf1df7e27ef779104712d833720d17",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 127,
+      "first": "2015-05-31",
+      "last": "2025-12-31",
+      "excluded": "total-return quality not verified"
+    },
+    "160119": {
+      "code": "160119",
+      "name": "南方中证500ETF联接(LOF)A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 2.2180062423836908e-16,
+        "reconciliation_tolerance": 0.06385288295766554,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "cbaf33ab30bafca4e063a14210e6f0b778eb78a44aa5718b29a1fd880e30aba4",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 195,
+      "first": "2009-09-30",
+      "last": "2025-12-31"
+    },
+    "000968": {
+      "code": "000968",
+      "name": "广发养老指数A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.10351966873706005,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "288be5d924006bbffb3a284a5a5d4dfd0b6fc1ecb09fe3564e57466686e61f29",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 130,
+      "first": "2015-02-28",
+      "last": "2025-12-31"
+    },
+    "000198": {
+      "code": "000198",
+      "name": "天弘余额宝货币",
+      "type": "货币型-普通货币",
+      "excluded": "money-market asset is outside variable-risk covariance comparison"
+    },
+    "110017": {
+      "code": "110017",
+      "name": "易方达增强回报债券A",
+      "type": "债券型-混合一级",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 5.691019348783374e-16,
+        "reconciliation_tolerance": 0.05050505050505051,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "99679c24bf41386835d0be086dd448317b29cc9ae73f4f9e28b8058484edd263",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 213,
+      "first": "2008-03-31",
+      "last": "2025-12-31"
+    },
+    "110018": {
+      "code": "110018",
+      "name": "易方达增强回报债券B",
+      "type": "债券型-混合一级",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 3.811924548069207e-16,
+        "reconciliation_tolerance": 0.05194805194805195,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "0d7e006d779cb2c29546e06357fade982da79e52005baa587757b9203aa45e0b",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 213,
+      "first": "2008-03-31",
+      "last": "2025-12-31"
+    },
+    "000171": {
+      "code": "000171",
+      "name": "易方达裕丰回报债券A",
+      "type": "债券型-混合二级",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 2.1197575649167665e-16,
+        "reconciliation_tolerance": 0.05353319057815846,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "2107e4b4cc46c17c3a23510a151c700b514e622e39f5b00b15687649216e8ffc",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 148,
+      "first": "2013-08-31",
+      "last": "2025-12-31"
+    },
+    "000216": {
+      "code": "000216",
+      "name": "华安黄金ETF联接A",
+      "type": "指数型-其他",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.07631257631257632,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "727a8cc78430ae64a6dd340e57b5c4360e7f3cbc1a51d320d7f74d38f67a01e9",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 148,
+      "first": "2013-08-31",
+      "last": "2025-12-31"
+    },
+    "000217": {
+      "code": "000217",
+      "name": "华安黄金ETF联接C",
+      "type": "指数型-其他",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.07689645891806682,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "4c761dc0700ab957e4bba1315cba488893afe9b6f3647a1139e2967c2159f2f4",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 148,
+      "first": "2013-08-31",
+      "last": "2025-12-31"
+    },
+    "000311": {
+      "code": "000311",
+      "name": "景顺长城沪深300指数增强A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 2.1197575649167665e-16,
+        "reconciliation_tolerance": 0.04151100041511001,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "afe2d83d207554b01e3914943095667b5e5b302f300f47a4e7043e7d41894223",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 146,
+      "first": "2013-10-31",
+      "last": "2025-12-31"
+    },
+    "000478": {
+      "code": "000478",
+      "name": "建信中证500指数增强A",
+      "type": "指数型-股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.041717074798715115,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "29fc2363ea1f52e24a93c4728c76a17e1397ad95157fc46b3ab63fd692fadf20",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 143,
+      "first": "2014-01-31",
+      "last": "2025-12-31"
+    },
+    "000071": {
+      "code": "000071",
+      "name": "华夏恒生ETF联接A",
+      "type": "指数型-海外股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.08081787691437345,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "d4d16a28a8d7f0b92496cbe17c3c70a1517e6f73fc78f3e2161901821e2e001d",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 160,
+      "first": "2012-08-31",
+      "last": "2025-12-31"
+    },
+    "000614": {
+      "code": "000614",
+      "name": "华安德国(DAX)联接(QDII)A",
+      "type": "指数型-海外股票",
+      "quality": {
+        "status": "reconciled",
+        "corporate_action_coverage_complete": true,
+        "reconciliation_error": 0.0,
+        "reconciliation_tolerance": 0.08233841086867023,
+        "availability_quality": "observed",
+        "warnings": []
+      },
+      "sha256": "5eddf64b1717629b75667d96ef311bbddef611b0d384c0a64aafc14280e62d98",
+      "source": "AkShare / Eastmoney; unit NAV plus distribution/split history and cumulative NAV reconciliation",
+      "rows": 136,
+      "first": "2014-08-31",
+      "last": "2025-12-31"
+    }
+  }
+}

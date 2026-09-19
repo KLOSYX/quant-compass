@@ -44,3 +44,9 @@ Thumbs.db
 # UI-UX Pro Max
 .shared/
 .agent/
+
+# Offline covariance study: keep metadata, not downloaded data or generated traces
+analysis/covariance_study/data/*
+!analysis/covariance_study/data/provenance.json
+analysis/covariance_study/results/traces/
+analysis/covariance_study/results/*.csv

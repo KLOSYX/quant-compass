@@ -1,0 +1,45 @@
+{
+  "seed": 20260919,
+  "hashes": {
+    "PROTOCOL.md": "6ff773ea90747e3a4b14eaff549f851a9474051fe92e141300cdb120dfac477f",
+    "run_study.py": "69d1197c385dbde33c803432d52dc6eec97dad407f92fed8e507b74e7936c9a8",
+    "data/cn_000968.csv": "f4ca9b52a1a7ced944c1c8b793aa61512cbaf89faefc3b3e4bfc629e19de9b5f",
+    "data/cn_160119.csv": "43e51f547f4455bcc3343021a20624f8d440db3ae8de063f7952c199c76a02ce",
+    "data/europe6.csv": "f16f82d488f18c917eb61ebd2bfc50daa23d48b58c42f4ece2fdbc0ad6957c3f",
+    "data/us_size_value25.csv": "e4845696697ea6cb7d3d815d544035faa3103b4505642f91c5f2209c70e04b2e",
+    "data/cn_110017.csv": "0e319eb966286da033e50b741c041955e66ffacb7f08d33d64425a4181159540",
+    "data/cn_000171.csv": "7c864c0fccd0b58e07884ffafd03c9c08d9f88d3a48b199df4dd1bfcb51c6ad0",
+    "data/cn_161725.csv": "e5851f5b32decb6bab2c4ca6db054df755bef2bc7cb8cb2a28e9883a66b642ba",
+    "data/cn_000051.csv": "f449e8caf06e285dadbbf6a85812a36bdd75d45ce4b8fdebd99721650f39a155",
+    "data/cn_110018.csv": "046658a8b38b5117c61c484f76a324eefa992c345cb33349d6074e63896f3f24",
+    "data/cn_000478.csv": "803694b910d867742c34c75a149c7fe3ca046aeab9e63b1b3491a07655ba41dd",
+    "data/cn_110003.csv": "0e53e0f2b580d22249d4761f3ae47a90cb64947cd724a4ee54ab59027d28b217",
+    "data/cn_000071.csv": "dc6b9c0175318c5add1280142948790099832490a8954bb0b38591174becefe4",
+    "data/cn_000311.csv": "ff7e999447f16514a5e0973ba16edd8abdbc42dceb34b3eac63b6b583555d9de",
+    "data/asia_ex_japan6.csv": "274f8906a65fee54dd14cfb08a814c52f6ed4fc6a63d4a5f3360d7c5a800ccee",
+    "data/cn_000217.csv": "7c2c39a01525ddd77ac6b815d9a1e63948fa0e9b86b8a3304e8c239be3858d59",
+    "data/cn_110020.csv": "1a1aab4bbeccc7041aec658920e069676e1d353f03fa18e454f7e370cf98b3ae",
+    "data/north_america6.csv": "44161ebeac7f8c061912960145925034edc180a74b6a78ff8b711a41c50d864e",
+    "data/emerging6.csv": "70a05f86a3ac5b9674c1530bbcdd6ae0ba42fb0c2b685efe06ad244837520d7a",
+    "data/cn_000216.csv": "beaecd91eb7494db245219b9e9fcbf6b04cbcd411c3e9c02dda530c289a472a1",
+    "data/cn_000614.csv": "9bfe68aeab012613552c70618bd00e7c6cac83eaf96d5010195c743324c04884",
+    "data/japan6.csv": "7d162cf798c31dfe120f95f8fa1659b778192c0754a83b8eabce5d1feb479930",
+    "data/us_industry49.csv": "7af5322cdbe14787f2f9924c3b5fec865b3c56d4fbd0d5314a2441fa90f3e650"
+  },
+  "elapsed_seconds": 439.04417967796326,
+  "python": "3.12.10 | packaged by conda-forge | (main, Apr 10 2025, 22:21:13) [GCC 13.3.0]",
+  "production_revision": "5b26353",
+  "final_source_hashes": {
+    "run_study.py": "89eb9b988ede1f051d8973b205480b4f331b002cef153a81222e202db3ad29c9",
+    "fetch_data.py": "37817bc67ce249bcb7425d997ac47ad5ac8724adf04126c46ede092bde0538d3",
+    "summarize.py": "d754dd436d56d9fd8afc56f2037d3f29e9967f4cf2c1412f0cc13c70763e5db5",
+    "test_study.py": "5983fc2e1cfdfefab0a222d884fda7bd7ef4139928094f784cbab6daf4229127"
+  },
+  "post_run_changes": "Only Ruff formatting/import ordering and explicit source-exclusion lint annotation; numerical logic unchanged. Original completion hashes retained.",
+  "versions": {
+    "numpy": "2.3.2",
+    "pandas": "2.3.1",
+    "scipy": "1.16.1",
+    "sklearn": "1.8.0"
+  }
+}

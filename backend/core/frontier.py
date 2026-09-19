@@ -265,15 +265,28 @@ def _minimum_variance_weights(
     bounds = get_frontier_weight_bounds(columns)
     initial_guess = get_frontier_initial_guess(columns)
 
+    # SLSQP's absolute stopping tolerance must not depend on whether returns
+    # are expressed as fractions or percentages. Positive scaling preserves
+    # the minimizer; an all-zero covariance leaves every feasible weight optimal.
+    covariance_values = covariance.to_numpy(dtype=float)
+    scale = float(np.trace(covariance_values) / len(columns))
+    scaled_covariance = covariance_values / scale if scale > 0 else covariance_values
+
     def variance(weights):
-        return float(weights.T @ covariance.values @ weights)
+        return float(weights.T @ scaled_covariance @ weights)
 
     result = minimize(
         variance,
         initial_guess,
+        jac=lambda weights: 2 * scaled_covariance @ weights,
         method="SLSQP",
         bounds=bounds,
-        constraints={"type": "eq", "fun": lambda weights: np.sum(weights) - 1},
+        constraints={
+            "type": "eq",
+            "fun": lambda weights: np.sum(weights) - 1,
+            "jac": lambda weights: np.ones(len(weights)),
+        },
+        options={"ftol": 1e-11, "maxiter": 400},
     )
     weights = result.x if result.success else initial_guess
     return pd.Series(weights, index=columns, dtype=float), intensity

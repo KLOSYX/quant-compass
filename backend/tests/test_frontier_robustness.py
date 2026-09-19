@@ -1,12 +1,46 @@
 import numpy as np
 import pandas as pd
-
+import pytest
 from core.frontier import (
+    _minimum_variance_weights,
     calculate_efficient_frontier,
     calculate_frontier_walk_forward_metrics,
     estimate_covariance,
     evaluate_covariance_shrinkage_ablation,
 )
+
+
+@pytest.mark.parametrize("method", ["fixed_20", "ledoit_wolf"])
+def test_diagnostic_minimum_variance_is_return_unit_invariant(method):
+    rng = np.random.default_rng(20260919)
+    returns = pd.DataFrame(rng.normal(size=(36, 4)) * [0.002, 0.005, 0.02, 0.06])
+    reference, intensity = _minimum_variance_weights(returns, method)
+    for factor in [0.1, 100]:
+        weights, scaled_intensity = _minimum_variance_weights(returns * factor, method)
+        np.testing.assert_allclose(weights, reference, atol=1e-7)
+        assert scaled_intensity == pytest.approx(intensity)
+
+
+@pytest.mark.parametrize("factor", [0.0001, 1, 100])
+def test_diagnostic_minimum_variance_matches_closed_form(factor):
+    # Orthogonal, centered returns yield diagonal covariance in a 1:4 ratio.
+    returns = pd.DataFrame({"A": [0.01, -0.01, 0, 0], "B": [0, 0, 0.02, -0.02]})
+    weights, intensity = _minimum_variance_weights(returns * factor, "fixed_20")
+    np.testing.assert_allclose(weights, [0.8, 0.2], atol=1e-7)
+    assert intensity == 0.2
+
+
+def test_diagnostic_minimum_variance_handles_zero_risk_and_single_asset():
+    for returns, expected in [
+        (pd.DataFrame({"A": [0.0] * 4, "B": [0.0] * 4}), [0.5, 0.5]),
+        (pd.DataFrame({"A": [0.01, -0.01, 0.02, -0.02]}), [1.0]),
+        (
+            pd.DataFrame({"A": [0.01, -0.01, 0.02, -0.02], "RiskFree": [0.001] * 4}),
+            [0.0, 1.0],
+        ),
+    ]:
+        weights, _ = _minimum_variance_weights(returns, "fixed_20")
+        np.testing.assert_allclose(weights, expected, atol=1e-7)
 
 
 def test_single_asset_frontier_is_feasible():

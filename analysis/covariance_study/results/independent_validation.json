@@ -1,0 +1,6 @@
+{
+  "traces_checked": 254,
+  "metric_max_absolute_error": 1.7763568394002505e-15,
+  "normalized_data_checks": "finite values, unique dates, complete monthly grids passed",
+  "source_formatting_only_after_run": true
+}
