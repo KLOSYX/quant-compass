@@ -83,8 +83,6 @@ def _compare_complete_covariance_states(
         "second_half": (midpoint, observations),
     }
     segments = {}
-    qualifying_segments = 0
-    strict_improvements = 0
     for name, (start, end) in slices.items():
         fixed = _summarize_ablation_slice(
             fixed_state.returns[start:end],
@@ -96,40 +94,13 @@ def _compare_complete_covariance_states(
             candidate_state.weight_drifts[start : max(start, end - 1)],
             risk_free_rate,
         )
-        qualifies = (
-            fixed["status"] == "ok"
-            and candidate["status"] == "ok"
-            and candidate["sharpe"] >= fixed["sharpe"] - 0.05
-            and candidate["weight_stability"] >= fixed["weight_stability"] - 0.01
-            and candidate["max_drawdown"] <= fixed["max_drawdown"] + 0.01
-        )
-        strict = (
-            qualifies
-            and candidate["sharpe"] > fixed["sharpe"] + 0.02
-            and candidate["weight_stability"] > fixed["weight_stability"]
-        )
-        qualifying_segments += int(qualifies)
-        strict_improvements += int(strict)
-        segments[name] = {
-            "fixed_20": fixed,
-            "ledoit_wolf": candidate,
-            "candidate_qualifies": qualifies,
-        }
+        segments[name] = {"fixed_20": fixed, "ledoit_wolf": candidate}
 
-    available_segments = sum(
-        item["fixed_20"]["status"] == "ok" and item["ledoit_wolf"]["status"] == "ok"
-        for item in segments.values()
-    )
-    candidate_ready = (
-        available_segments == len(segments)
-        and qualifying_segments == len(segments)
-        and strict_improvements >= 2
-    )
     return {
         "evaluation_scope": "complete_executable_strategy",
         "default_method": "fixed_20",
         "candidate_method": "ledoit_wolf",
-        "promotion_status": "candidate" if candidate_ready else "retain_fixed",
+        "promotion_status": "descriptive_only",
         "auto_switched": False,
         "segments": segments,
     }
@@ -189,17 +160,8 @@ class _StrategyState:
 
 
 def _select_train_point(frontier: list[dict], risk_free_rate: float) -> dict:
-    """Apply a fixed, training-only maximum excess-Sharpe selection rule."""
-
-    def rank(point):
-        risk = float(point.get("risk", 0.0))
-        excess_return = float(point.get("return", 0.0)) - risk_free_rate
-        sharpe = (
-            excess_return / risk if risk > 1e-9 else (1e6 if excess_return > 0 else 0)
-        )
-        return sharpe, -risk
-
-    return max(frontier, key=rank)
+    """Use the same historical minimum-risk reference as candidate generation."""
+    return min(frontier, key=lambda point: float(point["risk"]))
 
 
 def _initialize_state(
@@ -443,6 +405,7 @@ def evaluate_executable_walk_forward(
     asset_categories: Mapping[str, str] | None = None,
     substitute_for: Mapping[str, str] | None = None,
     execution_allocation_method: str = "proportional_gap",
+    planning_period_days: int = 30,
     planned_purchase_days: int | None = None,
     execution_nav: pd.DataFrame | None = None,
     corporate_actions=(),
@@ -552,12 +515,16 @@ def evaluate_executable_walk_forward(
             *(["RiskFree"] if "RiskFree" in train_df.columns else []),
         ]
         frontier_train_df = train_df[frontier_columns]
-        frontier = calculate_efficient_frontier(frontier_train_df, dict(fund_fees))
-        if not frontier:
-            continue
-        dynamic_weights = _select_train_point(frontier, risk_free_rate)["weights"]
+        if len(frontier_train_df) < 3:
+            # No covariance estimate: use an explicit equal-weight accounting baseline.
+            dynamic_weights = equal_weights
+        else:
+            frontier = calculate_efficient_frontier(frontier_train_df, dict(fund_fees))
+            if not frontier:
+                continue
+            dynamic_weights = _select_train_point(frontier, risk_free_rate)["weights"]
         candidate_weights = None
-        if include_covariance_ablation:
+        if include_covariance_ablation and len(frontier_train_df) >= 3:
             candidate_frontier = calculate_efficient_frontier(
                 frontier_train_df,
                 dict(fund_fees),
@@ -665,6 +632,7 @@ def evaluate_executable_walk_forward(
                         for primary in sorted(set((substitute_for or {}).values()))
                         if primary
                     ),
+                    planning_period_days=planning_period_days,
                     planned_purchase_days=planned_purchase_days,
                     min_purchase_amount=min_purchase_amount,
                     amount_step=amount_step,
@@ -943,7 +911,7 @@ def evaluate_executable_walk_forward(
         "status": "ok",
         "minimum_training_months": min_train_months,
         "evaluation_months": len(next(iter(states.values())).returns),
-        "selection_rule": "training_only_maximum_excess_sharpe",
+        "selection_rule": "training_only_minimum_variance_reference",
         "limit_history_assumption": "fixed_user_scenario",
         "cash_flow_policy": "identical_initial_capital_and_monthly_contributions",
         "metric_basis": {

@@ -140,7 +140,8 @@ def test_analyze_returns_recommended_point_for_long_sample():
     assert recommended["frontier_recommendation_eligible"] is True
     selection = payload["recommended_point_selection"]
     assert selection["selected_index"] == payload["recommended_point_index"]
-    assert selection["ranking"][0] == "oos_excess_sharpe"
+    assert selection["ranking"][0] == "lower_theoretical_risk"
+    assert selection["requires_target_confirmation"] is True
     assert selection["eligible_count"] > 0
     assert len(selection["candidate_diagnostics"]) == len(payload["efficient_frontier"])
 

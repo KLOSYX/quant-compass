@@ -3,8 +3,6 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
-from core.portfolio import shrink_frontier_expected_returns
-
 
 def estimate_account_risk(
     total_return_nav,
@@ -81,10 +79,12 @@ def calculate_asset_diagnostics(
     if df_nav.empty:
         return []
 
-    monthly_returns = df_nav.pct_change().fillna(0)
+    monthly_returns = df_nav.pct_change(fill_method=None).dropna()
     raw_expected_returns = monthly_returns.mean()
-    optimizer_expected_returns = shrink_frontier_expected_returns(raw_expected_returns)
-    annualized_volatility = monthly_returns.std(ddof=0) * np.sqrt(12)
+    optimizer_expected_returns = raw_expected_returns.copy()
+    annualized_volatility = monthly_returns.std(ddof=1) * np.sqrt(12)
+    if "RiskFree" in annualized_volatility:
+        annualized_volatility["RiskFree"] = 0.0
     years = max((df_nav.index[-1] - df_nav.index[0]).days / 365.25, 0.0)
     frontier_weight_series = {
         code: np.array(
@@ -134,6 +134,8 @@ def calculate_asset_diagnostics(
         max_weight = float(weights.max()) if weights.size else 0.0
         avg_weight = float(weights.mean()) if weights.size else 0.0
         sharpe = None if code == "RiskFree" else float(risky_sharpes.get(code, 0.0))
+        if sharpe is not None and not np.isfinite(sharpe):
+            sharpe = None
         rank = None if code == "RiskFree" else sharpe_rank.get(code)
 
         if code == "RiskFree":
@@ -142,8 +144,6 @@ def calculate_asset_diagnostics(
             status = "selected_on_frontier"
         elif optimizer_return <= rf_return + 1e-9:
             status = "below_risk_free"
-        elif rank is not None and rank > 1:
-            status = "dominated_by_higher_sharpe_assets"
         else:
             status = "unused_in_sample"
 

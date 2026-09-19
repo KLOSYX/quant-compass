@@ -10,10 +10,12 @@ import PortfolioOptimizer from './PortfolioOptimizer';
 import { LanguageProvider } from './LanguageContext';
 import { translations } from './i18n/translations';
 
-jest.mock('echarts-for-react', () => ({ onEvents }) => (
+jest.mock('echarts-for-react', () => ({ onEvents, option }) => (
     <button
         type="button"
         data-testid="mock-frontier-chart"
+        data-tooltip={option?.series?.[0]?.type === 'scatter' && option.series[0].data.length
+            ? option.tooltip.formatter({ data: option.series[0].data[0] }) : ''}
         onClick={() => onEvents?.click?.({ dataIndex: 0 })}
     >
         mock chart
@@ -61,8 +63,8 @@ test('resolves the backend recommended frontier point for explicit reset', () =>
         efficient_frontier: frontier,
         recommended_point_index: null
     })).toBeNull();
-    expect(translations.zh.reset_to_recommended_point).toContain('推荐点');
-    expect(translations.en.reset_to_recommended_point).toContain('Recommended Point');
+    expect(translations.zh.reset_to_recommended_point).toContain('参考点');
+    expect(translations.en.reset_to_recommended_point).toContain('Minimum-Risk Reference');
 });
 
 test('exposes the evidence attached to the backend recommendation', () => {
@@ -84,6 +86,7 @@ test('exposes the evidence attached to the backend recommendation', () => {
 });
 
 test('shows an explicit reset button after the backend recommends a frontier point', async () => {
+    localStorage.setItem('plannedPurchaseDays', '1'); // Legacy calendar-month setting must not override the new default.
     localStorage.setItem('fundCodes', JSON.stringify(['A']));
     localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A' }));
     jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -95,6 +98,9 @@ test('shows an explicit reset button after the backend recommends a frontier poi
                     risk: 0.2,
                     return: 0.08,
                     weights: { A: 1 },
+                    frontier_walk_forward_start_date: '2025-10-31',
+                    frontier_walk_forward_end_date: '2025-12-31',
+                    frontier_walk_forward_observations: 3,
                     frontier_walk_forward_sharpe: 0.75,
                     frontier_walk_forward_annualized_return: 0.07,
                     frontier_walk_forward_max_drawdown: 0.12,
@@ -117,9 +123,30 @@ test('shows an explicit reset button after the backend recommends a frontier poi
     render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
     fireEvent.click(screen.getByRole('button', { name: translations.zh.analyze_btn }));
 
+    const confirmButton = await screen.findByRole('button', { name: translations.zh.target_confirm_switch });
+    expect(localStorage.getItem('confirmedTarget')).toBeNull();
+    fireEvent.click(confirmButton);
+
     const resetButton = await screen.findByRole('button', {
         name: translations.zh.reset_to_recommended_point
     });
+    const diagnostic = screen.getByTestId('dynamic-frontier-diagnostic');
+    expect(diagnostic).not.toHaveAttribute('open');
+    expect(diagnostic).toHaveTextContent('2025-10-31 至 2025-12-31');
+    expect(diagnostic).toHaveTextContent('有效观测 3 个月');
+    expect(diagnostic).toHaveTextContent('不是当前选中点或已确认固定目标的样本外成绩');
+    const tooltip = screen.getByTestId('mock-frontier-chart').getAttribute('data-tooltip');
+    expect(tooltip).toContain(translations.zh.frontier_fixed_statistics);
+    expect(tooltip).not.toContain(translations.zh.walk_forward_return);
+    expect(tooltip).not.toContain('Sharpe');
+    const analysisRequest = global.fetch.mock.calls.find(([url]) => url === '/api/analyze');
+    expect(JSON.parse(analysisRequest[1].body).planned_purchase_days).toBe(21);
+    expect(JSON.parse(analysisRequest[1].body).planning_period_days).toBe(30);
+    fireEvent.click(screen.getByRole('button', { name: translations.zh.expand_advanced }));
+    fireEvent.change(screen.getByLabelText(translations.zh.planning_period_days), { target: { value: '45' } });
+    fireEvent.change(screen.getByLabelText(translations.zh.planned_purchase_days), { target: { value: '32' } });
+    expect(localStorage.getItem('planningPeriodDays')).toBe('45');
+    expect(localStorage.getItem('estimatedTradingDays')).toBe('32');
     expect(resetButton).toBeInTheDocument();
     expect(resetButton).toBeDisabled();
     expect(screen.getByTestId('recommendation-evidence')).toHaveTextContent('4/20');
@@ -129,10 +156,9 @@ test('shows an explicit reset button after the backend recommends a frontier poi
     );
 
     fireEvent.click(screen.getByTestId('mock-frontier-chart'));
-    expect(resetButton).toBeEnabled();
-
-    fireEvent.click(resetButton);
+    // The two points have identical weights: no target switch or confirmation needed.
     expect(resetButton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: translations.zh.target_confirm_switch })).not.toBeInTheDocument();
 });
 
 test('keeps analysis warnings in a compact expandable methodology section', async () => {
@@ -325,4 +351,57 @@ test('advanced settings show cash first and add fund exceptions only when needed
     expect(container.querySelector('#pending-B')).toBeNull();
     expect(JSON.parse(localStorage.getItem('pendingSells')).B).toBe('');
     expect(JSON.parse(localStorage.getItem('redemptionLimits')).A).toBe('0');
+});
+
+
+test.each(['zh', 'en'])('target preview requires confirmation and supports persisted undo (%s)', async language => {
+    const t = translations[language];
+    const original = { weights: { A: 0.8, B: 0.2 }, risk: 0.1, return: 0.05 };
+    const candidate = { weights: { A: 0.1, B: 0.9 }, risk: 0.11, return: 0.055 };
+    localStorage.setItem('appLanguage', language);
+    localStorage.setItem('fundCodes', JSON.stringify(['A', 'B']));
+    localStorage.setItem('fundNames', JSON.stringify({ A: 'Fund A', B: 'Fund B' }));
+    localStorage.setItem('confirmedTarget', JSON.stringify(original));
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({
+        efficient_frontier: [candidate], recommended_point_index: 0,
+        fund_names: { A: 'Fund A', B: 'Fund B' }, warnings: [],
+        backtest_period: { start_date: '2023-01-01', end_date: '2026-01-01' }
+    }) });
+    let view = render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    const analyze = async () => {
+        fireEvent.click(screen.getByRole('button', { name: t.analyze_btn }));
+        await screen.findByTestId('mock-frontier-chart');
+    };
+    await analyze();
+    fireEvent.click(screen.getByTestId('mock-frontier-chart'));
+    expect(screen.getByText(t.target_preview_title)).toBeInTheDocument();
+    expect(screen.getByText(t.target_max_change.replace('{value}', '70.00'))).toBeInTheDocument();
+    expect(screen.getByText('-70.00')).toBeInTheDocument();
+    expect(screen.getByText('+70.00')).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(original.weights);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/current_recommendation')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: t.target_cancel_preview }));
+    expect(screen.queryByText(t.target_preview_title)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-frontier-chart'));
+    await analyze();
+    expect(screen.queryByText(t.target_preview_title)).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(original.weights);
+    // Recommended-point reset follows the same preview/confirmation path.
+    fireEvent.click(screen.getByRole('button', { name: t.reset_to_recommended_point }));
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(original.weights);
+    fireEvent.click(screen.getByRole('button', { name: t.target_confirm_switch }));
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(candidate.weights);
+    expect(JSON.parse(localStorage.getItem('previousConfirmedTarget')).weights).toEqual(original.weights);
+    expect(screen.getByRole('status')).toHaveTextContent(t.target_switch_done);
+    view.unmount();
+    view = render(<LanguageProvider><PortfolioOptimizer /></LanguageProvider>);
+    await analyze();
+    expect(JSON.parse(fetchMock.mock.calls.filter(([url]) => url === '/api/analyze').at(-1)[1].body).target_weights).toEqual(candidate.weights);
+    fireEvent.click(screen.getByRole('button', { name: t.target_undo }));
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(candidate.weights);
+    fireEvent.click(screen.getByRole('button', { name: t.target_confirm_switch }));
+    expect(JSON.parse(localStorage.getItem('confirmedTarget')).weights).toEqual(original.weights);
+    expect(localStorage.getItem('previousConfirmedTarget')).toBeNull();
+    expect(screen.queryByRole('button', { name: t.target_undo })).not.toBeInTheDocument();
+    view.unmount();
 });

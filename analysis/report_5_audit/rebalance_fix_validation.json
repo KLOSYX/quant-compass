@@ -1,0 +1,24 @@
+{
+  "engine_version": "4.1",
+  "old_status": "rounded_purchase_capacity_insufficient",
+  "new_status": "rebalance_planned",
+  "sales": {
+    "014429": 144541.89,
+    "016149": 40410.43,
+    "270023": 98739.41
+  },
+  "new_money_gross_buys": 29999.96,
+  "pending_net_sale_proceeds": 283198.03295,
+  "conditional_buys_after_settlement": {
+    "002611": 120910.52,
+    "007339": 75189.65000000001,
+    "012643": 51076.46,
+    "021189": 19306.879999999997,
+    "457001": 16714.54
+  },
+  "cash_after": 534143.9,
+  "original_target_l1_deviation_before_fix": 878689.6370521783,
+  "original_target_l1_deviation_after_conditional_buys": 312497.94009711064,
+  "transaction_fees_before_conditional_buys": 508.2349015933605,
+  "checks": "receiving capacity, unchanged new-money buys, reserve, conservation passed"
+}

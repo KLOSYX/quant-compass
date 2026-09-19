@@ -2,7 +2,7 @@ from typing import Dict, List, Literal
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
+from scipy.optimize import linprog, minimize
 
 from core.constants import (
     COVARIANCE_SHRINKAGE,
@@ -11,14 +11,11 @@ from core.constants import (
 )
 from core.portfolio import (
     get_frontier_initial_guess,
-    get_frontier_weight_bounds,
-    get_max_return_weights,
     normalize_weights,
-    shrink_frontier_expected_returns,
 )
 from core.risk import calculate_cvar_loss, calculate_drawdown_from_returns
 
-CovarianceMethod = Literal["fixed_20", "ledoit_wolf"]
+CovarianceMethod = Literal["sample", "fixed_20", "ledoit_wolf"]
 
 
 def estimate_covariance(
@@ -39,7 +36,9 @@ def estimate_covariance(
 
     risky_returns = clean_returns[risky_columns]
     empirical = risky_returns.cov()
-    if method == "fixed_20":
+    if method == "sample":
+        shrunk, intensity = empirical, 0.0
+    elif method == "fixed_20":
         target = pd.DataFrame(
             np.diag(np.diag(empirical.values)),
             index=risky_columns,
@@ -113,148 +112,158 @@ def append_frontier_stability_warnings(
         )
 
 
-def calculate_efficient_frontier(
-    df,
-    fund_fees,
-    *,
-    covariance_method: CovarianceMethod = "fixed_20",
-):
-    if list(df.columns) == ["RiskFree"]:
-        monthly_returns = df.pct_change().dropna()
-        expected_return = monthly_returns["RiskFree"].mean()
-        return [
-            {"risk": 0, "return": expected_return * 12, "weights": {"RiskFree": 1.0}}
-        ]
+def _solve_minimum_variance(covariance, means=None, minimum_return=None, initial=None):
+    """Long-only convex QP, validated by a first-order global gap bound.
 
-    if len(df.columns) == 1:
-        monthly_returns = df.pct_change().dropna()
-        code = df.columns[0]
-        expected_return = float(monthly_returns[code].mean() * 12)
-        risk = float(monthly_returns[code].std(ddof=0) * np.sqrt(12))
-        return [{"risk": risk, "return": expected_return, "weights": {code: 1.0}}]
-
-    monthly_returns = df.pct_change().dropna()
-
-    raw_expected_returns = monthly_returns.mean()
-    # Simple shrinkage makes the frontier less sensitive to small-sample noise.
-    expected_returns = shrink_frontier_expected_returns(raw_expected_returns)
-    cov_matrix, _ = estimate_covariance(monthly_returns, covariance_method)
-
-    columns = list(df.columns)
-    bounds = get_frontier_weight_bounds(columns)
-    initial_guess = get_frontier_initial_guess(columns)
-
-    def clean_weights(raw_weights):
-        """Normalize numerical roundoff; preserve small theoretical positions."""
-        weights = pd.Series(raw_weights, index=columns, dtype=float).clip(lower=0.0)
-        total = float(weights.sum())
-        return weights / total if total > 0 else weights
-
-    def portfolio_variance(w):
-        weights = np.asarray(w, dtype=float)
-        return np.dot(weights.T, np.dot(cov_matrix, weights))
-
-    def frontier_initial_guesses(current_guess: np.ndarray) -> List[np.ndarray]:
-        guesses = [
-            current_guess,
-            initial_guess,
-            np.full(len(columns), 1.0 / len(columns), dtype=float),
-        ]
-        risk_free_index = columns.index("RiskFree") if "RiskFree" in columns else None
-        for idx, code in enumerate(columns):
-            one_hot = np.zeros(len(columns), dtype=float)
-            one_hot[idx] = 1.0
-            guesses.append(one_hot)
-            if risk_free_index is not None and idx != risk_free_index:
-                pair_guess = np.zeros(len(columns), dtype=float)
-                pair_guess[idx] = 0.35
-                pair_guess[risk_free_index] = 0.65
-                guesses.append(pair_guess)
-
-        deduped = []
-        seen = set()
-        for guess in guesses:
-            key = tuple(np.round(guess, 8))
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(guess)
-        return deduped
-
-    mvp_constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
-    mvp_result = minimize(
-        portfolio_variance,
-        initial_guess,
-        method="SLSQP",
+    For convex f, f(w)-f(w*) <= grad(f)(w) @ (w-s), where s minimizes
+    the linearization over the same feasible polytope. Tolerances here
+    are numerical tolerances, not investment preferences.
+    """
+    covariance = np.asarray(covariance, dtype=float)
+    size = len(covariance)
+    if size == 0 or not np.isfinite(covariance).all():
+        return None
+    scale = float(np.trace(covariance) / size)
+    q = covariance / scale if scale > 0 else covariance.copy()
+    q = (q + q.T) / 2
+    if np.linalg.eigvalsh(q).min() < -1e-10:
+        return None
+    bounds = [(0.0, 1.0)] * size
+    vector = None
+    floor = None
+    if minimum_return is not None:
+        means = np.asarray(means, dtype=float)
+        spread = float(np.ptp(means))
+        if spread > 0:
+            vector = (means - means.min()) / spread
+            floor = float((minimum_return - means.min()) / spread)
+            if floor > 1 + 1e-10:
+                return None
+            if floor >= 1 - 1e-12:
+                # On the maximum-return face the return constraint is redundant.
+                bounds = [(0.0, 1.0 if value >= 1 - 1e-12 else 0.0) for value in vector]
+                vector = None
+        elif minimum_return > float(means[0]) + 1e-12:
+            return None
+    linear_kwargs = dict(
+        A_eq=np.ones((1, size)),
+        b_eq=[1.0],
         bounds=bounds,
-        constraints=mvp_constraints,
+        A_ub=None if vector is None else -vector.reshape(1, -1),
+        b_ub=None if vector is None else [-floor],
+        method="highs",
     )
-    mvp_weights = mvp_result.x if mvp_result.success else initial_guess
-    mvp_return = float(np.sum(expected_returns * mvp_weights))
-    max_return_weights = get_max_return_weights(expected_returns, bounds)
-    max_feasible_return = float(np.sum(expected_returns * max_return_weights))
+    feasible = linprog(np.zeros(size), **linear_kwargs)
+    if not feasible.success:
+        return None
 
-    frontier_returns = np.linspace(mvp_return, max_feasible_return, 20)
-    frontier_points = []
-    current_guess = mvp_weights
-
-    for target in frontier_returns:
-        constraints = (
-            {"type": "eq", "fun": lambda w: np.sum(expected_returns * w) - target},
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
+    def is_feasible(weights):
+        return (
+            np.isfinite(weights).all()
+            and abs(weights.sum() - 1) <= 1e-8
+            and all(
+                lower - 1e-9 <= value <= upper + 1e-9
+                for value, (lower, upper) in zip(weights, bounds)
+            )
+            and (vector is None or weights @ vector >= floor - 1e-8)
         )
-        best_result = None
-        best_variance = None
-        for guess in frontier_initial_guesses(current_guess):
-            result = minimize(
-                portfolio_variance,
-                guess,
-                method="SLSQP",
-                bounds=bounds,
-                constraints=constraints,
-            )
-            if not result.success:
-                continue
-            variance = float(portfolio_variance(result.x))
-            if best_result is None or variance < best_variance:
-                best_result = result
-                best_variance = variance
 
-        if best_result is not None:
-            current_guess = best_result.x
-            cleaned_weights = clean_weights(best_result.x)
-            optimized_weights = cleaned_weights.to_numpy(dtype=float)
-            risk = np.sqrt(
-                np.dot(optimized_weights.T, np.dot(cov_matrix, optimized_weights))
-            ) * np.sqrt(12)
-            ret = float(np.sum(expected_returns * cleaned_weights) * 12)
-            frontier_points.append(
-                {"risk": risk, "return": ret, "weights": cleaned_weights.to_dict()}
-            )
-
-    if not frontier_points:
-        # A numerical failure must not erase an otherwise feasible allocation.
-        # This is a deterministic feasible target, not a solved frontier point.
-        if (
-            not np.isfinite(expected_returns).all()
-            or not np.isfinite(cov_matrix).all().all()
-        ):
-            raise ValueError(
-                "Insufficient finite observations for frontier risk estimates"
-            )
-        weights = clean_weights(initial_guess)
-        frontier_points.append(
+    start = np.asarray(initial) if initial is not None else feasible.x
+    if not is_feasible(start):
+        start = feasible.x
+    constraints = [
+        {"type": "eq", "fun": lambda w: w.sum() - 1, "jac": lambda w: np.ones(size)}
+    ]
+    if vector is not None:
+        constraints.append(
             {
-                "risk": float(
-                    np.sqrt(max(0.0, portfolio_variance(weights))) * np.sqrt(12)
-                ),
-                "return": float(np.sum(expected_returns * weights) * 12),
-                "weights": weights.to_dict(),
-                "solver_fallback_used": True,
-                "solver_status": "no_converged_frontier_point",
+                "type": "ineq",
+                "fun": lambda w: w @ vector - floor,
+                "jac": lambda w: vector,
             }
         )
-    return frontier_points
+    answer = minimize(
+        lambda w: float(w @ q @ w),
+        start,
+        jac=lambda w: 2 * q @ w,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+        options={"ftol": 1e-14, "maxiter": 1000},
+    )
+    if not answer.success:
+        return None
+    weights = np.asarray(answer.x, dtype=float)
+    if not is_feasible(weights):
+        return None
+    weights = np.maximum(weights, 0)
+    weights /= weights.sum()
+    if not is_feasible(weights):
+        return None
+    gradient = 2 * q @ weights
+    certificate = linprog(gradient, **linear_kwargs)
+    if not certificate.success:
+        return None
+    gap = max(0.0, float(gradient @ weights - certificate.fun))
+    if gap > 1e-7:
+        return None
+    return weights, gap
+
+
+def calculate_efficient_frontier(
+    df, fund_fees, *, covariance_method: CovarianceMethod = "fixed_20"
+):
+    """Historical mean/variance frontier, not a forecast or a trading policy."""
+    returns = (
+        df.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+    )
+    known_risk_free_only = list(df.columns) == ["RiskFree"] and len(returns) >= 1
+    if (len(returns) < 2 and not known_risk_free_only) or not len(df.columns):
+        raise ValueError("At least two complete return observations are required")
+    means = returns.mean().to_numpy(dtype=float)
+    covariance, _ = estimate_covariance(returns, covariance_method)
+    matrix = covariance.to_numpy(dtype=float)
+    columns = list(df.columns)
+    initial = get_frontier_initial_guess(columns)
+
+    def point(weights, fraction, gap=None):
+        return {
+            "risk": float(np.sqrt(max(0.0, weights @ matrix @ weights) * 12)),
+            "return": float(weights @ means * 12),
+            "weights": dict(zip(columns, weights.tolist())),
+            "return_basis": "historical_arithmetic_mean",
+            "forecast_available": False,
+            "estimation_observations": len(returns),
+            "frontier_fraction": float(fraction),
+            "solver_optimality_gap": gap,
+            "max_asset_weight": float(weights.max()),
+        }
+
+    minimum = _solve_minimum_variance(matrix, initial=initial)
+    if minimum is None:
+        fallback = point(initial, 0)
+        fallback.update(
+            solver_fallback_used=True, solver_status="no_verified_frontier_solution"
+        )
+        return [fallback]
+    weights, gap = minimum
+    minimum_return = float(weights @ means)
+    maximum_return = float(means.max())
+    points = [point(weights, 0, gap)]
+    if maximum_return - minimum_return <= 1e-12:
+        return points
+    rejected_points = 0
+    for fraction in np.linspace(0, 1, 20)[1:]:
+        target = minimum_return + fraction * (maximum_return - minimum_return)
+        solution = _solve_minimum_variance(matrix, means, target, weights)
+        if solution is None:
+            rejected_points += 1
+            continue
+        weights, gap = solution
+        points.append(point(weights, fraction, gap))
+    for item in points:
+        item["rejected_frontier_points"] = rejected_points
+    return points
 
 
 def _minimum_variance_weights(
@@ -262,34 +271,11 @@ def _minimum_variance_weights(
 ) -> tuple[pd.Series, float]:
     covariance, intensity = estimate_covariance(train_returns, covariance_method)
     columns = list(train_returns.columns)
-    bounds = get_frontier_weight_bounds(columns)
     initial_guess = get_frontier_initial_guess(columns)
-
-    # SLSQP's absolute stopping tolerance must not depend on whether returns
-    # are expressed as fractions or percentages. Positive scaling preserves
-    # the minimizer; an all-zero covariance leaves every feasible weight optimal.
-    covariance_values = covariance.to_numpy(dtype=float)
-    scale = float(np.trace(covariance_values) / len(columns))
-    scaled_covariance = covariance_values / scale if scale > 0 else covariance_values
-
-    def variance(weights):
-        return float(weights.T @ scaled_covariance @ weights)
-
-    result = minimize(
-        variance,
-        initial_guess,
-        jac=lambda weights: 2 * scaled_covariance @ weights,
-        method="SLSQP",
-        bounds=bounds,
-        constraints={
-            "type": "eq",
-            "fun": lambda weights: np.sum(weights) - 1,
-            "jac": lambda weights: np.ones(len(weights)),
-        },
-        options={"ftol": 1e-11, "maxiter": 400},
-    )
-    weights = result.x if result.success else initial_guess
-    return pd.Series(weights, index=columns, dtype=float), intensity
+    solution = _solve_minimum_variance(covariance.to_numpy(), initial=initial_guess)
+    if solution is None:
+        raise ValueError("Covariance diagnostic solver did not pass optimality checks")
+    return pd.Series(solution[0], index=columns, dtype=float), intensity
 
 
 def _evaluate_covariance_segment(
@@ -310,7 +296,12 @@ def _evaluate_covariance_segment(
         train_returns = risky_nav.iloc[:split].pct_change().dropna()
         if len(train_returns) < 2:
             continue
-        weights, intensity = _minimum_variance_weights(train_returns, covariance_method)
+        try:
+            weights, intensity = _minimum_variance_weights(
+                train_returns, covariance_method
+            )
+        except ValueError:
+            return {"status": "solver_failed", "observations": len(realized_returns)}
         next_return = float((returns.iloc[split - 1] * weights).sum())
         realized_returns.append(next_return)
         intensities.append(intensity)
@@ -355,51 +346,17 @@ def evaluate_covariance_shrinkage_ablation(
         "second_half": df_nav.iloc[midpoint:],
     }
     comparisons = {}
-    qualifying_segments = 0
-    strict_improvements = 0
     for segment_name, segment_nav in segments.items():
-        fixed = _evaluate_covariance_segment(segment_nav, "fixed_20", min_train_months)
-        candidate = _evaluate_covariance_segment(
-            segment_nav, "ledoit_wolf", min_train_months
-        )
-        qualifies = (
-            fixed["status"] == "ok"
-            and candidate["status"] == "ok"
-            and candidate["sharpe"] >= fixed["sharpe"] - 0.05
-            and candidate["weight_stability"] >= fixed["weight_stability"] - 0.01
-            and candidate["max_drawdown"] <= fixed["max_drawdown"] + 0.01
-        )
-        strict = (
-            qualifies
-            and candidate["sharpe"] > fixed["sharpe"] + 0.02
-            and candidate["weight_stability"] > fixed["weight_stability"]
-        )
-        qualifying_segments += int(qualifies)
-        strict_improvements += int(strict)
         comparisons[segment_name] = {
-            "fixed_20": fixed,
-            "ledoit_wolf": candidate,
-            "candidate_qualifies": qualifies,
+            method: _evaluate_covariance_segment(segment_nav, method, min_train_months)
+            for method in ("fixed_20", "ledoit_wolf")
         }
-
-    available_segments = sum(
-        comparison["fixed_20"]["status"] == "ok"
-        and comparison["ledoit_wolf"]["status"] == "ok"
-        for comparison in comparisons.values()
-    )
-    candidate_ready = (
-        available_segments == len(segments)
-        and qualifying_segments == len(segments)
-        and strict_improvements >= 2
-    )
     return {
         "default_method": "fixed_20",
         "candidate_method": "ledoit_wolf",
-        "promotion_status": "candidate" if candidate_ready else "retain_fixed",
+        "promotion_status": "descriptive_only",
         "auto_switched": False,
-        "selection_rule": (
-            "all_segments_non_inferior_and_at_least_two_strict_improvements"
-        ),
+        "selection_rule": "no_automatic_promotion",
         "segments": comparisons,
     }
 
@@ -421,10 +378,8 @@ def calculate_frontier_walk_forward_metrics(
         {"oos_returns": [], "oos_excess_returns": [], "weight_drifts": []}
         for _ in range(len(full_frontier))
     ]
-    full_weights = [
-        normalize_weights(point["weights"], list(df_nav.columns))
-        for point in full_frontier
-    ]
+    evaluation_dates = []
+    previous_weights = [None] * len(full_frontier)
     monthly_risk_free_return = (
         (1 + annual_risk_free_rate) ** (1 / 12) - 1
         if annual_risk_free_rate is not None
@@ -434,25 +389,39 @@ def calculate_frontier_walk_forward_metrics(
     for split_end in range(min_train_months, len(df_nav)):
         train_df = df_nav.iloc[:split_end]
         train_frontier = calculate_efficient_frontier(train_df, fund_fees)
-        if not train_frontier:
+        if not train_frontier or any(
+            p.get("solver_fallback_used") for p in train_frontier
+        ):
             continue
 
+        evaluation_dates.append(df_nav.index[split_end].strftime("%Y-%m-%d"))
         next_returns = returns.iloc[split_end]
         for point_index, target_point in enumerate(full_frontier):
             if len(train_frontier) == 1 or len(full_frontier) == 1:
                 train_index = min(point_index, len(train_frontier) - 1)
             else:
-                quantile = point_index / (len(full_frontier) - 1)
-                train_index = int(round(quantile * (len(train_frontier) - 1)))
+                quantile = target_point.get(
+                    "frontier_fraction", point_index / (len(full_frontier) - 1)
+                )
+                train_index = min(
+                    range(len(train_frontier)),
+                    key=lambda i: abs(
+                        train_frontier[i].get(
+                            "frontier_fraction", i / (len(train_frontier) - 1)
+                        )
+                        - quantile
+                    ),
+                )
 
             train_point = train_frontier[train_index]
             train_weights = normalize_weights(
                 train_point["weights"], list(df_nav.columns)
             )
-            target_weights = full_weights[point_index]
-
-            drift = float((train_weights - target_weights).abs().sum() / 2)
-            metrics[point_index]["weight_drifts"].append(drift)
+            prior = previous_weights[point_index]
+            if prior is not None:
+                drift = float((train_weights - prior).abs().sum() / 2)
+                metrics[point_index]["weight_drifts"].append(drift)
+            previous_weights[point_index] = train_weights
 
             oos_return = float(
                 (next_returns[train_weights.index] * train_weights).sum()
@@ -466,6 +435,15 @@ def calculate_frontier_walk_forward_metrics(
                 oos_return - period_risk_free_return
             )
 
+    evaluation_basis = {
+        "frontier_walk_forward_basis": "monthly_reestimated_frontier_fraction",
+        "frontier_walk_forward_start_date": evaluation_dates[0]
+        if evaluation_dates
+        else None,
+        "frontier_walk_forward_end_date": evaluation_dates[-1]
+        if evaluation_dates
+        else None,
+    }
     summarized_metrics = []
     for point_index, point_metrics in enumerate(metrics):
         oos_returns = pd.Series(point_metrics["oos_returns"], dtype=float)
@@ -473,6 +451,7 @@ def calculate_frontier_walk_forward_metrics(
         if observations == 0:
             summarized_metrics.append(
                 {
+                    **evaluation_basis,
                     "frontier_walk_forward_observations": 0,
                     "frontier_walk_forward_annualized_return": None,
                     "frontier_walk_forward_annualized_excess_return": None,
@@ -507,6 +486,7 @@ def calculate_frontier_walk_forward_metrics(
         weight_stability = float(max(0.0, 1.0 - avg_drift))
         summarized_metrics.append(
             {
+                **evaluation_basis,
                 "frontier_walk_forward_observations": observations,
                 "frontier_walk_forward_annualized_return": ann_return,
                 "frontier_walk_forward_annualized_excess_return": (

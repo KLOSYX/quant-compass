@@ -235,6 +235,7 @@ def backtest_fixed_target(
     risk_horizon_days: int = DEFAULT_RISK_HORIZON_DAYS,
     substitute_for: Dict[str, str] = None,
     execution_allocation_method: str = "proportional_gap",
+    planning_period_days: int = 30,
     planned_purchase_days: int = None,
     estimation_nav: pd.DataFrame = None,
     daily_estimation_nav: pd.DataFrame = None,
@@ -396,6 +397,7 @@ def backtest_fixed_target(
                     for primary in sorted(set((substitute_for or {}).values()))
                     if primary
                 ),
+                planning_period_days=planning_period_days,
                 planned_purchase_days=planned_purchase_days,
                 min_purchase_amount=min_purchase_amount,
                 amount_step=amount_step,
@@ -567,6 +569,7 @@ def simulate_strategy_frontier(
     risk_horizon_days=DEFAULT_RISK_HORIZON_DAYS,
     substitute_for=None,
     execution_allocation_method="proportional_gap",
+    planning_period_days=30,
     planned_purchase_days=None,
 ):
     """Replay each selected fixed target through the shared executor."""
@@ -602,6 +605,7 @@ def simulate_strategy_frontier(
             risk_horizon_days=risk_horizon_days,
             substitute_for=substitute_for,
             execution_allocation_method=execution_allocation_method,
+            planning_period_days=planning_period_days,
             planned_purchase_days=planned_purchase_days,
         )
 

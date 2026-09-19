@@ -151,6 +151,18 @@ def test_walk_forward_metrics_present_for_long_sample():
     )
     assert all("frontier_walk_forward_cvar_loss" in item for item in metrics)
     assert all("robust_score" not in item for item in metrics)
+    for item in metrics:
+        assert (
+            item["frontier_walk_forward_basis"]
+            == "monthly_reestimated_frontier_fraction"
+        )
+        assert item["frontier_walk_forward_start_date"] == "2023-01-31"
+        assert item["frontier_walk_forward_end_date"] == "2023-12-31"
+        assert item["frontier_walk_forward_observations"] == 12
+    empty = calculate_frontier_walk_forward_metrics(df.iloc[:23], {})
+    assert all(item["frontier_walk_forward_start_date"] is None for item in empty)
+    assert all(item["frontier_walk_forward_end_date"] is None for item in empty)
+    assert all(item["frontier_walk_forward_observations"] == 0 for item in empty)
 
 
 def test_walk_forward_scores_the_complete_frontier_point_including_risk_free():
@@ -244,7 +256,7 @@ def test_covariance_ablation_never_auto_switches_the_default():
 
     assert result["default_method"] == "fixed_20"
     assert result["auto_switched"] is False
-    assert result["promotion_status"] in {"candidate", "retain_fixed"}
+    assert result["promotion_status"] == "descriptive_only"
     assert set(result["segments"]) == {"full_sample", "first_half", "second_half"}
     assert all(
         segment["fixed_20"]["observations"] == segment["ledoit_wolf"]["observations"]

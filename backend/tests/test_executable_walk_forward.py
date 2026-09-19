@@ -267,7 +267,7 @@ def test_complete_walk_forward_can_ablate_covariance_with_identical_cash_flows()
     assert ablation["segments"]["first_half"]["fixed_20"]["status"] == (
         "insufficient_data"
     )
-    assert ablation["promotion_status"] == "retain_fixed"
+    assert ablation["promotion_status"] == "descriptive_only"
 
 
 def test_walk_forward_compares_tracking_allocator_with_proportional_baseline():

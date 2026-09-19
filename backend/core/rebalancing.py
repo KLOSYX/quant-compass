@@ -56,8 +56,19 @@ def plan_rebalance_sales(
         gap = targets[code] - baseline_values.get(code, 0)
         # Keep existing contribution purchases feasible, even if their fee makes
         # the resulting tiny gap switch sign.
+        # Match execution: an uncapped fund can receive only its target gap,
+        # not all proceeds that other (blocked) target funds cannot absorb.
+        receiving_capacity = min(
+            limit,
+            max(0.0, targets[code] - holdings.get(code, 0)) * (1 + buy_rate[i]),
+        )
         buy_bounds.append(
-            (0, max(baseline_buys.get(code, 0), limit if gap > 1e-7 else 0))
+            (
+                0,
+                max(
+                    baseline_buys.get(code, 0), receiving_capacity if gap > 1e-7 else 0
+                ),
+            )
         )
         sell_bounds.append(
             (
@@ -93,12 +104,23 @@ def plan_rebalance_sales(
             }
         # Keep the best tracking error to sub-cent precision, then prefer fewer sales.
         second = linprog(
-            np.r_[np.full(n, 1e-4), np.ones(n), np.zeros(n)],
+            np.r_[np.zeros(n), np.ones(n), np.zeros(n)],
             A_ub=[*rows, objective],
             b_ub=[*rhs, first.fun + 1e-6],
             bounds=bounds,
             method="highs",
         )
+        if second.success:
+            # A third LP expresses a true priority, not an arbitrary mixed weight.
+            third = linprog(
+                np.r_[np.ones(n), np.zeros(2 * n)],
+                A_ub=[*rows, objective, np.r_[np.zeros(n), np.ones(n), np.zeros(n)]],
+                b_ub=[*rhs, first.fun + 1e-6, second.fun + 1e-6],
+                bounds=bounds,
+                method="highs",
+            )
+            if third.success:
+                second = third
     except (ValueError, RuntimeError) as exc:
         return {}, {
             **diagnostics,

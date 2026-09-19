@@ -84,96 +84,54 @@ def _select_recommended_frontier_point(
     maximum_drawdown: float,
     cvar_enabled: bool,
     maximum_cvar_loss: float,
-    minimum_observations: int = 12,
-    minimum_weight_stability: float = 0.5,
 ) -> tuple[int | None, dict]:
-    eligible_candidates = []
-    candidate_diagnostics = []
+    """Choose a historical minimum-risk reference, never a return forecast.
+
+    Risk preferences remain visible diagnostics. No Sharpe winner, minimum
+    sample count or uncalibrated stability gate defines the user's target.
+    """
+    candidates = []
+    diagnostics = []
     for index, point in enumerate(frontier_points):
-        rejection_reasons = []
-        observations = int(point.get("frontier_walk_forward_observations") or 0)
-        max_drawdown = point.get("frontier_walk_forward_max_drawdown")
-        cvar_loss = point.get("frontier_walk_forward_cvar_loss")
-        stability = point.get("frontier_walk_forward_weight_stability")
-        sharpe = point.get("frontier_walk_forward_sharpe")
-
-        if point.get("solver_fallback_used"):
-            rejection_reasons.append("frontier_solver_failed")
-        if observations < minimum_observations:
-            rejection_reasons.append("insufficient_observations")
-        if max_drawdown is None or max_drawdown > maximum_drawdown:
-            rejection_reasons.append("max_drawdown_exceeded")
-        if cvar_enabled and (cvar_loss is None or cvar_loss > maximum_cvar_loss):
-            rejection_reasons.append("cvar_exceeded")
-        if stability is None or stability < minimum_weight_stability:
-            rejection_reasons.append("weight_stability_too_low")
-        if sharpe is None or not np.isfinite(sharpe):
-            rejection_reasons.append("invalid_oos_excess_sharpe")
-
-        eligible = not rejection_reasons
-        point["frontier_recommendation_eligible"] = eligible
-        point["frontier_recommendation_rejection_reasons"] = rejection_reasons
-        candidate_diagnostics.append(
+        valid = not point.get("solver_fallback_used") and np.isfinite(
+            point.get("risk", np.nan)
+        )
+        point["frontier_recommendation_eligible"] = bool(valid)
+        point["frontier_recommendation_rejection_reasons"] = (
+            [] if valid else ["unverified_solver"]
+        )
+        risk_warnings = []
+        drawdown = point.get("frontier_walk_forward_max_drawdown")
+        cvar = point.get("frontier_walk_forward_cvar_loss")
+        if drawdown is not None and drawdown > maximum_drawdown:
+            risk_warnings.append("max_drawdown_exceeded")
+        if cvar_enabled and cvar is not None and cvar > maximum_cvar_loss:
+            risk_warnings.append("cvar_exceeded")
+        diagnostics.append(
             {
                 "index": index,
-                "eligible": eligible,
-                "rejection_reasons": rejection_reasons,
+                "eligible": bool(valid),
+                "rejection_reasons": point["frontier_recommendation_rejection_reasons"],
+                "risk_warnings": risk_warnings,
             }
         )
-        if eligible:
-            eligible_candidates.append((index, point))
-
-    # Evidence gates remain diagnostics. They may lower confidence, but never
-    # eliminate every feasible allocation. Prefer low risk when evidence is thin.
-    recommended_index = None
-    fallback_used = not eligible_candidates
-    if eligible_candidates:
-        recommended_index = max(
-            eligible_candidates,
-            key=lambda item: (
-                item[1]["frontier_walk_forward_sharpe"],
-                item[1]["frontier_walk_forward_weight_stability"],
-                -item[1]["risk"],
-            ),
-        )[0]
-    elif frontier_points:
-        recommended_index = min(
-            range(len(frontier_points)),
-            key=lambda index: (frontier_points[index]["risk"], index),
-        )
-
-    selected_point = (
-        frontier_points[recommended_index] if recommended_index is not None else None
+        if valid:
+            candidates.append(index)
+    selected = (
+        min(candidates, key=lambda i: (frontier_points[i]["risk"], i))
+        if candidates
+        else (0 if frontier_points else None)
     )
-    selected_observations = (
-        int(selected_point.get("frontier_walk_forward_observations") or 0)
-        if selected_point
-        else 0
-    )
-    return recommended_index, {
-        "fallback_used": fallback_used,
-        "selection_evidence": "historical_selection_not_independent_validation",
-        "minimum_observations": minimum_observations,
-        "maximum_drawdown": maximum_drawdown,
-        "cvar_enabled": cvar_enabled,
-        "maximum_cvar_loss": maximum_cvar_loss,
-        "minimum_weight_stability": minimum_weight_stability,
-        "ranking": [
-            "oos_excess_sharpe",
-            "weight_stability",
-            "lower_theoretical_risk",
-        ],
-        "eligible_count": len(eligible_candidates),
+    return selected, {
+        "selected_index": selected,
+        "fallback_used": not candidates,
+        "selection_evidence": "historical_minimum_variance_reference_not_forecast",
+        "requires_target_confirmation": True,
+        "ranking": ["lower_theoretical_risk"],
+        "eligible_count": len(candidates),
         "total_count": len(frontier_points),
-        "selected_index": recommended_index,
-        "confidence": (
-            "none"
-            if selected_point is None
-            else "limited"
-            if fallback_used or selected_observations < 24
-            else "normal"
-        ),
-        "candidate_diagnostics": candidate_diagnostics,
+        "confidence": "limited",
+        "candidate_diagnostics": diagnostics,
     }
 
 
@@ -318,6 +276,9 @@ async def analyze_portfolio(request: AnalysisRequest):
             allow_degraded_research=request.allow_partial_return_data_for_research,
         )
         warnings.extend(quality_warnings)
+        warnings.append(
+            "前沿使用各标的自身历史总收益均值，未进行跨类别均值收缩；纵轴是历史算术年化统计，不是未来收益预测。低波动参考点须确认后才成为长期目标；模型未对集中度、信用或流动性偏好作隐含优化。"
+        )
         nav_adjusted = prepare_nav_for_analysis(
             estimation_nav,
             request.fund_fees,
@@ -360,6 +321,15 @@ async def analyze_portfolio(request: AnalysisRequest):
             )["category_values"]
             point.update(metric)
 
+        rejected_points = max(
+            (p.get("rejected_frontier_points", 0) for p in efficient_frontier_points),
+            default=0,
+        )
+        if rejected_points:
+            warnings.append(
+                f"{rejected_points} 个前沿候选未通过数值最优性验证，已排除；图中仅展示通过验证的点。"
+            )
+
         recommended_point_index, recommended_point_selection = (
             _select_recommended_frontier_point(
                 efficient_frontier_points,
@@ -376,7 +346,7 @@ async def analyze_portfolio(request: AnalysisRequest):
         )
         if recommended_point_selection["fallback_used"]:
             warnings.append(
-                "研究筛选证据不足，已选择可行组合中风险较低的备用目标；历史选择表现不是独立验证。"
+                "前沿数值求解未通过最优性验证，展示可行备用配置供确认，不宣称它是最优目标。"
             )
 
         # --- Simulate Strategy Frontier ---
@@ -412,6 +382,7 @@ async def analyze_portfolio(request: AnalysisRequest):
                 execution_allocation_method=_execution_allocation_method(
                     request.substitute_for
                 ),
+                planning_period_days=request.planning_period_days,
                 planned_purchase_days=request.planned_purchase_days,
             )
 
@@ -673,6 +644,7 @@ async def get_current_recommendation(request: CurrentRecommendationRequest):
                 allow_sales=bool(request.exit_fund_codes),
                 exit_fund_codes=tuple(request.exit_fund_codes),
                 reuse_settled_sale_proceeds=request.reuse_settled_sale_proceeds,
+                planning_period_days=request.planning_period_days,
                 planned_purchase_days=request.planned_purchase_days,
                 min_purchase_amount=request.min_purchase_amount,
                 amount_step=request.amount_step,
@@ -1048,6 +1020,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
             execution_allocation_method=_execution_allocation_method(
                 request.substitute_for
             ),
+            planning_period_days=request.planning_period_days,
             planned_purchase_days=request.planned_purchase_days,
             min_purchase_amount=request.min_purchase_amount,
             amount_step=request.amount_step,
@@ -1117,6 +1090,7 @@ async def run_strategy_backtests(request: StrategyBacktestRequest):
                 execution_allocation_method=_execution_allocation_method(
                     request.substitute_for
                 ),
+                planning_period_days=request.planning_period_days,
                 planned_purchase_days=request.planned_purchase_days,
                 execution_nav=fund_df,
                 corporate_actions=account_actions,

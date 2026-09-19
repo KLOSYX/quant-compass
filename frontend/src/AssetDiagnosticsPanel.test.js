@@ -17,7 +17,7 @@ test('renders asset diagnostics explanations', () => {
                         frontier_points_used: 0,
                         frontier_point_count: 20,
                         max_frontier_weight: 0,
-                        status: 'dominated_by_higher_sharpe_assets',
+                        status: 'unused_in_sample',
                         sharpe_rank: 3,
                     },
                     {
@@ -39,7 +39,7 @@ test('renders asset diagnostics explanations', () => {
     );
 
     expect(screen.getByText('资产诊断')).toBeInTheDocument();
-    expect(screen.getByText(/单位风险超额收益不占优/)).toBeInTheDocument();
+    expect(screen.queryByText(/更高 Sharpe 资产替代/)).not.toBeInTheDocument();
     expect(screen.getByText(/显式无风险锚点/)).toBeInTheDocument();
     expect(screen.getByText('12.67%')).toBeInTheDocument();
 });

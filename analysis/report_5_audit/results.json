@@ -1,0 +1,212 @@
+{
+  "decision_hash": "c35edbd581e716eb4c70f8d2b56518c2f2b3506e1dece526d4bb3f729ff36d7c",
+  "decision_created": "2026-09-19 09:19:15.103530+00:00",
+  "source": "akshare:eastmoney",
+  "nav_start": "2024-06-30",
+  "nav_end": "2026-08-31",
+  "return_start": "2024-07-31",
+  "observations": 26,
+  "target_weight_sum": 1.0,
+  "independent_normalized_optimality_gap": 6.5133815563278574e-09,
+  "raw_nav_reconstruction_max_error": 0.0,
+  "report_rows_matched": true,
+  "before_wealth": 2034752.4899999998,
+  "after_wealth": 2064737.9521484063,
+  "budget": 30000.0,
+  "gross_buys": 29999.96,
+  "buy_fees": 14.537851593343476,
+  "unspent": 0.040000000000873115,
+  "cash": 534143.9,
+  "target_fund_portfolio": {
+    "arithmetic_annual_return": 0.14266578084341675,
+    "model_annual_volatility": 0.06999880395559381,
+    "sample_annual_volatility": 0.0732278919720753,
+    "historical_monthly_rebalanced_cagr": 0.14946973400317054,
+    "monthly_max_drawdown": 0.04135295659166094
+  },
+  "target_account": {
+    "arithmetic_annual_return": 0.10575866910063508,
+    "model_annual_volatility": 0.05189037133652277,
+    "sample_annual_volatility": 0.05428410618319011,
+    "historical_monthly_rebalanced_cagr": 0.10949073387374963,
+    "monthly_max_drawdown": 0.03065509911806019
+  },
+  "actual_account_before": {
+    "arithmetic_annual_return": 0.06280806969031971,
+    "model_annual_volatility": 0.02905221893820682,
+    "sample_annual_volatility": 0.029446540044326605,
+    "historical_monthly_rebalanced_cagr": 0.06420834252186425,
+    "monthly_max_drawdown": 0.016305729192381713
+  },
+  "actual_account_after": {
+    "arithmetic_annual_return": 0.06542370685636462,
+    "model_annual_volatility": 0.030312408944146798,
+    "sample_annual_volatility": 0.03087886589552981,
+    "historical_monthly_rebalanced_cagr": 0.06693705702161035,
+    "monthly_max_drawdown": 0.017095698161559536
+  },
+  "actual_fund_portfolio_after": {
+    "arithmetic_annual_return": 0.08825515186535579,
+    "model_annual_volatility": 0.04089077772135119,
+    "sample_annual_volatility": 0.04165491577881789,
+    "historical_monthly_rebalanced_cagr": 0.09101524313635179,
+    "monthly_max_drawdown": 0.0230471930679107
+  },
+  "rebalancing": {
+    "band": 0.02,
+    "continuous_tracking_error": 311924.11954265554,
+    "max_deviation_after_new_money": 0.19632538593487145,
+    "solver": "highs-linear-tracking-then-turnover",
+    "status": "rounded_purchase_capacity_insufficient"
+  },
+  "assets": [
+    {
+      "code": "001211",
+      "target_weight": 1.8251227204364837e-16,
+      "historical_return": 0.01203893326058091,
+      "return_contribution": 2.1972530623704698e-18,
+      "variance_contribution": -1.1750830780962402e-19,
+      "actual_account_weight": 0.0,
+      "actual_fund_weight": 0.0
+    },
+    {
+      "code": "002611",
+      "target_weight": 0.20703103411027945,
+      "historical_return": 0.25981376951228197,
+      "return_contribution": 0.05378951337821753,
+      "variance_contribution": 0.41930396697687944,
+      "actual_account_weight": 0.09487636907926597,
+      "actual_fund_weight": 0.12798615003438288
+    },
+    {
+      "code": "006662",
+      "target_weight": 9.614390658572156e-17,
+      "historical_return": 0.015803821513334294,
+      "return_contribution": 1.519441139275429e-18,
+      "variance_contribution": -1.2178427728367578e-19,
+      "actual_account_weight": 0.0,
+      "actual_fund_weight": 0.0
+    },
+    {
+      "code": "007280",
+      "target_weight": 0.027559453684906383,
+      "historical_return": 0.16674008354627676,
+      "return_contribution": 0.004595265609911035,
+      "variance_contribution": 0.03336641112913071,
+      "actual_account_weight": 0.003962178343981923,
+      "actual_fund_weight": 0.005344892062344682
+    },
+    {
+      "code": "007339",
+      "target_weight": 0.08626662556820308,
+      "historical_return": 0.16686208047998352,
+      "return_contribution": 0.014394628618298108,
+      "variance_contribution": 0.10453568403793174,
+      "actual_account_weight": 0.027510614575034096,
+      "actual_fund_weight": 0.0371112183013321
+    },
+    {
+      "code": "012643",
+      "target_weight": 0.038148948355535235,
+      "historical_return": 0.07873031633317415,
+      "return_contribution": 0.003003478771809213,
+      "variance_contribution": 0.016801363186085296,
+      "actual_account_weight": 0.0035415128253095413,
+      "actual_fund_weight": 0.004777423463898276
+    },
+    {
+      "code": "014429",
+      "target_weight": 3.344825087557416e-15,
+      "historical_return": 0.013537640953453538,
+      "return_contribution": 4.52810410874561e-17,
+      "variance_contribution": 6.775879796925527e-18,
+      "actual_account_weight": 0.14553775683123651,
+      "actual_fund_weight": 0.19632725579862884
+    },
+    {
+      "code": "016149",
+      "target_weight": 0.5002130423393307,
+      "historical_return": 0.02931341108183936,
+      "return_contribution": 0.01466295053859032,
+      "variance_contribution": 0.003952263941583055,
+      "actual_account_weight": 0.39024185570939013,
+      "actual_fund_weight": 0.5264277414831315
+    },
+    {
+      "code": "021189",
+      "target_weight": 0.013723323039893175,
+      "historical_return": 0.1978687864596283,
+      "return_contribution": 0.00271541727609712,
+      "variance_contribution": 0.020353823806456253,
+      "actual_account_weight": 0.0008276253182328862,
+      "actual_fund_weight": 0.0011164484811082061
+    },
+    {
+      "code": "270023",
+      "target_weight": 0.027234905213207542,
+      "historical_return": 0.27664396278698855,
+      "return_contribution": 0.007534372104309748,
+      "variance_contribution": 0.059171184327675305,
+      "actual_account_weight": 0.06800350129366337,
+      "actual_fund_weight": 0.09173523822525995
+    },
+    {
+      "code": "457001",
+      "target_weight": 0.03436421324647234,
+      "historical_return": 0.424683925428603,
+      "return_contribution": 0.01459392897577747,
+      "variance_contribution": 0.11918607393563324,
+      "actual_account_weight": 0.0020724380221668307,
+      "actual_fund_weight": 0.0027956736352378947
+    },
+    {
+      "code": "539002",
+      "target_weight": 0.06545845444216841,
+      "historical_return": 0.41822291411711615,
+      "return_contribution": 0.027376225570406157,
+      "variance_contribution": 0.22332922865862492,
+      "actual_account_weight": 0.004727992410491846,
+      "actual_fund_weight": 0.00637795851467585
+    }
+  ],
+  "feasible_after_settlement_counterexample": {
+    "hypothetical_only": true,
+    "sold_code": "014429",
+    "gross_sale": 283370.19,
+    "gross_buys": {
+      "002611": 131703.16,
+      "007339": 81901.18,
+      "012643": 55635.61,
+      "021189": 21030.24,
+      "457001": 21000.0,
+      "539002": 2100.0
+    },
+    "cash": 534143.8600000001,
+    "fees": 93.37484329845756,
+    "actual_plan_l1_tracking_error": 878690.4351205542,
+    "counterexample_l1_tracking_error": 312097.61489958747,
+    "limitation": "Requires actual redeemability and settlement; these are not independently verified. No immediate use of pending proceeds."
+  },
+  "window_sensitivity": [
+    {
+      "months": 12,
+      "annual_return": 0.16770507464625473,
+      "annual_volatility": 0.0992864331865212
+    },
+    {
+      "months": 18,
+      "annual_return": 0.17034445213455662,
+      "annual_volatility": 0.0808510073766114
+    },
+    {
+      "months": 24,
+      "annual_return": 0.1561351103934225,
+      "annual_volatility": 0.07175338746640443
+    },
+    {
+      "months": 26,
+      "annual_return": 0.14266578084341675,
+      "annual_volatility": 0.06999880395559381
+    }
+  ]
+}

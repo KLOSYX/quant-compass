@@ -88,19 +88,19 @@ def test_purchase_minimum_does_not_force_overspending():
     )
 
 
-def test_daily_limits_do_not_invent_purchase_days_and_subtract_used_capacity():
+def test_daily_limits_use_standard_month_and_subtract_used_capacity():
     config = {
         "daily_limit": 100,
         "monthly_limit": 500,
         "daily_used": 20,
         "monthly_used": 450,
     }
-    assert monthly_investment_limit({"daily_limit": 100}, "2026-09-30") == 100
+    assert monthly_investment_limit({"daily_limit": 100}, "2026-09-30") == 2100
     assert (
         monthly_investment_limit(
             {"daily_limit": 100}, "2026-09-30", planned_purchase_days=20
         )
-        == 100
+        == 2000
     )
     assert monthly_investment_limit(config, "2026-09-19") == 50
 
@@ -195,7 +195,7 @@ def test_reinvested_distribution_uses_exact_confirmation_price():
     assert result["monthly_max_drawdown"] == pytest.approx(0)
 
 
-def test_no_research_candidate_still_selects_a_labeled_fallback():
+def test_missing_research_metrics_do_not_block_unconfirmed_reference():
     from api.routes import _select_recommended_frontier_point
 
     points = [
@@ -206,9 +206,10 @@ def test_no_research_candidate_still_selects_a_labeled_fallback():
         points, maximum_drawdown=0.1, cvar_enabled=True, maximum_cvar_loss=0.01
     )
     assert selected == 1
-    assert evidence["fallback_used"] is True
+    assert evidence["fallback_used"] is False
+    assert evidence["requires_target_confirmation"] is True
     assert evidence["confidence"] == "limited"
-    assert evidence["eligible_count"] == 0
+    assert evidence["eligible_count"] == 2
 
 
 def test_data_outage_keeps_a_valid_target_based_monthly_plan(monkeypatch, tmp_path):
@@ -314,3 +315,54 @@ def test_partial_return_analysis_continues_to_monthly_plan(
     assert recommendation["recommended_monthly_investment"] == pytest.approx(800)
     cash = next(row for row in recommendation["fund_advice"] if row["code"] == "Cash")
     assert cash["executable_holding"] == pytest.approx(200)
+
+
+def test_standard_month_daily_capacity_is_independent_of_calendar_date():
+    for date in ("2026-09-01", "2026-09-19", "2026-09-30", "2026-02-28", "2028-02-29"):
+        assert monthly_investment_limit({"daily_limit": 100}, date) == 2100
+        assert (
+            monthly_investment_limit(
+                {"daily_limit": 100}, date, planned_purchase_days=1
+            )
+            == 100
+        )
+        assert (
+            monthly_investment_limit(
+                {"daily_limit": 100, "monthly_limit": 2000, "monthly_used": 500}, date
+            )
+            == 1500
+        )
+
+
+def test_planning_period_and_trading_days_are_independent_settings():
+    from api.models import CurrentRecommendationRequest
+    from pydantic import ValidationError
+
+    settings = CurrentRecommendationRequest(
+        fund_codes=["A"], monthly_budget=1000, weights={"A": 1}
+    )
+    assert settings.planning_period_days == 30
+    assert settings.planned_purchase_days == 21
+    settings = CurrentRecommendationRequest(
+        fund_codes=["A"],
+        monthly_budget=1000,
+        weights={"A": 1},
+        planning_period_days=45,
+        planned_purchase_days=32,
+    )
+    assert (
+        monthly_investment_limit(
+            {"daily_limit": 100},
+            "2026-09-30",
+            planned_purchase_days=settings.planned_purchase_days,
+        )
+        == 3200
+    )
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        CurrentRecommendationRequest(
+            fund_codes=["A"],
+            monthly_budget=1000,
+            weights={"A": 1},
+            planning_period_days=15,
+            planned_purchase_days=21,
+        )

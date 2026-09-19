@@ -17,10 +17,6 @@ function getDiagnosisText(item, t) {
         return `${t('diag_reason_selected_on_frontier')} (${item.frontier_points_used}/${item.frontier_point_count})`;
     case 'below_risk_free':
         return t('diag_reason_below_risk_free');
-    case 'dominated_by_higher_sharpe_assets':
-        return item.sharpe_rank
-            ? `${t('diag_reason_dominated_by_higher_sharpe_assets')} (${t('diag_sharpe_rank')}: #${item.sharpe_rank})`
-            : t('diag_reason_dominated_by_higher_sharpe_assets');
     default:
         return t('diag_reason_unused_in_sample');
     }

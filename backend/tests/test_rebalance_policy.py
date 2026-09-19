@@ -53,6 +53,35 @@ def test_shortfall_below_purchase_minimum_does_not_trigger_a_sale():
     assert result.total_gross_sell == 0
 
 
+@pytest.mark.parametrize("buy_fee", [0, 0.01])
+def test_blocked_target_preserves_partial_rebalance_without_overbuying(buy_fee):
+    result = plan(
+        holdings={"A": 100000, "B": 0, "C": 0},
+        weights={"A": 0.2, "B": 0.3, "C": 0.5},
+        monthly_budget=10000,
+        cash=5000,
+        minimum_cash_reserve=5000,
+        investment_limits={"C": {"monthly_limit": 0}},
+        buy_fees={"B": buy_fee},
+    )
+    diagnostic = result.allocation_diagnostics["rebalancing"]
+    conditional = diagnostic["conditional_buys_after_settlement"]
+    assert diagnostic["status"] == "rebalance_planned"
+    assert result.funds["A"].gross_sell >= 23000 - 0.01
+    assert result.funds["C"].gross_buy == 0
+    assert result.funds["B"].gross_buy == 10000
+    assert result.cash_after == 5000
+    assert result.pending_sale_proceeds == pytest.approx(result.total_gross_sell)
+    assert sum(conditional.values()) >= result.pending_sale_proceeds - 0.01
+    assert (10000 + conditional["B"]) / (1 + buy_fee) <= 33000 + 0.01
+    assert (
+        sum(f.executable_holding for f in result.funds.values())
+        + result.cash_after
+        + result.pending_sale_proceeds
+        + result.transaction_fees
+    ) == pytest.approx(115000)
+
+
 def test_high_sale_fee_is_accounted_for_but_does_not_veto_restoration():
     result = plan(sell_fees={"A": 0.02})
     assert result.total_gross_sell == pytest.approx(15000 / 0.99, abs=0.02)
@@ -157,10 +186,10 @@ def test_invalid_complete_weights_are_rejected_without_normalization(weights):
 
 
 def test_purchase_dates_must_be_real_remaining_plan_dates():
-    for dates in [("2026-09-18",), ("2026-10-01",), ("2026-09-21", "2026-09-21")]:
+    for dates in [("2026-09-18",), ("2026-10-19",), ("2026-09-21", "2026-09-21")]:
         with pytest.raises(ValueError, match="purchase dates"):
             plan(planned_purchase_dates=dates)
-    result = plan(planned_purchase_dates=("2026-09-21", "2026-09-22"))
+    result = plan(planned_purchase_dates=("2026-09-21", "2026-10-01"))
     assert len(result.allocation_diagnostics["purchase_dates"]) == 2
 
 

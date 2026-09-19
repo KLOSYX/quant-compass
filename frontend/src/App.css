@@ -1528,3 +1528,15 @@ input[type='date']::-webkit-calendar-picker-indicator {
     .fund-exception-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; gap: 12px; }
     .fund-exception-name { grid-column: 1 / -1; }
 }
+
+.target-change-preview { margin-top: 20px; padding: 20px 0; border-block: 1px solid var(--accent-secondary, #d9a441); }
+.target-change-preview h4 { margin: 0 0 12px; }
+.target-change-preview p { color: var(--text-secondary); line-height: 1.65; margin: 12px 0; }
+.target-change-preview .target-change-summary { color: var(--text-primary); font-weight: 600; }
+.target-change-table-wrap { overflow-x: auto; }
+.target-change-preview table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.target-change-preview th, .target-change-preview td { padding: 12px 10px; text-align: right; border-bottom: 1px solid var(--border-color, #3b4037); }
+.target-change-preview th:first-child { text-align: left; min-width: 130px; overflow-wrap: anywhere; }
+.target-change-preview th small { display: block; color: var(--text-secondary); font-weight: 400; }
+.target-change-preview .inline-actions { flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+.target-change-preview :focus-visible { outline: 2px solid var(--accent-secondary, #d9a441); outline-offset: 3px; }

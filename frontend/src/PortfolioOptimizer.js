@@ -7,6 +7,7 @@ import { downloadPortfolioReport } from './exportPortfolioReport';
 
 import { getISODate, formatDD, formatPercentValue, formatRatio, formatMoney, getStoredNumber, getStoredPercentWithLegacyRatioSupport, sanitizeLegacyHoldings, ASSET_CATEGORY_OPTIONS, buildAssetCategoriesPayload, buildSubstituteForPayload, getRecommendedFrontierPoint, getRecommendationEvidence } from "./portfolioViewUtils";
 import MonthlyRecommendation from "./MonthlyRecommendation";
+import TargetChangePreview, { sameTargetWeights } from "./TargetChangePreview";
 
 function PortfolioOptimizer() {
     const { t, language } = useLanguage();
@@ -47,9 +48,18 @@ function PortfolioOptimizer() {
     const [endDate, setEndDate] = useState(() => localStorage.getItem('endDate') || getISODate(new Date()));
     const [analysisResult, setAnalysisResult] = useState(null);
     const [selectedPoint, setSelectedPoint] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('confirmedTarget') || 'null'); }
+        try {
+            const saved = JSON.parse(localStorage.getItem('confirmedTarget') || 'null');
+            return saved ? { ...saved, risk: null, return: null } : null;
+        }
         catch (_) { return null; }
     });
+    const [targetPreview, setTargetPreview] = useState(null);
+    const [previousTarget, setPreviousTarget] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('previousConfirmedTarget') || 'null'); }
+        catch { return null; }
+    });
+    const [targetNotice, setTargetNotice] = useState('');
     const [monthlyInvestment, setMonthlyInvestment] = useState(() => localStorage.getItem('monthlyInvestment') || '');
     const [initialHoldings, setInitialHoldings] = useState(() => {
         let stored = {};
@@ -71,7 +81,6 @@ function PortfolioOptimizer() {
     const [pendingProceeds, setPendingProceeds] = useState(() => getStoredNumber('pendingProceeds', 0));
     const [pendingSells, setPendingSells] = useState(() => JSON.parse(localStorage.getItem('pendingSells') || '{}'));
     const [redemptionLimits, setRedemptionLimits] = useState(() => JSON.parse(localStorage.getItem('redemptionLimits') || '{}'));
-    const [purchaseDates, setPurchaseDates] = useState('');
     const [addedExceptionCodes, setAddedExceptionCodes] = useState([]);
     const exceptionCodes = fundCodes.filter(code => addedExceptionCodes.includes(code)
         || (pendingSells[code] !== undefined && pendingSells[code] !== '')
@@ -94,7 +103,6 @@ function PortfolioOptimizer() {
         ...(live ? {
             pending_sale_proceeds: Number(pendingProceeds),
             pending_sell_amounts: Object.fromEntries(Object.entries(pendingSells).filter(([, v]) => v !== '').map(([c, v]) => [c, Number(v)])),
-            planned_purchase_dates: purchaseDates.trim() ? purchaseDates.trim().split(/[，,\s]+/) : []
         } : {})
     });
     const [minimumCashReserve, setMinimumCashReserve] = useState(() => getStoredNumber('minimumCashReserve', 0));
@@ -110,8 +118,9 @@ function PortfolioOptimizer() {
         return saved === null ? true : JSON.parse(saved);
     });
     const [maxDrawdownLimit, setMaxDrawdownLimit] = useState(() => getStoredPercentWithLegacyRatioSupport('maxDrawdownLimit', 20)); // pct
+    const [planningPeriodDays, setPlanningPeriodDays] = useState(() => getStoredNumber('planningPeriodDays', 30));
     const [plannedPurchaseDays, setPlannedPurchaseDays] = useState(
-        () => getStoredNumber('plannedPurchaseDays', 1)
+        () => getStoredNumber('estimatedTradingDays', 21)
     );
     const [strategyResult, setStrategyResult] = useState(null);
     const [recommendationResult, setRecommendationResult] = useState(null);
@@ -316,6 +325,8 @@ function PortfolioOptimizer() {
 
     const handleAnalysisSubmit = async (e) => {
         e.preventDefault();
+        setTargetPreview(null);
+        setTargetNotice('');
         setLoading(prev => ({ ...prev, analysis: true }));
         setError(null);
         setAnalysisResult(null);
@@ -342,7 +353,8 @@ function PortfolioOptimizer() {
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
-                planned_purchase_days: Number(plannedPurchaseDays) || 1,
+                planning_period_days: Number(planningPeriodDays) || 30,
+                planned_purchase_days: Number(plannedPurchaseDays) || 21,
                 start_date: startDate,
                 end_date: endDate,
                 strategy_mode: 'fixed_weight',
@@ -376,7 +388,7 @@ function PortfolioOptimizer() {
                 setError(t('target_universe_changed'));
             } else if (result.recommended_point_index !== null && result.recommended_point_index !== undefined) {
                 const initialTarget = result.efficient_frontier[result.recommended_point_index] || null;
-                setSelectedPoint(initialTarget);
+                if (initialTarget) setTargetPreview({ point: initialTarget, undo: false });
             } else if (result.fallback_target) {
                 setSelectedPoint(result.fallback_target);
             }
@@ -427,7 +439,8 @@ function PortfolioOptimizer() {
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
-                planned_purchase_days: Number(plannedPurchaseDays) || 1,
+                planning_period_days: Number(planningPeriodDays) || 30,
+                planned_purchase_days: Number(plannedPurchaseDays) || 21,
                 start_date: analysisResult.backtest_period.start_date,
                 end_date: analysisResult.backtest_period.end_date,
                 monthly_investment: parseFloat(monthlyInvestment),
@@ -511,7 +524,8 @@ function PortfolioOptimizer() {
                 fund_fees: feesAsFloats,
                 asset_categories: buildAssetCategoriesPayload(fundCodes, fundAssetCategories),
                 substitute_for: buildSubstituteForPayload(fundCodes, fundSubstituteFor),
-                planned_purchase_days: Number(plannedPurchaseDays) || 1,
+                planning_period_days: Number(planningPeriodDays) || 30,
+                planned_purchase_days: Number(plannedPurchaseDays) || 21,
                 weights: selectedPoint.weights,
                 current_holdings: holdingsAsFloats,
                 current_cash: parseFloat(currentCash) || 0,
@@ -591,39 +605,51 @@ function PortfolioOptimizer() {
     };
 
 
-    const onChartClick = (params) => {
-        const selected = analysisResult?.efficient_frontier?.[params.dataIndex];
-        if (!selected) return;
-        setSelectedPoint(selected);
-        localStorage.setItem('confirmedTarget', JSON.stringify(selected));
-        setStrategyResult(null);
-        setRecommendationResult(null);
-
-
+    const previewTarget = (point, undo = false) => {
+        if (!point) return;
+        if (sameTargetWeights(selectedPoint, point)) {
+            setTargetPreview(null);
+            return;
+        }
+        setTargetNotice('');
+        setTargetPreview({ point, undo });
     };
 
-    const handleResetToRecommendedPoint = () => {
-        const recommended = getRecommendedFrontierPoint(analysisResult);
-        if (!recommended) return;
-        setSelectedPoint(recommended);
-        localStorage.setItem('confirmedTarget', JSON.stringify(recommended));
+    const confirmTargetChange = () => {
+        if (!targetPreview || loading.analysis || loading.strategy || loading.recommendation) return;
+        const next = targetPreview.point;
+        if (Object.keys(next.weights).some(code => !fundCodes.includes(code) && code !== 'RiskFree')) {
+            setError(t('target_universe_changed'));
+            setTargetPreview(null);
+            return;
+        }
+        const previous = targetPreview.undo ? null : selectedPoint;
+        if (previous) localStorage.setItem('previousConfirmedTarget', JSON.stringify(previous));
+        else localStorage.removeItem('previousConfirmedTarget');
+        localStorage.setItem('confirmedTarget', JSON.stringify(next));
+        setPreviousTarget(previous);
+        setSelectedPoint(next);
+        setTargetPreview(null);
+        setTargetNotice('target_switch_done');
         setStrategyResult(null);
         setRecommendationResult(null);
         setBudgetError('');
+    };
+
+    const onChartClick = (params) => {
+        if (params.seriesIndex !== undefined && params.seriesIndex !== 0) return;
+        previewTarget(analysisResult?.efficient_frontier?.[params.dataIndex]);
+    };
+
+    const handleResetToRecommendedPoint = () => {
+        previewTarget(getRecommendedFrontierPoint(analysisResult));
     };
 
     const getFrontierOptions = () => {
         if (!analysisResult) return {};
 
         const frontierData = analysisResult.efficient_frontier.map(p => [
-            p.risk,
-            p.return,
-            p.weights,
-            p.frontier_walk_forward_sharpe,
-            p.frontier_walk_forward_annualized_return,
-            p.frontier_walk_forward_max_drawdown,
-            p.frontier_walk_forward_weight_stability,
-            p.frontier_recommendation_eligible
+            p.risk, p.return, p.weights
         ]);
         const xName = t('theoretical_vol');
         const yName = t('expected_return');
@@ -642,12 +668,7 @@ function PortfolioOptimizer() {
                 formatter: (p) => {
                     const risk = (p.data[0] * 100).toFixed(2);
                     const ret = (p.data[1] * 100).toFixed(2);
-                    const oosSharpe = Number.isFinite(Number(p.data[3])) ? Number(p.data[3]).toFixed(2) : '--';
-                    const oosReturn = Number.isFinite(Number(p.data[4])) ? `${(Number(p.data[4]) * 100).toFixed(2)}%` : '--';
-                    const oosDrawdown = Number.isFinite(Number(p.data[5])) ? `${(Number(p.data[5]) * 100).toFixed(2)}%` : '--';
-                    const stability = Number.isFinite(Number(p.data[6])) ? `${(Number(p.data[6]) * 100).toFixed(1)}%` : '--';
-                    const eligible = p.data[7] ? t('recommendation_eligible') : t('recommendation_not_eligible');
-                    return `<b>${t('tooltip_theory_title')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%<br/><br/><b>${t('recommendation_oos_evidence')}</b><br/>${t('walk_forward_return')}: ${oosReturn}<br/>${t('oos_excess_sharpe')}: ${oosSharpe}<br/>${t('walk_forward_max_dd')}: ${oosDrawdown}<br/>${t('walk_forward_stability')}: ${stability}<br/>${eligible}`;
+                    return `<b>${t('frontier_fixed_statistics')}</b><br/>${t('tooltip_expected_return')}: ${ret}%<br/>${t('tooltip_expected_risk')}: ${risk}%<br/>${t('frontier_not_oos')}`;
                 }
             },
             xAxis: {
@@ -680,7 +701,7 @@ function PortfolioOptimizer() {
                     name: t('selected_point'),
                     type: 'scatter',
                     silent: true,
-                    data: selectedPoint ? [[selectedPoint.risk, selectedPoint.return]] : [],
+                    data: selectedPoint && Number.isFinite(selectedPoint.risk) && Number.isFinite(selectedPoint.return) ? [[selectedPoint.risk, selectedPoint.return]] : [],
                     symbolSize: 18,
                     itemStyle: {
                         color: '#d9a441',
@@ -688,6 +709,17 @@ function PortfolioOptimizer() {
                         borderWidth: 2
                     },
                     z: 10
+                },
+                {
+                    name: t('target_candidate'),
+                    type: 'scatter',
+                    silent: true,
+                    symbol: 'diamond',
+                    data: targetPreview && Number.isFinite(targetPreview.point.risk) && Number.isFinite(targetPreview.point.return)
+                        ? [[targetPreview.point.risk, targetPreview.point.return]] : [],
+                    symbolSize: 22,
+                    itemStyle: { color: 'transparent', borderColor: '#f3f0e8', borderWidth: 2 },
+                    z: 11
                 }
             ]
         };
@@ -767,7 +799,9 @@ function PortfolioOptimizer() {
 
     const recommendedPoint = getRecommendedFrontierPoint(analysisResult);
     const recommendationEvidence = getRecommendationEvidence(analysisResult);
-    const isRecommendedPointSelected = recommendedPoint === selectedPoint;
+    const isRecommendedPointSelected = sameTargetWeights(recommendedPoint, selectedPoint);
+    const canUndoTarget = previousTarget?.weights && !sameTargetWeights(previousTarget, selectedPoint)
+        && Object.keys(previousTarget.weights).every(code => fundCodes.includes(code) || code === 'RiskFree');
 
     return (
         <div className="portfolio-optimizer">
@@ -933,6 +967,14 @@ function PortfolioOptimizer() {
                                     <p className="text-center text-slate-400 text-sm mt-4">{t('chart_hint')}</p>
                                 </>
                             )}
+                            <p className="panel-copy">{t('target_memory_hint')}</p>
+                            {canUndoTarget && <button type="button" className="text-link-btn" onClick={() => previewTarget({ ...previousTarget, risk: null, return: null }, true)}>{t('target_undo')}</button>}
+                            {targetNotice && <p role="status" className="panel-copy">{t(targetNotice)}</p>}
+                            {targetPreview && <TargetChangePreview
+                                current={selectedPoint} candidate={targetPreview.point} fundNames={fundNames}
+                                busy={loading.analysis || loading.strategy || loading.recommendation}
+                                onConfirm={confirmTargetChange} onCancel={() => setTargetPreview(null)}
+                            />}
                             {recommendationEvidence && (
                                 <div data-testid="recommendation-evidence" className="evidence-card">
                                     <div className="evidence-card-header">
@@ -944,6 +986,13 @@ function PortfolioOptimizer() {
                                         </span>
                                     </div>
                                     <p className="evidence-copy">{t('recommendation_basis_explanation')}</p>
+                                    <details data-testid="dynamic-frontier-diagnostic">
+                                        <summary>{t('dynamic_frontier_title')}</summary>
+                                        <p className="evidence-copy">{t('dynamic_frontier_explanation')}</p>
+                                        <p className="evidence-copy">{t('dynamic_frontier_period')
+                                            .replace('{start}', recommendationEvidence.point.frontier_walk_forward_start_date || '—')
+                                            .replace('{end}', recommendationEvidence.point.frontier_walk_forward_end_date || '—')
+                                            .replace('{months}', recommendationEvidence.point.frontier_walk_forward_observations ?? '—')}</p>
                                     <div className="evidence-metrics">
                                         <div>
                                             <div className="metric-label">{t('oos_excess_sharpe')}</div>
@@ -962,6 +1011,7 @@ function PortfolioOptimizer() {
                                             <div className="metric-value metric-violet">{formatPercentValue(recommendationEvidence.point.frontier_walk_forward_weight_stability, 1)}</div>
                                         </div>
                                     </div>
+                                    </details>
                                     {recommendationEvidence.confidence === 'limited' && (
                                         <p className="evidence-caveat">{t('recommendation_limited_confidence')}</p>
                                     )}
@@ -975,10 +1025,8 @@ function PortfolioOptimizer() {
                                     <h3 className="card-title">{t('covariance_ablation_title')}</h3>
                                 </div>
                                 <p className="panel-copy">{t('covariance_ablation_note')}</p>
-                                <div className={`state-notice ${analysisResult.covariance_ablation.promotion_status === 'candidate' ? 'state-success' : 'state-neutral'}`}>
-                                    {analysisResult.covariance_ablation.promotion_status === 'candidate'
-                                        ? t('covariance_candidate')
-                                        : t('covariance_retain_fixed')}
+                                <div className="state-notice state-neutral">
+                                    {t('covariance_retain_fixed')}
                                 </div>
                                 <div className="mt-4 overflow-x-auto">
                                     <table className="data-table min-w-[760px]">
@@ -1157,17 +1205,18 @@ function PortfolioOptimizer() {
                                                     </div>
                                                 </details>
                                                 <details className="settings-disclosure">
-                                                    <summary>{t('settings_schedule')}<span className="settings-summary">{purchaseDates || Number(plannedPurchaseDays) !== 1 ? t('settings_has_values') : t('settings_single_purchase')}</span></summary>
+                                                    <summary>{t('settings_schedule')}<span className="settings-summary">{Number(plannedPurchaseDays) !== 21 || Number(planningPeriodDays) !== 30 ? t('settings_has_values') : t('settings_single_purchase')}</span></summary>
                                                     <div className="settings-body settings-fields">
                                                         <div className="form-group">
+                                                    <label className="form-label text-xs" htmlFor="setting-planning-period">{t('planning_period_days')}</label>
+                                                    <input id="setting-planning-period" className="form-input text-sm" type="number" step="1" min="1" value={planningPeriodDays} onChange={e => { setPlanningPeriodDays(e.target.value); localStorage.setItem('planningPeriodDays', e.target.value); }} />
+                                                </div>
+                                                <div className="form-group">
                                                     <label className="form-label text-xs" htmlFor="setting-planned_purchase_days">{t('planned_purchase_days')}</label>
-                                                    <input id="setting-planned_purchase_days" className="form-input text-sm" type="number" step="1" min="1" value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('plannedPurchaseDays', e.target.value); }} />
+                                                    <input id="setting-planned_purchase_days" className="form-input text-sm" type="number" step="1" min="1" max={planningPeriodDays} value={plannedPurchaseDays} onChange={(e) => { setPlannedPurchaseDays(e.target.value); localStorage.setItem('estimatedTradingDays', e.target.value); }} />
                                                     <p className="text-[11px] text-slate-400 mt-1 leading-4">{t('planned_purchase_days_help')}</p>
                                                 </div>
-                                                        <div className="form-group">
-                                                    <label className="form-label text-xs" htmlFor="purchase-dates">{t('purchase_dates')}</label>
-                                                    <input id="purchase-dates" className="form-input text-sm" value={purchaseDates} placeholder="2026-09-21,2026-09-22" onChange={e => setPurchaseDates(e.target.value)} />
-                                                </div>
+
                                                     </div>
                                                 </details>
                                                 <details className="settings-disclosure">
@@ -1446,9 +1495,7 @@ function PortfolioOptimizer() {
                                                     ))}
                                                 </div>
                                                 <div className="mt-2 text-xs text-violet-200">
-                                                    {strategyResult.walk_forward.covariance_ablation.promotion_status === 'candidate'
-                                                        ? t('covariance_candidate')
-                                                        : t('covariance_retain_fixed')}
+                                                    {t('covariance_retain_fixed')}
                                                 </div>
                                             </div>
                                         )}

@@ -27,3 +27,13 @@ test('retains the monthly plan while showing a risk preference warning', () => {
     expect(screen.getByText(/模型估计风险仍超过所设偏好|Estimated risk still exceeds/)).toBeInTheDocument();
     expect(screen.getByText('Planned fund')).toBeInTheDocument();
 });
+
+
+test('labels standard-month allocations as staged totals', () => {
+    const result = { monthly_budget: 3000, recommended_monthly_investment: 3000, fund_advice: [], execution_allocation: {
+        planning_period_days: 30, planned_purchase_days: 21, status: 'ok', unspent_budget: 0
+    }};
+    render(<LanguageProvider><MonthlyRecommendation recommendationResult={result} onExport={() => {}} /></LanguageProvider>);
+    expect(screen.getByText(/规划周期为 30 个自然日，按 21 个可交易日估算/)).toBeInTheDocument();
+    expect(screen.getByText(/这是分批投入总额/)).toBeInTheDocument();
+});

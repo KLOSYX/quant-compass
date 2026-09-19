@@ -28,6 +28,7 @@ yarn-error.log
 # Generated Assets
 backend/static/
 backend/data/*.sqlite3
+/quant-compass-investment-plan-*.html
 docs/
 .codex
 

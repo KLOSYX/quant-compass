@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.constants import (
     DEFAULT_APPLY_FUND_FEES_TO_HISTORY,
@@ -45,7 +45,8 @@ class PortfolioSettings(FiniteBaseModel):
     fund_codes: List[str]
     asset_categories: Dict[str, str] = {}
     substitute_for: Dict[str, str] = {}
-    planned_purchase_days: Optional[int] = Field(default=None, ge=1)
+    planning_period_days: int = Field(default=30, ge=1)
+    planned_purchase_days: Optional[int] = Field(default=21, ge=1)
     min_purchase_amount: float = Field(default=0.0, ge=0)
     amount_step: float = Field(default=0.01, gt=0)
     apply_fund_fees_to_history: bool = DEFAULT_APPLY_FUND_FEES_TO_HISTORY
@@ -71,6 +72,15 @@ class PortfolioSettings(FiniteBaseModel):
     sell_fee: Dict[str, float] = {}
     fund_investment_limits: Dict[str, FundInvestmentLimit] = {}
     allow_partial_return_data_for_research: bool = False
+
+    @model_validator(mode="after")
+    def validate_planning_days(self):
+        days = len(self.planned_purchase_dates) or (
+            self.planned_purchase_days if self.planned_purchase_days is not None else 21
+        )
+        if days > self.planning_period_days:
+            raise ValueError("planned_purchase_days cannot exceed planning_period_days")
+        return self
 
 
 class AnalysisRequest(PortfolioSettings):

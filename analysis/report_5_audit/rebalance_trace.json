@@ -1,0 +1,17 @@
+{
+  "sales": {
+    "014429": 300497.32,
+    "016149": 40504.04,
+    "270023": 98744.51
+  },
+  "diagnostic": {
+    "band": 0.02,
+    "max_deviation_after_new_money": 0.19632538593487145,
+    "status": "rebalance_planned",
+    "continuous_tracking_error": 311924.11954265554,
+    "solver": "highs-linear-tracking-then-turnover"
+  },
+  "net_proceeds": 439252.14745,
+  "incremental_buy_capacity": 283370.23,
+  "uncovered_proceeds": 155881.91745
+}

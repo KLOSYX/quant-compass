@@ -14,7 +14,7 @@ from core.rebalancing import plan_rebalance_sales
 from core.validation import non_negative_number, unit_interval_number
 
 
-DECISION_ENGINE_VERSION = "4.0"
+DECISION_ENGINE_VERSION = "4.1"
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,7 @@ class ExecutionContext:
     reuse_settled_sale_proceeds: bool = False
     min_purchase_amount: float = 0.0
     amount_step: float = 0.01
+    planning_period_days: int = 30
     planned_purchase_days: int | None = None
     allocation_method: str = "proportional_gap"
     execution_covariance: pd.DataFrame | None = None
@@ -174,17 +175,28 @@ def plan_month(
     }
     target_risk_free = capital * base_safe_ratio
     target_cash = max(0.0, total_wealth - target_total - target_risk_free)
-    purchase_days = context.planned_purchase_days
+    purchase_days = (
+        context.planned_purchase_days
+        if context.planned_purchase_days is not None
+        else 21
+    )
     if context.planned_purchase_dates:
         dates = [pd.Timestamp(value).date() for value in context.planned_purchase_dates]
         today = pd.Timestamp(as_of).date()
         if len(set(dates)) != len(dates) or any(
-            d < today or (d.year, d.month) != (today.year, today.month) for d in dates
+            d < today
+            or d
+            >= (
+                pd.Timestamp(today) + pd.Timedelta(days=context.planning_period_days)
+            ).date()
+            for d in dates
         ):
             raise ValueError(
-                "purchase dates must be distinct remaining dates in the decision month"
+                "purchase dates must be distinct dates within the planning period"
             )
         purchase_days = len(dates)
+    if purchase_days > context.planning_period_days or context.planning_period_days < 1:
+        raise ValueError("planned_purchase_days cannot exceed planning_period_days")
     kwargs = dict(
         fund_codes=list(risky_weights.index),
         current_holdings=holdings,
@@ -298,9 +310,11 @@ def plan_month(
         **execution.allocation_diagnostics,
         "rebalancing": rebalance,
         "purchase_dates": [str(d) for d in context.planned_purchase_dates],
+        "planned_purchase_days": purchase_days,
+        "planning_period_days": context.planning_period_days,
         "schedule_status": "user_supplied_dates_require_channel_confirmation"
         if context.planned_purchase_dates
-        else "conditional_purchase_days_not_confirmed_dates",
+        else "estimated_trading_days_no_calendar",
     }
     return replace(
         execution,

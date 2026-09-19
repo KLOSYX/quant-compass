@@ -1,4 +1,4 @@
-import { buildProjection, createPortfolioReportHtml } from './exportPortfolioReport';
+import { createPortfolioReportHtml } from './exportPortfolioReport';
 
 const options = {
     language: 'zh',
@@ -29,8 +29,8 @@ test('creates self-contained escaped report with category exposures', () => {
     expect(html).toContain('<!doctype html>');
     expect(html).toContain('目前的投资资金分配');
     expect(html).toContain('最终定投计划');
-    expect(html).toContain('未来收益预期曲线');
-    expect(html).toContain('<svg');
+    expect(html).toContain('收益统计口径');
+    expect(html).not.toContain('<svg');
     expect(html).toContain('&lt;指数基金&gt;');
     expect(html).not.toContain('<指数基金>');
     expect(html).toContain('闲置现金');
@@ -43,8 +43,10 @@ test('creates self-contained escaped report with category exposures', () => {
     expect(html).toContain('50.00%');
 });
 
-test('projection compounds contributions', () => {
-    expect(buildProjection({ initialCapital: 1000, monthlyInvestment: 100, annualReturn: 0.12, years: 1 }).at(-1).value).toBeGreaterThan(2200);
+test('does not extrapolate historical returns into future wealth', () => {
+    const html = createPortfolioReportHtml({ ...options, language: 'en' });
+    expect(html).toContain('Historical returns are not forecasts');
+    expect(html).not.toContain('<svg');
 });
 
 
@@ -55,7 +57,7 @@ test('exports settlement conditions and does not present unavailable risk as zer
     });
     expect(html).toContain('到账后条件买入');
     expect(html).toContain('不计入本次可用现金');
-    expect(html).toContain('收益数据不可估计');
+    expect(html).toContain('历史收益不是未来收益预测');
     expect(html).not.toContain('<svg');
     expect(html).toContain('— / —');
 });

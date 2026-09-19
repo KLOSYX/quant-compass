@@ -112,7 +112,7 @@ export default function MonthlyRecommendation({ recommendationResult, onExport }
             <div className={`recommendation-diagnostic ${recommendationResult.execution_allocation.fallback_used ? 'diagnostic-warning' : ''}`}>
                 <div className="diagnostic-title">{t('execution_allocation_diagnostics')}</div>
                 <div className="diagnostic-copy">
-                    {t('purchase_schedule_conditional')} {recommendationResult.execution_allocation.purchase_dates?.join(', ')}
+                    {t('purchase_schedule_conditional').replace('{days}', recommendationResult.execution_allocation.planned_purchase_days ?? 21).replace('{calendarDays}', recommendationResult.execution_allocation.planning_period_days ?? 30)} {recommendationResult.execution_allocation.purchase_dates?.join(', ')}
                     <br />
                     {t('execution_status')}: {recommendationResult.execution_allocation.status}
                     {' · '}{t('execution_unspent')}: ¥{Number(recommendationResult.execution_allocation.unspent_budget || 0).toFixed(2)}

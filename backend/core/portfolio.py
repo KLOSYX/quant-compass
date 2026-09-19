@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-from core.constants import RETURN_SHRINKAGE
 from core.validation import finite_number
 
 
@@ -155,20 +154,3 @@ def append_fee_warnings(
         warnings.append(
             "历史回测默认不额外扣减管理费，因为基金单位净值通常已包含管理费影响。"
         )
-
-
-def shrink_frontier_expected_returns(raw_expected_returns: pd.Series) -> pd.Series:
-    expected_returns = raw_expected_returns.copy()
-    if "RiskFree" in raw_expected_returns.index:
-        risky_expected_returns = raw_expected_returns.drop("RiskFree")
-        if not risky_expected_returns.empty:
-            expected_returns.loc[risky_expected_returns.index] = (
-                (1 - RETURN_SHRINKAGE) * risky_expected_returns
-                + RETURN_SHRINKAGE * risky_expected_returns.mean()
-            )
-        expected_returns["RiskFree"] = raw_expected_returns["RiskFree"]
-    else:
-        expected_returns = (
-            1 - RETURN_SHRINKAGE
-        ) * raw_expected_returns + RETURN_SHRINKAGE * raw_expected_returns.mean()
-    return expected_returns
